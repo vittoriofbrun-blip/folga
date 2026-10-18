@@ -47,7 +47,9 @@ const settingsFile = join(DATA_DIR, 'settings.json');
 let settingsFrom = 'padrões (sem arquivo)';   // vai para o server.log: sem isso, um ajuste perdido no logon é invisível
 function loadSettings(): Settings {
   try {
-    const r = mergeSettings(DEFAULT_SETTINGS, JSON.parse(readFileSync(settingsFile, 'utf8')));
+    // tira o BOM: editor ou PowerShell 5.1 gravando o arquivo o coloca, e aí o JSON.parse falha e os
+    // ajustes do usuário somem em silêncio (visto num teste nosso em 2026-10-18)
+    const r = mergeSettings(DEFAULT_SETTINGS, JSON.parse(readFileSync(settingsFile, 'utf8').replace(/^﻿/, '')));
     if (typeof r === 'string') throw new Error(r);
     settingsFrom = 'settings.json';
     return r;

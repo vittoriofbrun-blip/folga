@@ -11,8 +11,10 @@ import { DEFAULT_SETTINGS, type LogEntry, type MemoryState } from '../types.ts';
 const PORT = 19000 + Math.floor(Math.random() * 1000);
 const dataDir = mkdtempSync(join(tmpdir(), 'folga-ac-'));
 const root = join(import.meta.dirname, '..', '..');
-// a sonda falsa sobe em 63 % de memória; a linha em 50 % faz o Auto Care disparar
-writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({ ...DEFAULT_SETTINGS, autoCareEnabled: true, autoCareThreshold: 50 }));
+// a sonda falsa sobe em 63 % de memória; a linha em 50 % faz o Auto Care disparar.
+// O ﻿ na frente é de propósito: arquivo com BOM (editor, PowerShell 5.1) tem que continuar valendo,
+// senão os ajustes do usuário voltam aos padrões em silêncio e o Auto Care não dispara.
+writeFileSync(join(dataDir, 'settings.json'), '﻿' + JSON.stringify({ ...DEFAULT_SETTINGS, autoCareEnabled: true, autoCareThreshold: 50 }));
 
 const server = spawn(process.execPath, ['--no-warnings', join(root, 'src', 'server.ts')], {
   env: {
