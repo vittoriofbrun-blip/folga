@@ -9,6 +9,12 @@
     app **não** veio marcado. Captura em `docs/telas-v2/10-r29-chrome-2-janelas.jpg`.
   - Tudo removido depois: janelas de teste, servidor e pastas temporárias.
   - Falta do F-13 só o app de bandeja do Antônio.
+- **`scripts/qa-live.ts` rodado de novo com a sonda de hoje** (ela mudou: passou a mandar `windowCount`).
+  Os 5 casos do R07 continuam certos com janelas reais: `fechou`, `ficou_aberto`, **`bandeja`**, `encerrado`
+  e WM_CLOSE nas 2 janelas do caso de várias. Sem sobras.
+  - Ou seja, o mecanismo da bandeja está provado com janela real. O que falta no F-13 é só confirmar com um
+    app de bandeja do próprio Antônio, e isso é decisão dele: fechar um app dele sem pedir pode perder
+    trabalho não salvo.
 - **R31 confirmada de verdade:** a Central de Ações do Windows guarda os avisos do Folga, com o texto certo,
   inclusive o teste com `"`, `<tag>`, `&` e `$(...)` saindo literal. Antes só havia o código de saída 0.
   - Sobraram na Central os avisos de teste ("Folga (teste)", "(teste 3)"), que o Antônio pode dispensar.
