@@ -10,6 +10,7 @@ export type WarningsDeps = {
   getSettings: () => Settings;
   probeAlive: () => boolean;
   lastAutoCareRun: () => number | null;
+  settingsProblem: () => string | null;   // R34: null = os ajustes vieram do settings.json
   emit: Emit;
   // opcionais, só para testes: o servidor passa apenas os obrigatórios
   exec?: (file: string, args: string[]) => Promise<string>;
@@ -113,6 +114,16 @@ export function diskWarning(d: DiskInfo): Candidate | null {
   return cand('disco', `disco:${d.drive}`, critical ? 'critico' : 'atencao',
     critical ? `Disco ${d.drive} quase cheio` : `Pouco espaço no disco ${d.drive}`,
     `${nf1.format(d.free / GB)} GB livres de ${nf1.format(d.total / GB)} GB (${nf1.format(freePct)} % livre).`, 'arquivos');
+}
+
+/**
+ * R34: os ajustes salvos não foram lidos e o Folga está nos padrões. Crítico porque é silencioso e tira
+ * proteções que o usuário escolheu: o Auto Care volta a desligado e as listas de "nunca fechar" somem.
+ */
+export function settingsWarning(problem: string | null): Candidate | null {
+  if (!problem) return null;
+  return cand('ajustes', 'ajustes', 'critico', 'Seus ajustes não foram lidos',
+    `O Folga está com os padrões de fábrica: ${problem}. Abra Ajustes, confira e salve de novo.`, 'ajustes');
 }
 
 export function autoCareWarning(lastRun: number | null, now: number): Candidate | null {
@@ -232,6 +243,7 @@ export function createWarnings(deps: WarningsDeps) {
       const s = deps.getState();
       if (s) apply('memoria', [memoryWarning(s.memLoad, deps.getSettings().autoCareThreshold)]);
       apply('autocare', [autoCareWarning(deps.lastAutoCareRun(), now())]);
+      apply('ajustes', [settingsWarning(deps.settingsProblem())]);
       const disks = await disk();
       if (disks.length) apply('disco', disks.map(diskWarning));
     }),

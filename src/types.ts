@@ -78,7 +78,7 @@ export type View = 'inicio' | 'memoria' | 'arquivos' | 'assistente' | 'avisos' |
 
 // Avisos (D15, R26, R27)
 export type Severity = 'critico' | 'atencao' | 'info';
-export type WarningKind = 'memoria' | 'disco' | 'travamento' | 'antivirus' | 'autocare' | 'sonda';
+export type WarningKind = 'memoria' | 'disco' | 'travamento' | 'antivirus' | 'autocare' | 'sonda' | 'ajustes';
 export type Warning = {
   id: string;              // estável por causa: 'memoria', 'disco:C:', 'travamento:chrome', 'antivirus', ...
   kind: WarningKind; severity: Severity;

@@ -6,7 +6,8 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  approvedEnabled, avWarning, createWarnings, decodeAvState, parseAv, parseCrashes, parseRegQuery, type WarningsDeps,
+  approvedEnabled, avWarning, createWarnings, decodeAvState, parseAv, parseCrashes, parseRegQuery, settingsWarning,
+  type WarningsDeps,
 } from '../warnings.ts';
 import { DEFAULT_SETTINGS, type MemoryState, type Warning } from '../types.ts';
 
@@ -18,12 +19,14 @@ function rig(over: Partial<WarningsDeps> = {}) {
   const env = {
     t: Date.UTC(2026, 9, 18, 15, 0, 0), memLoad: 50, alive: true, lastRun: null as number | null,
     disk: { total: 500 * GB, free: 200 * GB }, emitted: [] as Warning[][],
+    settingsProblem: null as string | null,
   };
   const deps: WarningsDeps = {
     getState: () => ({ memLoad: env.memLoad } as MemoryState),
     getSettings: () => ({ ...DEFAULT_SETTINGS, autoCareThreshold: 92 }),
     probeAlive: () => env.alive,
     lastAutoCareRun: () => env.lastRun,
+    settingsProblem: () => env.settingsProblem,
     emit: (_e, data) => { env.emitted.push(data as Warning[]); },
     now: () => env.t,
     statfs: async () => ({ bsize: 4096, blocks: env.disk.total / 4096, bavail: env.disk.free / 4096 }),
@@ -143,6 +146,31 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   assert.deepEqual(decodeAvState(0x041010), { active: true, upToDate: false });   // bit de "desatualizado"
   assert.deepEqual(decodeAvState(0x040000), { active: false, upToDate: true });   // desligado
   ok('productState decodificado (McAfee 266240 ativo, Defender 393472 inativo)');
+}
+{
+  // R34: ajustes que não foram lidos viram aviso crítico; é a única pista que o usuário tem de que o
+  // Auto Care e o "nunca fechar" dele voltaram aos padrões sozinhos.
+  assert.equal(settingsWarning(null), null);
+  const s = settingsWarning('Unexpected token');
+  assert.equal(s?.id, 'ajustes');
+  assert.equal(s?.severity, 'critico');
+  assert.equal(s?.view, 'ajustes');
+  assert.match(s!.detail, /padrões de fábrica/);
+  assert.match(s!.detail, /Unexpected token/);
+  ok('R34: aviso crítico quando o settings.json não valeu');
+}
+{
+  const { env, w } = rig();
+  await w.run.fast();
+  assert.equal(w.list().some(x => x.kind === 'ajustes'), false, 'ajustes lidos: nenhum aviso');
+  env.settingsProblem = 'arquivo quebrado';
+  await w.run.fast();
+  const a = w.list().find(x => x.kind === 'ajustes');
+  assert.equal(a?.severity, 'critico');
+  env.settingsProblem = null;
+  await w.run.fast();
+  assert.equal(w.list().some(x => x.kind === 'ajustes'), false, 'resolvido: o aviso sai da lista');
+  ok('R34: o aviso aparece e some junto com o problema');
 }
 {
   const real = '[{"displayName":"Windows Defender","productState":393472},{"displayName":"McAfee","productState":266240}]';

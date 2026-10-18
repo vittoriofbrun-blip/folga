@@ -1,5 +1,17 @@
 # Estado (mais recente no topo)
 
+## 2026-10-18 (18:05) — R34: perder ajuste virou aviso crítico
+- Fecha o buraco que o caso do logon abriu: o Folga voltava aos padrões **em silêncio**, e com isso o Auto
+  Care desligava e o "nunca fechar" sumia, sem nada na tela.
+- Agora, se existe `settings.json` e ele não vale, sobe um aviso **crítico** "Seus ajustes não foram lidos",
+  com o motivo do parse e o atalho para Ajustes. Some sozinho quando o arquivo volta a valer.
+- `settingsWarning` é função pura, com 2 casos novos em `warnings.test.ts` (16 no total).
+- Visto ao vivo num servidor de teste com `settings.json` quebrado: o aviso virou o **primeiro problema do
+  Início**, a nota caiu para 70 ("Regular") e o botão leva a Ajustes.
+  Captura em `docs/telas-v2/11-r34-ajustes-nao-lidos.jpg`.
+- 15 suítes verdes, typecheck e build. Servidor real reiniciado às 18:08 com isto; nenhum aviso de ajustes
+  nele, como esperado.
+
 ## 2026-10-18 (17:45 a 18:00) — R29 vista na tela com Chrome real, aviso confirmado, BOM corrigido
 - **R29 provada ao vivo, sem tocar no Chrome do Antônio.** Abri 2 janelas de Chrome com perfil temporário e
   li por um servidor de teste à parte (porta 4792, sonda real, Auto Care e vigia desligados, `idleMinutes` 5):

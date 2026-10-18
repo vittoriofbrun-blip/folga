@@ -45,6 +45,7 @@ writeAtomic(join(DATA_DIR, 'agent-token'), AGENT_TOKEN);
 const settingsFile = join(DATA_DIR, 'settings.json');
 // o disco passa pela mesma validação do PUT (sampleSeconds entra no comando da sonda); inválido volta aos padrões
 let settingsFrom = 'padrões (sem arquivo)';   // vai para o server.log: sem isso, um ajuste perdido no logon é invisível
+let settingsProblem: string | null = null;    // R34: preenchido só quando havia arquivo e ele não valeu
 function loadSettings(): Settings {
   try {
     // tira o BOM: editor ou PowerShell 5.1 gravando o arquivo o coloca, e aí o JSON.parse falha e os
@@ -52,9 +53,13 @@ function loadSettings(): Settings {
     const r = mergeSettings(DEFAULT_SETTINGS, JSON.parse(readFileSync(settingsFile, 'utf8').replace(/^﻿/, '')));
     if (typeof r === 'string') throw new Error(r);
     settingsFrom = 'settings.json';
+    settingsProblem = null;
     return r;
   } catch (e) {
-    if (existsSync(settingsFile)) settingsFrom = `padrões (settings.json recusado: ${e instanceof Error ? e.message : 'ilegível'})`;
+    if (existsSync(settingsFile)) {
+      settingsProblem = e instanceof Error ? e.message : 'o arquivo não pôde ser lido';
+      settingsFrom = `padrões (settings.json recusado: ${settingsProblem})`;
+    }
     return { ...DEFAULT_SETTINGS };
   }
 }
@@ -185,7 +190,7 @@ const emit: Emit = (event, data) => {
 };
 const warnings = createWarnings({
   getState: () => state, getSettings: () => settings, probeAlive: () => probeUp,
-  lastAutoCareRun: () => ac.lastRunAt, emit,
+  lastAutoCareRun: () => ac.lastRunAt, emit, settingsProblem: () => settingsProblem,
 });
 const files = createFiles({ getSettings: () => settings, roots: process.env.FOLGA_FILES_ROOTS?.split(';') });   // testes: pastas no lugar das do usuário
 const suggestions = createSuggestions({

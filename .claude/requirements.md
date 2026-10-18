@@ -131,6 +131,13 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
   `launch.mjs` **sem** `--no-window`: sobe o servidor e abre a janela. O `--no-window` continua existindo para
   quem quiser só o servidor. O Auto Care vale com a janela aberta ou fechada (R13).
 
+- **R34 Perder ajuste não pode ser silencioso** (2026-10-18) — Se existe `settings.json` e ele não vale, o
+  Folga roda nos padrões **e levanta um aviso crítico** ("Seus ajustes não foram lidos"), com o motivo e o
+  caminho para Ajustes. Ele some sozinho quando o arquivo volta a valer.
+  - Motivo: nos padrões, o Auto Care fica desligado e o "nunca fechar" do usuário some. Em 2026-10-18 isso
+    aconteceu num início no logon e só foi notado por acaso, horas depois.
+  - O arquivo com BOM deixou de ser motivo de recusa (o BOM é removido antes do parse).
+
 - **R32 O início deixa rastro** (2026-10-18) — O `launch.mjs` manda a saída do servidor para
   `%LOCALAPPDATA%\Folga\server.log` (acréscimo, zerado acima de 1 MB), e o servidor grava uma linha ao subir:
   data, porta, pasta de dados, de onde vieram os ajustes e o estado do Auto Care.
