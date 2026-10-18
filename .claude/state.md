@@ -22,6 +22,8 @@
     bandeja com `mayForceQuit` (`encerrado`). 5 casos ok, sem sobras;
   - `src/tests/autocare-server.test.ts`: o Auto Care dispara sozinho no servidor real (sonda falsa), fecha só o
     parado, grava `origin: auto` e liga o freio.
+  - atalho de inicialização criado numa pasta temporária e aberto como no logon: o servidor subiu sem janela e
+    leu 136 apps (falta só o reinício real do Windows).
 - Falta só com apps do Antônio (cartão F-13): Chrome dele com várias janelas (hipótese: a restauração de sessão
   do Chromium pode reabrir só a última janela fechada) e um app de bandeja dele.
 - Atenção:
