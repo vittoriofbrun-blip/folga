@@ -26,6 +26,11 @@ const MAX_FILES = 500;
 const MAX_APPS = 100;
 const KINDS: readonly SuggestionKind[] = ['lixeira', 'limpeza_rapida', 'liberar_memoria'];
 const DAY = 86_400_000;
+const TTL = 3_600_000;   // M5: cartão pendente vale 1 h
+const EXPIRED = 'expirou depois de 1 h; peça de novo';
+// bidi (U+202A–202E, U+2066–2069) esconde o fim do nome do arquivo; fora de título e motivo
+const BAD_TITLE = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
+const BAD_REASON = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
 const nf1 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
 
@@ -73,12 +78,26 @@ export function createSuggestions(deps: SuggestionsDeps) {
     return writing;
   }
   const publish = () => deps.emit('suggestions', list());
-  function list(): Suggestion[] { return items.map(s => ({ ...s })); }
+  const running = new Set<string>();
+  const isExpired = (s: Suggestion) => s.status === 'pendente' && !running.has(s.id) && now() - s.t > TTL;
+  /** Marca como ignorada o que passou de 1 h pendente. Devolve se mudou algo (quem chama grava). */
+  function expire(): boolean {
+    let changed = false;
+    for (const s of items) if (isExpired(s)) { s.status = 'ignorada'; s.result = EXPIRED; s.doneAt = now(); changed = true; }
+    return changed;
+  }
+  function list(): Suggestion[] {
+    if (expire()) void persist();
+    return items.map(s => ({ ...s }));
+  }
 
   // ---------- montagem dos itens (R21, R23) ----------
   async function buildFiles(paths: string[]): Promise<SuggestionItem[] | SuggestionError> {
     if (paths.length === 0) return err('nenhum arquivo na sugestão');
     if (paths.length > MAX_FILES) return err(`são arquivos demais (o máximo é ${MAX_FILES})`);
+    const scan = deps.files.last();   // M5: só vale o que a última busca de arquivos parados achou
+    if (!scan) return err('faça uma busca de arquivos parados antes');
+    const found = new Set(scan.files.map(f => f.path.toLowerCase()));
     const checked = await deps.files.inspect(paths);
     const out: SuggestionItem[] = [];
     const seen = new Set<string>();
@@ -87,16 +106,17 @@ export function createSuggestions(deps: SuggestionsDeps) {
       // um item inválido recusa a sugestão inteira (R21); a mensagem não repete o caminho (R17)
       if ('erro' in c) return err(`o item ${i + 1} foi recusado: ${c.erro}`);
       const key = c.path.toLowerCase();
+      if (!found.has(key)) return err(`o item ${i + 1} foi recusado: não está na última busca de arquivos parados`);
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({
         id: c.path, label: c.path.slice(c.path.lastIndexOf('\\') + 1),
-        detail: `${folderOf(c.path)} · último uso há ${since(now() - c.lastUsed)}`, bytes: c.size,
+        detail: `${folderOf(c.path)} · último uso há ${since(now() - c.lastUsed)}`, bytes: c.size, lastUsed: c.lastUsed,
       });
     }
     return out;
   }
-  function buildApps(keys: string[]): SuggestionItem[] | SuggestionError {
+  function buildApps(keys: string[], source: Suggestion['source']): SuggestionItem[] | SuggestionError {
     if (keys.length === 0) return err('nenhum app na sugestão');
     if (keys.length > MAX_APPS) return err('são apps demais');
     const state = deps.getState();
@@ -106,6 +126,8 @@ export function createSuggestions(deps: SuggestionsDeps) {
       const a = state.apps.find(x => x.key === key);
       if (!a) return err('um dos apps não está aberto');
       if (a.state === 'protected') return err(`${a.name} é protegido e não pode ser fechado`);
+      // B2: o assistente só sugere app parado; pela tela, o usuário escolhe qualquer não protegido
+      if (source === 'agente' && a.state !== 'idle') return err(`${a.name} não está parado; o assistente só sugere apps parados`);
       out.push({ id: a.key, label: a.name, detail: REASON[a.reason] ?? a.reason, bytes: a.privateWorkingSet });
     }
     return out;
@@ -130,11 +152,11 @@ export function createSuggestions(deps: SuggestionsDeps) {
     if (!title || title.length > 120) return err('o título precisa ter de 1 a 120 caracteres');
     if (reason.length > 500) return err('o motivo pode ter no máximo 500 caracteres');
     // sem caracteres de controle (no motivo só se admite quebra de linha e tabulação)
-    if (/[\u0000-\u001f\u007f-\u009f]/.test(title) || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(reason)) return err('o texto tem caracteres inválidos');
+    if (BAD_TITLE.test(title) || BAD_REASON.test(reason)) return err('o texto tem caracteres inválidos');
     if (kind !== 'limpeza_rapida' && (!Array.isArray(d.items) || d.items.some(x => typeof x !== 'string'))) return err('a lista de itens é inválida');
     const given = (kind === 'limpeza_rapida' ? [] : d.items) as string[];
 
-    const built = kind === 'lixeira' ? await buildFiles(given) : kind === 'liberar_memoria' ? buildApps(given) : await buildClean();
+    const built = kind === 'lixeira' ? await buildFiles(given) : kind === 'liberar_memoria' ? buildApps(given, source) : await buildClean();
     if (!Array.isArray(built)) return built;
 
     const s: Suggestion = {
@@ -148,10 +170,10 @@ export function createSuggestions(deps: SuggestionsDeps) {
   }
 
   // ---------- approve ----------
-  const running = new Set<string>();
   async function approve(id: string): Promise<Suggestion | SuggestionError> {
     const s = items.find(x => x.id === id);
     if (!s) return err('sugestão não encontrada', 404);
+    if (isExpired(s)) { expire(); await persist(); publish(); return err(`essa sugestão ${EXPIRED}`, 409); }
     if (s.status !== 'pendente' || running.has(id)) return err('essa sugestão já foi decidida', 409);
     running.add(id);
     try {
@@ -178,20 +200,29 @@ export function createSuggestions(deps: SuggestionsDeps) {
       const why = (checked[bad] as { erro: string }).erro;
       return { status: 'falhou', result: `Nada foi enviado: o item ${bad + 1} mudou desde a sugestão (${why}).` };
     }
-    const good = checked as Array<{ path: string; size: number }>;
+    const good = checked as Array<{ path: string; size: number; lastUsed: number }>;
+    // M5: arquivo que mudou de tamanho ou foi usado depois da sugestão não vai (sem caminho na mensagem: só o nome)
+    const changed = s.items.findIndex((it, i) => good[i]!.size !== it.bytes || good[i]!.lastUsed > (it.lastUsed ?? -Infinity));
+    if (changed !== -1) return { status: 'falhou', result: `Nada foi enviado: o arquivo ${s.items[changed]!.label} foi usado ou mudou depois da sugestão.` };
     const r = await deps.files.recycle(good.map(g => g.path));
     const okSet = new Set(r.ok.map(p => p.toLowerCase()));
     const moved = good.filter(g => okSet.has(g.path.toLowerCase()));
     const bytes = moved.reduce((a, g) => a + g.size, 0);
     const parts: string[] = [];
-    if (moved.length) parts.push(`${plural(moved.length, 'arquivo', 'arquivos')} na Lixeira · ${size(bytes)}`);
+    if (moved.length) {
+      // M4: o disco diz o que saiu da pasta; a Lixeira diz quantos de fato entraram
+      const gone = plural(moved.length, 'arquivo', 'arquivos');
+      if (r.inTrash === null) parts.push(`${gone} saíram da pasta · ${size(bytes)} (não deu para conferir a Lixeira)`);
+      else if (r.inTrash >= moved.length) parts.push(`${gone} na Lixeira · ${size(bytes)}`);
+      else parts.push(`${plural(moved.length, 'arquivo saiu', 'arquivos saíram')} da pasta; só ${nf0.format(r.inTrash)} ${r.inTrash === 1 ? 'apareceu' : 'apareceram'} na Lixeira (o Windows pode ter pedido para apagar de vez)`);
+    }
     if (r.failed.length) parts.push(`${plural(r.failed.length, 'arquivo não pôde', 'arquivos não puderam')} ir para a Lixeira`);
     return { status: moved.length ? 'feita' : 'falhou', result: parts.join('. ') };
   }
 
   async function runApps(s: Suggestion): Promise<Outcome> {
     const keys = s.items.map(i => i.id);
-    const check = buildApps(keys);   // candidato agora? (R09, R21)
+    const check = buildApps(keys, s.source);   // candidato agora? (R09, R21)
     if (!Array.isArray(check)) return { status: 'falhou', result: `Nada foi fechado: ${check.erro}.` };
     const r = await deps.release(keys);
     if ('erro' in r) return { status: 'falhou', result: `Nada foi fechado: ${r.erro}.` };
@@ -203,7 +234,7 @@ export function createSuggestions(deps: SuggestionsDeps) {
 
   async function runClean(s: Suggestion): Promise<Outcome> {
     // R21: cada categoria do cartão ainda tem que ser acionável agora (ex.: o navegador não pode ter sido aberto)
-    const now_ = await deps.files.quickCleanPreview();
+    const now_ = await deps.files.quickCleanPreview({ fresh: true });   // sem cache: o navegador pode ter sido aberto
     const cats = s.items.map(i => i.id as QuickCleanCategory);
     const bad = cats.find(c => !now_.some(p => p.category === c && p.actionable));
     if (bad) return { status: 'falhou', result: 'Nada foi apagado: uma das categorias não pode mais ser limpa agora (o navegador foi aberto?).' };

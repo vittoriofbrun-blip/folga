@@ -2,11 +2,11 @@
 // um turno por vez (R25), teto de tempo, retomada e troca de provedor. Os CLIs são trocados por um script
 // node que imita o formato real (fixtures tiradas de uma execução real, ADR 0006); nada chama a rede.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createAgent, extractSuggestions, feed, newAcc, realLaunch, type Launch } from '../agent.ts';
+import { agentCwd, createAgent, extractSuggestions, feed, killTree, newAcc, realLaunch, type Launch } from '../agent.ts';
 import type { AgentEvent, AgentProvider, Suggestion, SuggestionDraft } from '../types.ts';
 
 let n = 0;
@@ -191,10 +191,11 @@ writeFileSync(fake, `
 const [mode, sess, prompt] = process.argv.slice(2);
 const out = o => process.stdout.write(JSON.stringify(o) + '\\n');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const sid = sess || (mode === 'claude' ? 'claude-sess-1' : 'codex-thread-1');
+const sid = sess || (mode === 'claude' ? '11111111-2222-4333-8444-555555555555' : 'codex-thread-1');
 if (prompt === 'dormir') { out(mode === 'claude' ? { type: 'system', subtype: 'init', session_id: sid } : { type: 'thread.started', thread_id: sid }); await sleep(60000); }
 if (prompt === 'lento') await sleep(1500);
 let texto = 'Resposta de ' + mode + ' (sessão recebida: ' + (sess || 'nenhuma') + ')';
+if (prompt === 'cwd') texto = process.cwd();
 if (prompt === 'bloco') texto = 'Achei dois candidatos.\\n\\n' + ${JSON.stringify(SBLOCK(valido))} + '\\n' + ${JSON.stringify(SBLOCK({ ...valido, titulo: 'Atalho perigoso', itens: ['C:\\Windows\\System32\\x.dll'] }))} + '\\n' + ${JSON.stringify(bloco('{ quebrado'))} + '\\nFim.';
 if (prompt === 'erro') {
   if (mode === 'claude') out({ type: 'result', is_error: true, subtype: 'success', result: 'Not logged in · Please run /login', session_id: sid });
@@ -218,8 +219,10 @@ await sleep(prompt === 'sai-devagar' ? 5000 : 0);
 const fakeLaunch = (t: { provider: AgentProvider; prompt: string; sessionId: string | null }): Launch =>
   ({ cmd: process.execPath, args: [fake, t.provider === 'gpt' ? 'gpt' : 'claude', t.sessionId ?? '', t.prompt] });
 
+const CLAUDE_SID = '11111111-2222-4333-8444-555555555555';
 const made: string[] = [];   // pastas de dados criadas por setup(), apagadas no fim
 function setup(opts: { timeout?: number; slowAdd?: number } = {}) {
+  const kills: number[] = [];
   const dataDir = mkdtempSync(join(tmpdir(), 'folga-agentdata-'));
   made.push(dataDir);
   const events: AgentEvent[] = [];
@@ -227,6 +230,7 @@ function setup(opts: { timeout?: number; slowAdd?: number } = {}) {
   const added: SuggestionDraft[] = [];
   const agent = createAgent({
     dataDir, port: 4799, selfPids, launch: fakeLaunch, turnTimeoutMs: opts.timeout,
+    killTree: pid => { kills.push(pid); killTree(pid); },
     emit: (ev, data) => { if (ev === 'agent') events.push(data as AgentEvent); },
     addSuggestion: async d => {
       added.push(d);
@@ -239,7 +243,7 @@ function setup(opts: { timeout?: number; slowAdd?: number } = {}) {
     for (let i = 0; i < 100; i++) { if (events.slice(from).some(e => e.type === 'done' || e.type === 'error')) return events.slice(from); await sleep(100); }
     throw new Error('o turno não terminou');
   };
-  return { agent, events, selfPids, added, dataDir, fim };
+  return { agent, events, selfPids, added, dataDir, fim, kills };
 }
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
@@ -251,7 +255,7 @@ await caso('um turno do Claude: eventos start/tool/text/done, mensagem gravada, 
   assert.deepEqual(ev.map(e => e.type), ['start', 'tool', 'text', 'done']);
   const c = s.agent.conversation();
   assert.equal(c.busy, false);
-  assert.equal(c.sessionId, 'claude-sess-1');
+  assert.equal(c.sessionId, CLAUDE_SID);
   assert.deepEqual(c.messages.map(m => m.role), ['user', 'assistant']);
   assert.equal(c.messages[1]!.provider, 'claude');
   assert.deepEqual(c.messages[1]!.tools, ['ver_memoria']);
@@ -259,7 +263,7 @@ await caso('um turno do Claude: eventos start/tool/text/done, mensagem gravada, 
   // persistência: outra instância lê a mesma conversa
   const outra = createAgent({ dataDir: s.dataDir, port: 1, selfPids: new Set(), emit: () => {}, addSuggestion: async () => ({ erro: 'x', status: 500 }), launch: fakeLaunch });
   assert.equal(outra.conversation().messages.length, 2);
-  assert.equal(outra.conversation().sessionId, 'claude-sess-1');
+  assert.equal(outra.conversation().sessionId, CLAUDE_SID);
   assert.equal(JSON.parse(readFileSync(join(s.dataDir, 'agent-mcp.json'), 'utf8')).mcpServers.folga.env.FOLGA_PORT, '4799');
 });
 
@@ -341,7 +345,8 @@ await caso('erro do CLI vira mensagem com error true e evento error', async () =
     assert.equal(ev.at(-1)!.type, 'error');
     const m = s.agent.conversation().messages.at(-1)!;
     assert.equal(m.error, true);
-    assert.match(m.text, p === 'claude' ? /login/ : /quota/);
+    assert.equal(m.text, p === 'claude' ? 'O Claude não respondeu agora. Tente de novo.' : 'O GPT não respondeu agora. Tente de novo.');   // B4/R17: nada do CLI na tela
+    assert.ok(!/login|quota/.test(JSON.stringify(ev)), 'nem no evento');
     assert.equal(s.agent.conversation().busy, false);
   }
 });
@@ -356,9 +361,9 @@ await caso('teto de tempo: estoura, mata o processo e registra o erro (R25)', as
   const ev = await s.fim();
   assert.ok(Date.now() - t0 < 5000);
   assert.equal(ev.at(-1)!.type, 'error');
-  assert.match(s.agent.conversation().messages.at(-1)!.text, /Passei de/);
+  assert.equal(s.agent.conversation().messages.at(-1)!.text, 'Tempo esgotado: parei a resposta.');
   assert.equal(s.agent.conversation().messages.at(-1)!.error, true);
-  assert.equal(s.agent.conversation().sessionId, 'claude-sess-1', 'a sessão do turno interrompido continua válida');
+  assert.equal(s.agent.conversation().sessionId, CLAUDE_SID, 'a sessão do turno interrompido continua válida');
   await sleep(300);
   assert.ok(!alive(pid), 'o processo morreu');
   assert.equal(s.selfPids.size, 0);
@@ -402,6 +407,65 @@ await caso('reset no meio do turno: o turno morto não escreve na conversa nova 
   const c = s.agent.conversation();
   assert.deepEqual(c.messages.map(m => m.role), ['user', 'assistant']);
   assert.ok(!c.messages[1]!.error);
+});
+
+await caso('M2: depois que o CLI saiu, stop() não manda taskkill (o PID pode ser de outro processo); com o CLI vivo, manda', async () => {
+  const s = setup({ slowAdd: 1500 });
+  await s.agent.send('claude', 'bloco');
+  while (!s.events.some(e => e.type === 'text')) await sleep(50);
+  await sleep(800);   // o CLI já saiu; o servidor ainda valida as sugestões, então o turno continua aberto
+  assert.equal(s.agent.conversation().busy, true);
+  const antes = s.kills.length;
+  s.agent.stop();
+  assert.equal(s.kills.length, antes, 'stop() num turno cujo processo já saiu não chama killTree');
+  await s.fim();
+  assert.ok(!s.agent.conversation().messages.at(-1)!.error, 'a resposta já pronta não vira "interrompida"');
+
+  const v = setup();
+  await v.agent.send('gpt', 'dormir');
+  let pid = 0;
+  for (let i = 0; i < 30 && !pid; i++) { pid = [...v.selfPids][0] ?? 0; await sleep(50); }
+  v.agent.stop();
+  assert.deepEqual(v.kills, [pid], 'com o CLI vivo, stop() mata a árvore dele');
+  await v.fim();
+});
+
+await caso('M6: o CLI roda na pasta vazia agent-cwd, não na pasta de dados; realLaunch pede essa pasta', async () => {
+  const s = setup();
+  await s.agent.send('claude', 'cwd');
+  await s.fim();
+  const ran = s.agent.conversation().messages.at(-1)!.text;
+  assert.equal(realpathSync.native(ran), realpathSync.native(agentCwd(s.dataDir)));
+  assert.notEqual(realpathSync.native(ran), realpathSync.native(s.dataDir));
+  assert.ok(existsSync(agentCwd(s.dataDir)));
+  for (const provider of ['claude', 'gpt'] as const) {
+    assert.equal(realLaunch({ provider, prompt: 'oi', sessionId: null, system: 'S', mcpFile: 'm' }, 'C:/dados', 4780).cwd, join('C:/dados', 'agent-cwd'));
+  }
+});
+
+await caso('B7: sessionId fora do formato (do stream ou do agent.json) é descartado e a conversa recomeça', async () => {
+  // do stream
+  const uuid = '7f68eab9-b91c-4408-9042-fa3d86c4579e';
+  assert.equal(run('claude', [`{"type":"system","subtype":"init","session_id":"${uuid}"}`]).acc.sessionId, uuid);
+  for (const ruim of ['--dangerously-skip-permissions', 'não-é-uuid', '7f68eab9-b91c-4408-9042-fa3d86c4579e --x', '']) {
+    assert.equal(run('claude', [JSON.stringify({ type: 'system', subtype: 'init', session_id: ruim })]).acc.sessionId, null, ruim);
+  }
+  assert.equal(run('gpt', ['{"type":"thread.started","thread_id":"01a14fb0-d52e"}']).acc.sessionId, '01a14fb0-d52e');
+  for (const ruim of ['-c x=1 --x', 'a b', 'a'.repeat(65), 'a;b']) assert.equal(run('gpt', [JSON.stringify({ type: 'thread.started', thread_id: ruim })]).acc.sessionId, null, ruim);
+  // do disco
+  const abrir = (dataDir: string) => createAgent({ dataDir, port: 1, selfPids: new Set(), emit: () => {}, addSuggestion: async () => ({ erro: 'x', status: 500 }), launch: fakeLaunch });
+  for (const [provider, sessionId, esperado] of [['claude', uuid, uuid], ['claude', '--resume x', null], ['claude', 'claude-sess-1', null], ['gpt', 'codex-thread-1', 'codex-thread-1'], ['gpt', 'x y', null]] as const) {
+    const s = setup();
+    writeFileSync(join(s.dataDir, 'agent.json'), JSON.stringify({ id: 'c1', provider, sessionId, cwd: agentCwd(s.dataDir), messages: [] }));
+    assert.equal(abrir(s.dataDir).conversation().sessionId, esperado, `${provider} ${sessionId}`);
+  }
+  // agent.json de antes do agent-cwd (sem cwd): o --resume não acharia a sessão, então começa outra e o histórico fica
+  const s = setup();
+  writeFileSync(join(s.dataDir, 'agent.json'), JSON.stringify({ id: 'c1', provider: 'claude', sessionId: uuid, messages: [{ id: 'm', role: 'user', text: 'oi', t: 1 }] }));
+  const a = abrir(s.dataDir);
+  assert.equal(a.conversation().sessionId, null);
+  assert.equal(a.conversation().messages.length, 1);
+  assert.ok(!('cwd' in a.conversation()), 'o caminho não vai para a API (R17)');
 });
 
 await rm(dir, { recursive: true, force: true, maxRetries: 5 });

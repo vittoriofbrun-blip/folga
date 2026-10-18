@@ -109,7 +109,10 @@ export type QuickCleanItem = {
 // Sugestões: o agente (ou a tela) propõe, o usuário aprova (R20–R24)
 export type SuggestionKind = 'lixeira' | 'limpeza_rapida' | 'liberar_memoria';
 export type SuggestionStatus = 'pendente' | 'feita' | 'ignorada' | 'falhou';
-export type SuggestionItem = { id: string; label: string; detail: string; bytes: number };   // id = caminho, chave de app ou categoria
+export type SuggestionItem = {
+  id: string; label: string; detail: string; bytes: number;   // id = caminho, chave de app ou categoria
+  lastUsed?: number;       // só arquivo: último uso visto na sugestão; a aprovação recusa se ficou mais novo (M5)
+};
 export type Suggestion = {
   id: string; t: number; source: 'agente' | 'folga';
   kind: SuggestionKind; title: string; reason: string;

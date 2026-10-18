@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { realpathSync, type Dirent, type Stats } from 'node:fs';
 import { lstat, opendir, readdir, realpath, unlink } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { QuickCleanCategory, QuickCleanItem, Settings, StaleBasis, StaleFile, StaleScan } from './types.ts';
 
 export type Browser = 'chrome' | 'edge';
@@ -19,6 +19,7 @@ export type FilesDeps = {
   accessTracking?: boolean;                          // pula o fsutil
   browsersOpen?: () => Promise<Record<Browser, boolean>>;
   trash?: () => Promise<{ bytes: number; files: number }>;
+  sendToTrash?: (paths: string[]) => Promise<void>;   // testes: Lixeira falsa no lugar do PowerShell
   maxEntries?: number; maxMs?: number; now?: () => number;
 };
 export type Inspected = { path: string; size: number; lastUsed: number; basis: StaleBasis };
@@ -30,7 +31,10 @@ const MAX_MS = 20_000;
 const MAX_DEPTH = 10;
 const MAX_FINDINGS = 500;
 const TEMP_DAYS = 7;
-const SKIP_DIRS = new Set(['node_modules', '.git', 'appdata', '$recycle.bin']);
+const PREVIEW_MS = 30_000;   // B6: o preview é caro (varre %TEMP% e caches, roda PowerShell)
+const SKIP_DIRS = new Set(['node_modules', '.git', 'appdata', '$recycle.bin', '__pycache__', 'site-packages']);
+// D20: marcadores de projeto de código; a pasta que tem um deles não entra na busca de arquivos parados
+const PROJECT_MARKERS: ReadonlySet<string> = new Set(['.git', 'package.json', 'pyvenv.cfg', 'pyproject.toml', 'cargo.toml', 'go.mod']);
 
 const SYSROOT = () => process.env.SystemRoot ?? 'C:\\Windows';
 const PS = () => join(SYSROOT(), 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
@@ -66,6 +70,8 @@ const runPS = (script: string, input: unknown, timeoutMs: number) =>
   run(PS(), ['-NoProfile', '-NonInteractive', '-Command', script], input === null ? null : JSON.stringify(input), timeoutMs);
 
 const lc = (s: string) => s.toLowerCase();
+// M3: arquivo extraído de zip ou copiado mantém o mtime antigo; criação e mudança de metadados contam como "chegou agora"
+const ageOf = (st: Stats) => Math.max(st.mtimeMs, st.birthtimeMs, st.ctimeMs);
 const exists = (p: string) => lstat(p).then(() => true, () => false);
 
 /** `child` está estritamente dentro de `root`? (relative do win32 ignora maiúsculas; outra unidade vira caminho absoluto) */
@@ -81,24 +87,31 @@ type Budget = { entries: number; maxEntries: number; deadline: number; now: () =
 async function walk(
   root: string, maxDepth: number, skipDir: ((name: string) => boolean) | null, b: Budget,
   onFile: (path: string, st: Stats) => void | Promise<void>,
+  projectMarkers: ReadonlySet<string> | null = null,
 ) {
   const stack: Array<[string, number]> = [[root, 0]];
   let active = 0;
   async function visit(dir: string, depth: number) {
     const files: string[] = [];
+    const subdirs: Array<[string, number]> = [];
+    let project = false;
     try {
       const d = await opendir(dir);
       try {
         for await (const e of d as AsyncIterable<Dirent>) {
           if (b.entries >= b.maxEntries || b.now() > b.deadline) { b.stopped = true; break; }
           b.entries++;
+          // D20: pasta de projeto de código (abaixo da raiz) fica de fora inteira: dependência parada não é lixo
+          if (projectMarkers && depth > 0 && projectMarkers.has(lc(e.name))) { project = true; break; }
           if (e.isSymbolicLink()) continue;
           if (e.isDirectory()) {
-            if (depth < maxDepth && !(skipDir && skipDir(e.name))) stack.push([join(dir, e.name), depth + 1]);
+            if (depth < maxDepth && !(skipDir && skipDir(e.name))) subdirs.push([join(dir, e.name), depth + 1]);
           } else if (e.isFile()) files.push(join(dir, e.name));
         }
       } finally { await d.close().catch(() => {}); }
     } catch { /* sem acesso à pasta: segue */ }
+    if (project) return;
+    stack.push(...subdirs);
     for (let i = 0; i < files.length && !b.stopped; i += 64) {
       await Promise.all(files.slice(i, i + 64).map(async f => {
         try { const st = await lstat(f); if (st.isFile()) await onFile(f, st); } catch { /* sumiu ou travado */ }
@@ -202,7 +215,7 @@ export function createFiles(deps: FilesDeps) {
         if ((t0 - u.lastUsed) / DAY < days) return;
         total += st.size;
         found.push({ path, name, root, size: st.size, lastUsed: u.lastUsed, lastModified: st.mtimeMs, basis: u.basis });
-      });
+      }, PROJECT_MARKERS);
       if (b.stopped) break;
     }
     found.sort((a, c) => c.size - a.size);
@@ -221,9 +234,30 @@ export function createFiles(deps: FilesDeps) {
     return p;
   }
 
+  // ---------- pasta de projeto de código (D20) ----------
+  const projectCache = new Map<string, boolean>();
+  /** Alguma pasta entre a raiz permitida e o arquivo tem um marcador de projeto? (a raiz em si não conta, como na busca) */
+  async function inProject(file: string, roots: string[]): Promise<boolean> {
+    const root = roots.find(r => inside(r, file));
+    if (!root) return false;
+    let dir = dirname(file);
+    while (inside(root, dir)) {
+      const key = lc(dir);
+      let hit = projectCache.get(key);
+      if (hit === undefined) {
+        hit = (await Promise.all([...PROJECT_MARKERS].map(m => exists(join(dir, m))))).some(Boolean);
+        projectCache.set(key, hit);
+      }
+      if (hit) return true;
+      dir = dirname(dir);
+    }
+    return false;
+  }
+
   // ---------- revalidação de caminhos (R21) ----------
   /** Um caminho só passa se estiver dentro de uma pasta permitida, existir e for arquivo comum (não pasta, não link). */
   async function inspect(paths: string[]): Promise<Array<Inspected | InspectError>> {
+    projectCache.clear();   // a pasta pode ter virado (ou deixado de ser) projeto desde a última validação
     const roots = allowedRoots();
     const tracking = await accessTracking();
     const recent = await recentMap();
@@ -240,6 +274,7 @@ export function createFiles(deps: FilesDeps) {
       if (!st || !st2) return { erro: 'o arquivo não existe mais' };
       if (st.isSymbolicLink() || st2.isSymbolicLink()) return { erro: 'é um atalho ou link, não um arquivo' };
       if (!st2.isFile()) return { erro: 'não é um arquivo comum' };
+      if (await inProject(real, roots)) return { erro: 'está dentro de uma pasta de projeto de código' };   // D20
       return { path: real, size: st2.size, ...usage(basename(real), st2, tracking, recent) };
     };
     const out: Array<Inspected | InspectError> = [];
@@ -248,7 +283,11 @@ export function createFiles(deps: FilesDeps) {
   }
 
   // ---------- Lixeira ----------
-  async function recycle(paths: string[]): Promise<{ ok: string[]; failed: string[] }> {
+  /** Itens na Lixeira agora; null = não deu para ler (nunca fingir que são 0). */
+  async function trashCount(): Promise<number | null> {
+    try { return (await (deps.trash ? deps.trash() : readTrash())).files; } catch { return null; }
+  }
+  async function recycle(paths: string[]): Promise<{ ok: string[]; failed: string[]; inTrash: number | null }> {
     const checked = await inspect(paths);
     const send: string[] = [];
     const sentFor = new Map<string, string>();   // caminho real → pedido original
@@ -258,12 +297,16 @@ export function createFiles(deps: FilesDeps) {
       if ('erro' in c) failed.push(p); else { send.push(c.path); sentFor.set(c.path, p); }
     });
     const ok: string[] = [];
+    let inTrash: number | null = 0;
     if (send.length) {
-      await runPS(PS_RECYCLE, send, 120_000);
-      // quem decide é o disco: saiu do lugar = foi para a Lixeira
+      const before = await trashCount();
+      await (deps.sendToTrash ? deps.sendToTrash(send) : runPS(PS_RECYCLE, send, 120_000));
+      // o disco diz o que saiu da pasta; a contagem da Lixeira (antes × depois) diz quantos de fato entraram (M4)
       for (const real of send) (await exists(real) ? failed : ok).push(sentFor.get(real)!);
+      const after = await trashCount();
+      inTrash = before === null || after === null ? null : Math.max(0, after - before);
     }
-    return { ok, failed };
+    return { ok, failed, inTrash };
   }
 
   // ---------- limpeza rápida ----------
@@ -308,7 +351,7 @@ export function createFiles(deps: FilesDeps) {
     // temporários, caches e a consulta de processos andam juntos: o preview aparece quando o mais lento termina
     const [open] = await Promise.all([
       browsersOpen(),
-      (async () => { const b = budget(); for (const d of tempDirs()) await walk(d, 32, null, b, (p, st) => { if (st.mtimeMs < limit) temp.push([p, st]); }); })(),
+      (async () => { const b = budget(); for (const d of tempDirs()) await walk(d, 32, null, b, (p, st) => { if (ageOf(st) < limit) temp.push([p, st]); }); })(),
       ...(['chrome', 'edge'] as const).map(async br => {
         const targets = deps.cacheDirs ? dirs[br] : (await Promise.all(dirs[br].map(profileCaches))).flat();
         const b = budget();
@@ -319,7 +362,20 @@ export function createFiles(deps: FilesDeps) {
   }
   const sum = (l: Array<[string, Stats]>) => l.reduce((a, [, st]) => a + st.size, 0);
 
-  async function quickCleanPreview(): Promise<QuickCleanItem[]> {
+  // B6: single-flight + cache de 30 s; quickClean invalida. `fresh` (aprovação) sempre coleta de novo.
+  let previewP: Promise<QuickCleanItem[]> | null = null;
+  let previewAt: number | null = null;   // null = coleta em andamento
+  let previewGen = 0;
+  function quickCleanPreview(opts: { fresh?: boolean } = {}): Promise<QuickCleanItem[]> {
+    if (previewP && !opts.fresh && (previewAt === null || now() - previewAt < PREVIEW_MS)) return previewP;
+    const gen = previewGen;
+    previewAt = null;
+    const p: Promise<QuickCleanItem[]> = collectPreview().then(r => { if (gen === previewGen && previewP === p) previewAt = now(); return r; });
+    previewP = p;
+    p.catch(() => { if (previewP === p) previewP = null; });
+    return p;
+  }
+  async function collectPreview(): Promise<QuickCleanItem[]> {
     const [{ temp, cache, open }, t] = await Promise.all([collect(), deps.trash ? deps.trash() : trashInfo()]);
     const items: QuickCleanItem[] = [{
       category: 'temp_usuario', label: 'Arquivos temporários com mais de 7 dias', bytes: sum(temp), files: temp.length, actionable: true,
@@ -339,15 +395,15 @@ export function createFiles(deps: FilesDeps) {
     });
     return items;
   }
-  async function trashInfo(): Promise<{ bytes: number; files: number }> {
-    try {
-      const j = JSON.parse(await runPS(PS_TRASH, null, 20_000)) as { bytes?: number; files?: number };
-      return { bytes: Math.max(0, Number(j.bytes) || 0), files: Math.max(0, Number(j.files) || 0) };
-    } catch { return { bytes: 0, files: 0 }; }
+  async function readTrash(): Promise<{ bytes: number; files: number }> {
+    const j = JSON.parse(await runPS(PS_TRASH, null, 20_000)) as { bytes?: number; files?: number };
+    return { bytes: Math.max(0, Number(j.bytes) || 0), files: Math.max(0, Number(j.files) || 0) };
   }
+  const trashInfo = () => readTrash().catch(() => ({ bytes: 0, files: 0 }));
 
   /** Apaga de vez só o que o preview marca como acionável. `categories` limita ao que o cartão aprovado mostrava. */
   async function quickClean(opts: { categories?: QuickCleanCategory[] } = {}): Promise<{ bytes: number; files: number; skipped: number }> {
+    previewGen++; previewP = null;   // o que o preview guardou deixou de valer
     const want = new Set<QuickCleanCategory>(opts.categories ?? ['temp_usuario', 'cache_navegador']);
     const { temp, cache, open } = await collect();
     const limit = now() - TEMP_DAYS * DAY;
@@ -359,7 +415,7 @@ export function createFiles(deps: FilesDeps) {
       await Promise.all(todo.slice(i, i + 32).map(async ([p, , old]) => {
         try {
           const st = await lstat(p);   // reconfere logo antes: ainda arquivo comum e (se temporário) ainda antigo
-          if (!st.isFile() || (old && st.mtimeMs >= limit)) { skipped++; return; }
+          if (!st.isFile() || (old && ageOf(st) >= limit)) { skipped++; return; }
           await unlink(p);
           bytes += st.size; files++;
         } catch { skipped++; }   // travado, em uso ou sem permissão: fica

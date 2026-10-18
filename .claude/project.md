@@ -82,6 +82,11 @@ Fora da v1: disco, otimizar, organizar, desinstalar, MCP para agentes, partícul
   aprovação automática de ferramentas ao agente foi barrada pelo classificador de segurança, e este
   desenho dispensa isso.
 
+- **D20** — Pastas de projeto de código ficam fora de "arquivos que não abro mais", tanto na busca quanto
+  na validação. Uma pasta conta como projeto se tiver `.git`, `package.json`, `pyvenv.cfg`, `pyproject.toml`,
+  `Cargo.toml` ou `go.mod`. Motivo: o QA ao vivo achou dependências de um ambiente virtual Python como
+  "paradas", e mandá-las para a Lixeira quebraria o projeto. (2026-10-18)
+
 ## Perguntas abertas (decisão do Antônio)
 Todas as perguntas abaixo foram decididas em 2026-10-18 (D11 a D13); os valores seguem ajustáveis em Ajustes.
 - **P01** — Nome do app. "Folga" é provisório. Não pode ser "Mint".

@@ -1,7 +1,7 @@
 // Arquivos parados, revalidação e limpeza rápida. Só pastas temporárias criadas aqui: nunca toca em arquivo real
 // do usuário e nunca chama a Lixeira de verdade (R21, R22, D16, D17).
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -191,16 +191,43 @@ try {
     assert.deepEqual(rr.ok, []);
     assert.equal(rr.failed.length, 2);
     assert.ok(existsSync(good));
+    assert.equal(rr.inTrash, 0);
     ok('recycle: caminho inválido vai para failed sem tocar em nada');
+
+    // M4: Lixeira falsa (antes/depois) — quem diz quantos entraram é a contagem da Lixeira, não o disco
+    let bin = 10, entram = 2, binIlegivel = false;
+    const sent: string[][] = [];
+    const fr = mk({
+      trash: async () => { if (binIlegivel) throw new Error('sem resposta'); return { bytes: 0, files: bin }; },
+      sendToTrash: async ps => { sent.push(ps); for (const p of ps) await rm(p); bin += entram; },   // "Lixeira": o arquivo sai da pasta
+    });
+    const par = (n: string) => [file(join(downloads, `${n}-1.bin`), 1000, 400), file(join(downloads, `${n}-2.bin`), 1000, 400)];
+    let r2 = await fr.recycle(par('lixo-a'));
+    assert.equal(r2.ok.length, 2); assert.equal(r2.failed.length, 0); assert.equal(r2.inTrash, 2);
+    entram = 1;   // saíram 2 da pasta, só 1 apareceu na Lixeira (o Windows apagou de vez ou perguntou)
+    r2 = await fr.recycle(par('lixo-b'));
+    assert.equal(r2.ok.length, 2); assert.equal(r2.inTrash, 1);
+    binIlegivel = true;
+    r2 = await fr.recycle(par('lixo-c'));
+    assert.equal(r2.ok.length, 2); assert.equal(r2.inTrash, null, 'Lixeira ilegível: desconhecido, não 0');
+    binIlegivel = false;
+    const antes = sent.length;
+    r2 = await fr.recycle([join(downloads, 'nao-existe-mesmo.bin')]);
+    assert.equal(r2.inTrash, 0); assert.equal(sent.length, antes, 'nada válido: a Lixeira nem é chamada');
+    ok('recycle: inTrash = itens da Lixeira depois − antes (completo, parcial, ilegível, nada enviado)');
   }
 
   // ---------- limpeza rápida ----------
   {
     const tmp = dir('Temp');
-    file(join(tmp, 'velho.tmp'), 3000, 10);
-    file(join(dir('Temp', 'sub', 'sub2'), 'velho2.tmp'), 2000, 30);
-    file(join(tmp, 'novo.tmp'), 4000, 1);
-    const travado = file(join(tmp, 'travado.tmp'), 1000, 20);
+    // M3: a idade é max(mtime, criação, ctime) e um arquivo de teste é criado agora; então o relógio do teste anda
+    // 10 dias à frente, e "daysOld" vale em relação a esse relógio (mtime no futuro para o que deve parecer novo)
+    const SKEW = 10 * DAY;
+    const tfile = (path: string, bytes: number, daysOld: number) => file(path, bytes, daysOld - SKEW / DAY);
+    tfile(join(tmp, 'velho.tmp'), 3000, 10);
+    tfile(join(dir('Temp', 'sub', 'sub2'), 'velho2.tmp'), 2000, 30);
+    tfile(join(tmp, 'novo.tmp'), 4000, 1);
+    const travado = tfile(join(tmp, 'travado.tmp'), 1000, 20);
     // arquivo travado de verdade: um PowerShell o abre sem compartilhar (o unlink do Windows falha)
     const holder = spawn(join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
       ['-NoProfile', '-NonInteractive', '-Command', "$f=[IO.File]::Open($env:FOLGA_LOCK,'Open','Read','None');'ready';Start-Sleep 60"],
@@ -213,7 +240,7 @@ try {
     file(join(edgeC, 'js_1'), 7000, 0);
     const caches = { chrome: [chromeC], edge: [edgeC] };
     let open = { chrome: true, edge: false };
-    const mkc = () => mk({ tempDirs: [tmp], cacheDirs: caches, browsersOpen: async () => open, trash: async () => ({ bytes: 123, files: 2 }) });
+    const mkc = () => mk({ tempDirs: [tmp], cacheDirs: caches, browsersOpen: async () => open, trash: async () => ({ bytes: 123, files: 2 }), now: () => Date.now() + SKEW });
 
     let items = await mkc().quickCleanPreview();
     const by = (c: string) => items.find(i => i.category === c)!;
@@ -256,6 +283,65 @@ try {
 
     holder.kill();
     await new Promise(r => holder.once('exit', r));   // solta o arquivo antes da limpeza
+
+    // M3: arquivo extraído de zip/copiado: mtime de 30 dias, mas criado agora → NÃO é apagado
+    const chegou = dir('Temp-chegou');
+    const extraido = file(join(chegou, 'extraido.tmp'), 3000, 30);
+    assert.ok(statSync(extraido).mtimeMs < Date.now() - 29 * DAY, 'mtime antigo de verdade');
+    assert.ok(statSync(extraido).birthtimeMs > Date.now() - 60_000, 'criado agora');
+    const real = () => mk({ tempDirs: [chegou] });   // relógio real
+    assert.equal((await real().quickCleanPreview()).find(i => i.category === 'temp_usuario')!.files, 0);
+    const rr3 = await real().quickClean({ categories: ['temp_usuario'] });
+    assert.equal(rr3.files, 0);
+    assert.ok(existsSync(extraido), 'mtime antigo mas criado agora: fica');
+    // o mesmo arquivo, 8 dias depois: aí sim passou da idade (a criação é que decide, não o mtime)
+    const depois = mk({ tempDirs: [chegou], now: () => Date.now() + 8 * DAY });
+    assert.equal((await depois.quickCleanPreview()).find(i => i.category === 'temp_usuario')!.files, 1);
+    // e a reconferência logo antes do unlink usa a mesma idade: preview velho não apaga o que "chegou" depois
+    const rr4 = await depois.quickClean({ categories: ['temp_usuario'] });
+    assert.equal(rr4.files, 1);
+    assert.ok(!existsSync(extraido));
+    ok('quickClean: idade = max(mtime, criação, ctime); mtime de 30 dias mas criado agora não é apagado');
+
+    // B6: single-flight + cache de 30 s; quickClean invalida; fresh ignora o cache
+    let clock = 5_000_000, trashCalls = 0;
+    const fc = mk({ tempDirs: [dir('Temp-cache')], cacheDirs: {}, trash: async () => { trashCalls++; return { bytes: 0, files: 0 }; }, now: () => clock });
+    const p1 = fc.quickCleanPreview(), p2 = fc.quickCleanPreview();
+    assert.equal(p1, p2, 'chamadas concorrentes dividem a mesma promessa');
+    await p1;
+    assert.equal(trashCalls, 1);
+    await fc.quickCleanPreview();
+    clock += 29_000;
+    await fc.quickCleanPreview();
+    assert.equal(trashCalls, 1, 'dentro de 30 s: do cache');
+    clock += 2_000;
+    await fc.quickCleanPreview();
+    assert.equal(trashCalls, 2, 'passou de 30 s: coleta de novo');
+    await fc.quickClean();
+    await fc.quickCleanPreview();
+    assert.equal(trashCalls, 3, 'depois de um quickClean: coleta de novo');
+    await fc.quickCleanPreview({ fresh: true });
+    assert.equal(trashCalls, 4, 'fresh (aprovação) ignora o cache');
+    ok('quickCleanPreview: single-flight, cache de 30 s, invalidado por quickClean, fresh coleta de novo');
+  }
+
+  // ---------- D20: pasta de projeto de código fica de fora (busca e validação) ----------
+  {
+    const raiz = dir('Projetos-raiz');
+    const solto = file(join(dir('Projetos-raiz', 'fotos'), 'solto.zip'), 2 * MB, 400);
+    const noNode = file(join(dir('Projetos-raiz', 'app-node', 'dist'), 'bundle.js.map'), 2 * MB, 400);
+    writeFileSync(join(raiz, 'app-node', 'package.json'), '{}');
+    const noVenv = file(join(dir('Projetos-raiz', 'odysseus', 'venv', 'Lib'), 'onnx.pyd'), 2 * MB, 400);
+    writeFileSync(join(raiz, 'odysseus', 'venv', 'pyvenv.cfg'), 'home = x');
+    const noGit = file(join(dir('Projetos-raiz', 'repo', 'src'), 'modelo.onnx'), 2 * MB, 400);
+    mkdirSync(join(raiz, 'repo', '.git'));
+    const f = mk({ roots: [raiz] });
+    const s = await f.scan({ olderThanDays: 30, minMB: 1 });
+    assert.deepEqual(s.files.map(x => x.name), ['solto.zip'], `achou: ${s.files.map(x => x.path).join(' | ')}`);
+    const checked = await f.inspect([solto, noNode, noVenv, noGit]);
+    assert.ok(!('erro' in checked[0]!), 'arquivo solto passa');
+    for (const c of checked.slice(1)) assert.ok('erro' in c && /projeto/.test(c.erro), `devia recusar: ${JSON.stringify(c)}`);
+    ok('D20: pastas com package.json, pyvenv.cfg ou .git ficam fora da busca e da validação');
   }
 
   console.log(`files: ${passed} casos ok`);

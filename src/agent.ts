@@ -3,7 +3,7 @@
 // valida e vira cartão que o usuário aprova na tela (R20–R24). Um turno por vez, teto de 120 s (R25).
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -12,7 +12,7 @@ import type {
   AgentEvent, AgentProvider, ChatMessage, Conversation, Emit, Suggestion, SuggestionDraft, SuggestionKind,
 } from './types.ts';
 
-export type Launch = { cmd: string; args: string[]; env?: NodeJS.ProcessEnv };
+export type Launch = { cmd: string; args: string[]; env?: NodeJS.ProcessEnv; cwd?: string };
 export type TurnInput = { provider: AgentProvider; prompt: string; sessionId: string | null; system: string; mcpFile: string };
 export type AgentDeps = {
   dataDir: string;
@@ -23,6 +23,7 @@ export type AgentDeps = {
   // opcionais, para testes
   turnTimeoutMs?: number;                       // padrão 120 s (R25)
   launch?: (t: TurnInput) => Launch;            // troca o comando do provedor (script fake)
+  killTree?: (pid: number) => void;             // troca o taskkill (teste confere quando ele é chamado)
 };
 export type SendResult = { ok: true } | { erro: string; status: number };
 
@@ -41,6 +42,13 @@ const CLAUDE_EXE = process.env.FOLGA_CLAUDE_EXE ?? join(homedir(), '.local', 'bi
 const CODEX_EXE = process.env.FOLGA_CODEX_EXE ?? join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'),
   'npm', 'node_modules', '@openai', 'codex', 'node_modules', '@openai', 'codex-win32-x64', 'vendor', 'x86_64-pc-windows-msvc', 'bin', 'codex.exe');
 const MISSING: Record<AgentProvider, string> = { claude: 'Claude Code não encontrado', gpt: 'Codex não encontrado' };
+
+/** Pasta vazia onde os CLIs rodam: a pasta de dados guarda ui-token, ajustes, registro e sugestões, e o agente não deve vê-los. */
+export const agentCwd = (dataDir: string) => join(dataDir, 'agent-cwd');
+
+// Id de sessão vai para --resume / exec resume: só o formato que cada CLI gera (Claude: UUID; Codex: letras, números e hífens)
+const SESSION_ID: Record<AgentProvider, RegExp> = { claude: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, gpt: /^[A-Za-z0-9-]{1,64}$/ };
+export const validSessionId = (provider: AgentProvider, v: unknown): string | null => (typeof v === 'string' && SESSION_ID[provider].test(v) ? v : null);
 
 const fwd = (p: string) => p.replaceAll('\\', '/');
 const toml = (s: string) => JSON.stringify(s);   // string TOML básica = string JSON
@@ -70,6 +78,7 @@ export function realLaunch(t: TurnInput, dataDir: string, port: number): Launch 
 '--settings', JSON.stringify({ disableAllHooks: true, crossSessionInbound: 'refuse', claudeMdExcludes: ['**/CLAUDE.md', `${home}/.claude/CLAUDE.md`] }),
       ],
       env: { ...clean, CLAUDE_CODE_HARBOR_KITE: '0' },
+      cwd: agentCwd(dataDir),
     };
   }
   const mcpRoot = fwd(join(import.meta.dirname, 'mcp.ts'));
@@ -87,6 +96,7 @@ export function realLaunch(t: TurnInput, dataDir: string, port: number): Launch 
     cmd: CODEX_EXE,
     args: t.sessionId ? ['exec', 'resume', ...common, '--', t.sessionId, prompt] : ['exec', ...common, '--', prompt],
     env: clean,
+    cwd: agentCwd(dataDir),
   };
 }
 
@@ -117,7 +127,7 @@ export function feed(provider: AgentProvider, line: string, acc: Acc): StreamEve
   const text = (t: string) => { acc.texts.push(t); out.push({ type: 'text', text: t }); };
 
   if (provider === 'claude') {
-    if (j.type === 'system' && j.subtype === 'init') acc.sessionId = str(j.session_id) ?? acc.sessionId;
+    if (j.type === 'system' && j.subtype === 'init') acc.sessionId = validSessionId('claude', j.session_id) ?? acc.sessionId;
     else if (j.type === 'assistant') {
       const content = rec(j.message).content;
       for (const c of Array.isArray(content) ? content : []) {
@@ -126,7 +136,7 @@ export function feed(provider: AgentProvider, line: string, acc: Acc): StreamEve
         else if (b.type === 'tool_use' && str(b.name)) tool(b.name as string);
       }
     } else if (j.type === 'result') {
-      acc.sessionId = str(j.session_id) ?? acc.sessionId;
+      acc.sessionId = validSessionId('claude', j.session_id) ?? acc.sessionId;
       acc.done = true;
       if (j.is_error === true || (j.subtype !== undefined && j.subtype !== 'success')) acc.error = str(j.result) ?? `o Claude terminou com ${String(j.subtype ?? 'erro')}`;
       else acc.finalText = typeof j.result === 'string' ? j.result : null;
@@ -136,7 +146,7 @@ export function feed(provider: AgentProvider, line: string, acc: Acc): StreamEve
 
   // Codex
   const item = rec(j.item);
-  if (j.type === 'thread.started') acc.sessionId = str(j.thread_id) ?? acc.sessionId;
+  if (j.type === 'thread.started') acc.sessionId = validSessionId('gpt', j.thread_id) ?? acc.sessionId;
   else if ((j.type === 'item.started' || j.type === 'item.completed') && item.type === 'mcp_tool_call' && str(item.tool)) {
     const id = str(item.id) ?? `${acc.tools.length}:${item.tool as string}`;
     if (!acc.seen.has(id)) { acc.seen.add(id); tool(item.tool as string); }
@@ -183,7 +193,7 @@ export function extractSuggestions(raw: string): Extracted {
 // ---------------------------------------------------------------------------------------------------
 type Stored = { id: string; provider: AgentProvider; sessionId: string | null; messages: ChatMessage[] };
 
-function killTree(pid: number) {
+export function killTree(pid: number) {
   const r = spawnSync('C:\\Windows\\System32\\taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, timeout: 5_000, stdio: 'ignore' });
   if (r.status !== 0) { try { process.kill(pid); } catch { /* já morreu */ } }
 }
@@ -193,6 +203,8 @@ const dateBR = () => new Date().toLocaleDateString('pt-BR', { weekday: 'long', d
 export function createAgent(deps: AgentDeps) {
   const file = join(deps.dataDir, 'agent.json');
   const mcpFile = join(deps.dataDir, 'agent-mcp.json');
+  const cwd = agentCwd(deps.dataDir);
+  const kill = deps.killTree ?? killTree;
   const timeoutMs = deps.turnTimeoutMs ?? TURN_TIMEOUT_MS;
   const exists: Record<AgentProvider, boolean> = { claude: existsSync(CLAUDE_EXE), gpt: existsSync(CODEX_EXE) };
   let system: string | null = null;
@@ -202,20 +214,23 @@ export function createAgent(deps: AgentDeps) {
     try {
       const j = rec(JSON.parse(readFileSync(file, 'utf8')));
       if (str(j.id) && (j.provider === 'claude' || j.provider === 'gpt') && Array.isArray(j.messages)) {
-        return { id: j.id as string, provider: j.provider, sessionId: str(j.sessionId), messages: (j.messages as ChatMessage[]).slice(-MAX_MESSAGES) };
+        // sessão gravada em outra pasta (antes do agent-cwd) não é achada pelo --resume: começa uma nova, o histórico fica
+        const sessionId = j.cwd === cwd ? validSessionId(j.provider, j.sessionId) : null;
+        return { id: j.id as string, provider: j.provider, sessionId, messages: (j.messages as ChatMessage[]).slice(-MAX_MESSAGES) };
       }
     } catch { /* sem conversa salva */ }
     return fresh('claude');
   }
   let conv = load();
   let busy = false;
-  type Turn = { pid: number | null; convId: string; killed: 'stop' | 'timeout' | null };
+  // live: o processo do CLI ainda existe. Depois que ele sai o Windows pode reaproveitar o PID, então ninguém mais manda taskkill nele.
+  type Turn = { pid: number | null; convId: string; killed: 'stop' | 'timeout' | null; live: boolean };
   let current: Turn | null = null;
 
   const save = () => {
     conv.messages = conv.messages.slice(-MAX_MESSAGES);
     const tmp = file + '.tmp';
-    writeFileSync(tmp, JSON.stringify(conv));
+    writeFileSync(tmp, JSON.stringify({ ...conv, cwd }));
     renameSync(tmp, file);
   };
   const emit = (e: AgentEvent) => deps.emit('agent', e);
@@ -238,10 +253,13 @@ export function createAgent(deps: AgentDeps) {
     const reply = acc.error === null && !why ? (acc.finalText ?? (acc.texts.length ? acc.texts.join('\n\n') : null)) : null;
     let msg: ChatMessage;
     if (reply === null || !reply.trim()) {
-      const motivo = why === 'timeout' ? `Passei de ${Math.round(timeoutMs / 1000)} s sem terminar; parei esta resposta.`
+      // R17: o chat só mostra texto fixo; o detalhe do CLI (pode ter caminho e dado interno) vai só para o console
+      const nome = provider === 'claude' ? 'O Claude' : 'O GPT';
+      const motivo = why === 'timeout' ? 'Tempo esgotado: parei a resposta.'
         : why === 'stop' ? 'Resposta interrompida.'
-        : (acc.error ?? acc.softError ?? (stderr.trim().split(/\r?\n/).slice(-2).join(' ') || `o ${provider === 'claude' ? 'Claude' : 'Codex'} saiu sem responder (código ${exitCode})`));
-      msg = { id: randomUUID(), role: 'assistant', text: motivo.slice(0, 400), t: Date.now(), provider, tools: acc.tools.length ? [...new Set(acc.tools)] : undefined, error: true };
+        : `${nome} não respondeu agora. Tente de novo.`;
+      if (!why) console.error('[agente] turno sem resposta:', provider, `código ${exitCode}:`, (acc.error ?? acc.softError ?? stderr.trim().split(/\r?\n/).slice(-2).join(' ')).slice(0, 400));
+      msg = { id: randomUUID(), role: 'assistant', text: motivo, t: Date.now(), provider, tools: acc.tools.length ? [...new Set(acc.tools)] : undefined, error: true };
       conv.messages.push(msg);
       save();
       emit({ type: 'error', conversation: convId, error: msg.text });
@@ -283,24 +301,26 @@ export function createAgent(deps: AgentDeps) {
     const acc = newAcc();
     const input: TurnInput = { provider, prompt, sessionId: conv.sessionId, system: systemPrompt(), mcpFile };
     const l = deps.launch ? deps.launch(input) : realLaunch(input, deps.dataDir, deps.port);
-    const turn: Turn = { pid: null, convId, killed: null };
+    const turn: Turn = { pid: null, convId, killed: null, live: false };
+    const killLive = () => { if (turn.live && turn.pid) kill(turn.pid); };
     current = turn;
 
     let stderr = '';
     let closed = false;
-    let exited = false;
     const done = (code: number | null) => {
       if (closed) return;
       closed = true;
       clearTimeout(timer);
-      if (!exited && turn.pid) killTree(turn.pid);   // o CLI demora a sair depois da resposta; não precisamos esperar
+      killLive();   // o CLI demora a sair depois da resposta; não precisamos esperar
+      turn.live = false;
       if (turn.pid) deps.selfPids.delete(turn.pid);
       void finish(turn, convId, provider, acc, turn.killed, code, stderr);
     };
 
-    const child = spawn(l.cmd, l.args, { cwd: deps.dataDir, env: l.env ?? process.env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    if (child.pid) { turn.pid = child.pid; deps.selfPids.add(child.pid); }
-    const timer = setTimeout(() => { turn.killed = 'timeout'; if (turn.pid) killTree(turn.pid); }, timeoutMs);
+    mkdirSync(cwd, { recursive: true });
+    const child = spawn(l.cmd, l.args, { cwd: l.cwd ?? cwd, env: l.env ?? process.env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    if (child.pid) { turn.pid = child.pid; turn.live = true; deps.selfPids.add(child.pid); }
+    const timer = setTimeout(() => { turn.killed = 'timeout'; killLive(); }, timeoutMs);
 
     createInterface({ input: child.stdout }).on('line', line => {
       for (const e of feed(provider, line, acc)) emit({ ...e, conversation: convId });
@@ -309,13 +329,13 @@ export function createAgent(deps: AgentDeps) {
     child.stderr.on('data', d => { if (stderr.length < 4000) stderr += String(d); });
     child.on('error', e => { acc.error = acc.error ?? `não consegui iniciar o ${provider === 'claude' ? 'Claude' : 'Codex'}: ${(e as NodeJS.ErrnoException).code ?? 'erro'}`; done(null); });
     // espera o stdout esvaziar um instante depois da saída (o readline pode ter linhas pendentes)
-    child.on('exit', code => { exited = true; setTimeout(() => done(code), 300); });
+    child.on('exit', code => { turn.live = false; setTimeout(() => done(code), 300); });
   }
 
   function stop(): void {
-    if (!current) return;
+    if (!current?.live) return;   // sem turno, ou o CLI já saiu (só falta gravar a resposta): nada a matar
     current.killed ??= 'stop';
-    if (current.pid) killTree(current.pid);
+    if (current.pid) kill(current.pid);
   }
 
   return {

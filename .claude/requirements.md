@@ -78,6 +78,10 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
 - **R25 Um turno por vez** — Teto de 120 s por turno; ao estourar, o servidor mata a árvore do processo do
   agente. O processo termina ao fim de cada turno.
 
+- **R28 Projeto de código não é lixo** (D20) — Nenhum arquivo dentro de uma pasta com `.git`,
+  `package.json`, `pyvenv.cfg`, `pyproject.toml`, `Cargo.toml` ou `go.mod` aparece na busca nem passa na
+  validação de uma sugestão de Lixeira.
+
 ## Avisos (v2, D15)
 - **R26** — Cada aviso tem um id estável por causa, nível, título, uma frase e o lugar onde se resolve.
   Avisos iguais não se repetem; quando a causa some, o aviso sai.

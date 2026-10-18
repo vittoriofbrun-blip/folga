@@ -1,6 +1,6 @@
 // Servidor MCP (stdio) do Folga: as ferramentas que o agente (Claude ou GPT) pode chamar.
 // JSON-RPC puro em stdout, uma mensagem por linha; logs só em stderr. As ferramentas são uma ponte para a
-// API local do Folga (127.0.0.1), com o token lido do disco. TODAS são só de leitura (R20): nada aqui apaga,
+// API local do Folga (127.0.0.1), com o agent-token lido do disco (vale só na varredura de arquivos; o ui-token, que aprova sugestões, o agente não lê). TODAS são só de leitura (R20): nada aqui apaga,
 // fecha ou muda coisa alguma do usuário; o agente propõe e o usuário aprova na tela.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -9,7 +9,7 @@ import { createInterface } from 'node:readline';
 const PORT = Number(process.env.FOLGA_PORT ?? 4780);
 const DATA_DIR = process.env.FOLGA_DATA_DIR ?? join(process.env.LOCALAPPDATA ?? '.', 'Folga');
 const BASE = `http://127.0.0.1:${PORT}`;
-const token = () => readFileSync(join(DATA_DIR, 'ui-token'), 'utf8').trim();
+const token = () => readFileSync(join(DATA_DIR, 'agent-token'), 'utf8').trim();
 
 type Json = Record<string, unknown>;
 // readOnly: o Codex só chama sem pedir aprovação as ferramentas marcadas como leitura (readOnlyHint)
@@ -60,7 +60,7 @@ export const TOOLS: Tool[] = [
         emUsoPorcento: s.memLoad,
         totalGB: +(s.totalPhys / GB).toFixed(1),
         disponivelGB: +(s.availPhys / GB).toFixed(1),
-        apps: s.apps.filter(a => a.state !== 'protected').map(a => ({ app: a.key, nome: a.name, estado: a.state, motivo: a.reason, MB: mb(a.privateWorkingSet), cpu: a.cpuPercent })),
+        apps: s.apps.filter(a => a.state !== 'protected').map(a => ({ app: texto(a.key, 64), nome: texto(a.name, 80), estado: a.state, motivo: a.reason, MB: mb(a.privateWorkingSet), cpu: a.cpuPercent })),
         protegidosMB: mb(s.apps.filter(a => a.state === 'protected').reduce((t, a) => t + a.privateWorkingSet, 0)),
       };
     },

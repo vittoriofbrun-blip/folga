@@ -23,21 +23,36 @@ const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 
 mkdirSync(DATA_DIR, { recursive: true });
 
-// ---------- token (R16) ----------
+/** Gravação atômica (ADR 0005): o leitor nunca vê o arquivo pela metade. */
+function writeAtomic(file: string, content: string) {
+  writeFileSync(file + '.tmp', content);
+  renameSync(file + '.tmp', file);
+}
+
+// ---------- tokens (R16) ----------
+// ui-token: da interface, autoriza tudo. Arquivo com menos de 32 caracteres (vazio, cortado, editado à mão) é regerado.
 const tokenFile = join(DATA_DIR, 'ui-token');
-if (!existsSync(tokenFile)) writeFileSync(tokenFile, randomBytes(32).toString('hex'));
-const TOKEN = readFileSync(tokenFile, 'utf8').trim();
+let TOKEN = existsSync(tokenFile) ? readFileSync(tokenFile, 'utf8').trim() : '';
+if (TOKEN.length < 32) { TOKEN = randomBytes(32).toString('hex'); writeAtomic(tokenFile, TOKEN); }
+// agent-token: só do processo MCP do agente, novo a cada início, aceito apenas na varredura de arquivos (que só lê).
+// O ui-token também aprova sugestões; o agente nunca o vê.
+const AGENT_TOKEN = randomBytes(32).toString('hex');
+writeAtomic(join(DATA_DIR, 'agent-token'), AGENT_TOKEN);
 
 // ---------- ajustes (ADR 0005: gravação atômica) ----------
 const settingsFile = join(DATA_DIR, 'settings.json');
+// o disco passa pela mesma validação do PUT (sampleSeconds entra no comando da sonda); inválido volta aos padrões
 function loadSettings(): Settings {
-  try { return { ...DEFAULT_SETTINGS, ...JSON.parse(readFileSync(settingsFile, 'utf8')) }; }
-  catch { return { ...DEFAULT_SETTINGS }; }
+  try {
+    const r = mergeSettings(DEFAULT_SETTINGS, JSON.parse(readFileSync(settingsFile, 'utf8')));
+    if (typeof r === 'string') throw new Error(r);
+    return r;
+  } catch {
+    if (existsSync(settingsFile)) console.error('settings.json inválido: usando os padrões');
+    return { ...DEFAULT_SETTINGS };
+  }
 }
-function saveSettings(s: Settings) {
-  writeFileSync(settingsFile + '.tmp', JSON.stringify(s, null, 2));
-  renameSync(settingsFile + '.tmp', settingsFile);
-}
+function saveSettings(s: Settings) { writeAtomic(settingsFile, JSON.stringify(s, null, 2)); }
 const RANGES: Partial<Record<keyof Settings, [number, number]>> = {
   idleMinutes: [5, 600], busyCpuPercent: [1, 100], sampleSeconds: [1, 60],
   autoCareThreshold: [50, 99], autoCareCooldownMinutes: [1, 240],
@@ -51,7 +66,7 @@ export function mergeSettings(current: Settings, patch: unknown): Settings | str
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return 'corpo inválido';
   const next: Settings = { ...current };
   for (const [k, v] of Object.entries(patch)) {
-    if (!(k in DEFAULT_SETTINGS)) return `campo desconhecido: ${k}`;
+    if (!Object.hasOwn(DEFAULT_SETTINGS, k)) return `campo desconhecido: ${k}`;
     const key = k as keyof Settings;
     const range = RANGES[key];
     if (range) {
@@ -130,7 +145,7 @@ function onSnapshot(snap: ProbeSnapshot, fresh = false) {
 
 const probeArgs = (): [string, string[]] => {
   const fake = process.env.FOLGA_FAKE_PROBE;   // testes: script node que imita a sonda
-  const interval = String(settings.sampleSeconds);
+  const interval = String(Math.round(Number(settings.sampleSeconds)) || 2);   // vai no -Command do PowerShell: só número
   if (fake) return [process.execPath, [fake, '--interval', interval]];
   // .exe compilado: só com FOLGA_PROBE_EXE=1, porque o antivírus apaga exe sem assinatura (ADR 0002)
   if (process.env.FOLGA_PROBE_EXE === '1') return [join(ROOT, 'probe', 'bin', 'probe.exe'), ['--interval', interval]];
@@ -165,7 +180,7 @@ const warnings = createWarnings({
   getState: () => state, getSettings: () => settings, probeAlive: () => probeUp,
   lastAutoCareRun: () => ac.lastRunAt, emit,
 });
-const files = createFiles({ getSettings: () => settings });
+const files = createFiles({ getSettings: () => settings, roots: process.env.FOLGA_FILES_ROOTS?.split(';') });   // testes: pastas no lugar das do usuário
 const suggestions = createSuggestions({
   dataDir: DATA_DIR, files, getState: () => state, emit,
   release: async keys => { const r = await releaser.release(keys, 'manual'); if (lastSnap) onSnapshot(lastSnap); return r; },
@@ -180,6 +195,14 @@ warnings.start();
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.woff2': 'font/woff2',
+};
+
+// M1: nenhuma página nossa pode ser colocada num iframe de outro site (clickjacking). style-src com 'unsafe-inline'
+// porque o React usa o atributo style; os scripts do Vite são módulos em /assets, então script-src fica 'self'.
+const SECURITY_HEADERS: Record<string, string> = {
+  'x-frame-options': 'DENY',
+  'x-content-type-options': 'nosniff',
+  'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 };
 
 function send(res: ServerResponse, status: number, body: unknown) {
@@ -199,7 +222,9 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 }
 
 async function serveStatic(pathname: string, res: ServerResponse) {
-  const rel = normalize(decodeURIComponent(pathname)).replace(/^([\\/])+/, '');
+  let rel: string;
+  try { rel = normalize(decodeURIComponent(pathname)).replace(/^([\\/])+/, ''); }   // %, %E0%A4%A… lançam URIError
+  catch { return send(res, 400, { erro: 'endereço inválido' }); }
   let file = join(DIST, rel);
   if (!file.startsWith(DIST + sep) && file !== DIST) return send(res, 404, { erro: 'não encontrado' });
   if (!extname(file) || !existsSync(file)) file = join(DIST, 'index.html');   // SPA
@@ -213,6 +238,7 @@ async function serveStatic(pathname: string, res: ServerResponse) {
 }
 
 const server = createServer(async (req, res) => {
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);   // vale para send(), arquivos e SSE
   try {
     // R15: só 127.0.0.1/localhost (barra DNS rebinding)
     if (!ALLOWED_HOSTS.has(req.headers.host ?? '')) return send(res, 403, { erro: 'host não permitido' });
@@ -220,12 +246,17 @@ const server = createServer(async (req, res) => {
     const path = url.pathname;
     const method = req.method ?? 'GET';
 
-    if (!path.startsWith('/api/')) return method === 'GET' ? serveStatic(path, res) : send(res, 405, { erro: 'método' });
+    if (!path.startsWith('/api/')) return method === 'GET' ? await serveStatic(path, res) : send(res, 405, { erro: 'método' });   // await: erro assíncrono cai no catch daqui
 
-    // R16: escrita só com JSON e token
+    // outro site disparando a requisição (ex.: uma imagem de outro site apontando para uma GET cara): o navegador avisa em Sec-Fetch-Site
+    if (req.headers['sec-fetch-site'] === 'cross-site') return send(res, 403, { erro: 'origem não permitida' });
+
+    // R16: escrita só com JSON e token. O agent-token vale só na varredura de arquivos.
     if (method === 'POST' || method === 'PUT') {
       if (!(req.headers['content-type'] ?? '').startsWith('application/json')) return send(res, 415, { erro: 'use application/json' });
-      if (req.headers['x-folga-token'] !== TOKEN) return send(res, 403, { erro: 'token inválido' });
+      const given = req.headers['x-folga-token'];
+      const agentScan = method === 'POST' && path === '/api/files/scan' && given === AGENT_TOKEN;
+      if (given !== TOKEN && !agentScan) return send(res, 403, { erro: 'token inválido' });
     }
 
     if (method === 'GET' && path === '/api/token') return send(res, 200, { token: TOKEN });   // sem CORS: outro site não lê
@@ -315,6 +346,9 @@ const server = createServer(async (req, res) => {
     else res.end();
   }
 });
+
+// rede de segurança: uma rejeição esquecida não derruba o servidor (Node 24 encerraria o processo); só o nome do erro
+process.on('unhandledRejection', e => console.error('rejeição não tratada:', e instanceof Error ? e.name : typeof e));
 
 server.on('error', (e: NodeJS.ErrnoException) => {
   console.error(e.code === 'EADDRINUSE' ? `porta ${PORT} ocupada` : 'erro no servidor');

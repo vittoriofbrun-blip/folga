@@ -6,7 +6,9 @@ import { approveSuggestion, ignoreSuggestion } from './api';
 import { MB, NB, nf0, plural, size } from './format';
 import './styles/sugestoes.css';
 
-const MAX_ITEMS = 8;
+// B3: bidi (U+202A–202E, U+2066–2069) esconde o fim do nome de um arquivo; sai de tudo que o cartão mostra
+const BIDI = /[\u202a-\u202e\u2066-\u2069]/g;
+const clean = (s: string) => s.replace(BIDI, '');
 
 /** Como `size`, mas sem "0 MB" para arquivos pequenos. */
 export const sizeFine = (b: number) =>
@@ -41,27 +43,23 @@ export function SuggestionCard({ s, compact = false }: { s: Suggestion; compact?
   }
   const approve = () => (cur.kind === 'limpeza_rapida' && !confirm ? setConfirm(true) : decide('aprovar'));
 
-  const shown = cur.items.slice(0, MAX_ITEMS);
-  const more = cur.items.length - shown.length;
-
   return (
     <article className="sug-card" data-compact={compact || undefined} data-status={cur.status} aria-labelledby={titleId}>
       <header className="sug-head">
         <span className="sug-origin" data-source={cur.source}>{cur.source === 'agente' ? 'do assistente' : 'do Folga'}</span>
-        <h3 id={titleId} className="sug-title">{cur.title}</h3>
+        <h3 id={titleId} className="sug-title">{clean(cur.title)}</h3>
       </header>
-      {cur.reason && <p className="sug-reason">{cur.reason}</p>}
+      {cur.reason && <p className="sug-reason">{clean(cur.reason)}</p>}
 
       {!compact && (
         <ul className="sug-items" aria-label="O que vai acontecer">
-          {shown.map(i => (
-            <li key={i.id} className="sug-item">
-              <span className="sug-item-name">{i.label}</span>
+          {cur.items.map(i => (
+            <li key={i.id} className="sug-item" title={clean(cur.kind === 'lixeira' ? i.id : i.detail)}>
+              <span className="sug-item-name">{clean(i.label)}</span>
               <span className="sug-item-size">{sizeFine(i.bytes)}</span>
-              <span className="sug-item-detail" title={cur.kind === 'lixeira' ? i.id : i.detail}>{i.detail}</span>
+              <span className="sug-item-detail">{clean(i.detail)}</span>
             </li>
           ))}
-          {more > 0 && <li className="sug-more">e mais {plural(more, 'item', 'itens')}</li>}
         </ul>
       )}
 
