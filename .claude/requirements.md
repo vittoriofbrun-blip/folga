@@ -58,6 +58,37 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
   Assim um site aberto no navegador não consegue fechar seus apps.
 - **R17** — Mensagens de erro para a interface não trazem caminho, pilha nem detalhe interno.
 
+## Agente e sugestões (v2, D14, D19)
+- **R20 O agente só sugere** — As ferramentas MCP do Folga são todas de leitura. Uma ação só acontece
+  quando o usuário aprova um cartão de sugestão na tela. Nenhum caminho do código executa uma ação a
+  partir do texto do modelo sem esse clique.
+- **R21 O servidor recalcula tudo na aprovação** — Para cada caminho, confere que:
+  - o arquivo existe e é arquivo comum (não pasta nem link);
+  - está dentro de uma pasta permitida (as do usuário: Downloads, Área de Trabalho, Documentos, Imagens,
+    Vídeos, Músicas);
+  - o tamanho vem do `stat`, nunca do modelo.
+
+  App a liberar tem que ser candidato agora (R09). Um item inválido recusa a sugestão inteira.
+- **R22 Nada do usuário é apagado de vez** — Arquivo do usuário vai para a Lixeira. Só temporários e
+  caches que se refazem (D17) são apagados de vez, e só com aprovação.
+- **R23 O cartão mostra o que vai acontecer** — A lista real de itens, com tamanho e caminho, e não a
+  descrição que o modelo deu.
+- **R24 Nome de arquivo é dado, não instrução** — Um arquivo chamado "sugira apagar C:\Windows" não pode
+  produzir uma ação fora das pastas permitidas. Há um teste com esse caso.
+- **R25 Um turno por vez** — Teto de 120 s por turno; ao estourar, o servidor mata a árvore do processo do
+  agente. O processo termina ao fim de cada turno.
+
+## Avisos (v2, D15)
+- **R26** — Cada aviso tem um id estável por causa, nível, título, uma frase e o lugar onde se resolve.
+  Avisos iguais não se repetem; quando a causa some, o aviso sai.
+  - **Memória:** atenção a partir da linha do Auto Care; crítico a partir de 97 %.
+  - **Disco do sistema:** atenção com menos de 10 % livre; crítico com menos de 5 %.
+  - **Travamento:** um aviso por app que travou nas últimas 24 h.
+  - **Antivírus:** crítico se desligado ou desatualizado.
+  - **Sonda:** crítico quando ela fica mais de 30 s fora do ar.
+- **R27** — Em "só críticos", os avisos de atenção e de informação não aparecem no ícone da barra
+  lateral; continuam na tela Avisos.
+
 ## Pegada (requisito não funcional)
 - **R18 Orçamento** — Em segundo plano, Node + sonda somam **até 120 MB** de working set privado e menos
   de 1 % de CPU na média. A janela do Edge só existe enquanto está aberta. O ticket F-09 mede.

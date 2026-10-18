@@ -34,7 +34,56 @@ Fora da v1: disco, otimizar, organizar, desinstalar, MCP para agentes, partícul
 - **D08** — CSS com tokens próprios em vez de Tailwind: são 3 telas. Adicionar Tailwind se passar de ~5 telas.
 - **D09** — Ícones de app viram avatares com a inicial (o próprio guia do Mint faz isso). Ícone real depois.
 
+## Decisões da v2 (2026-10-18, pedido do Antônio: McAfee, agente no chat, visual do Mint)
+- **D11 (P01)** — O nome é **Folga**. Antônio delegou a escolha: o nome é curto, em português, diz o que o
+  app dá ("memória com folga") e não lembra o Mint.
+- **D12 (P02, supersede D08 e a regra "sem o verde-limão")** — Visual do Mint por pedido explícito:
+  - paleta `#080b08`, `#0e130f`, `#2c322d`, `#edebe5`, `#979d97`, destaque `#bdfe3a`;
+  - DM Sans embutida (sem internet) e Geist Mono;
+  - barra lateral com ícone e rótulo, títulos grandes, pílulas;
+  - partículas na tela Memória (o F-12 entra).
+
+  Continua proibido usar o nome, o logo e a imagem da Terra do Mint.
+- **D13 (P03 a P07)** — Padrões ajustáveis em Ajustes:
+  - não encerrar app de bandeja (P03);
+  - não abrir com o Windows (P04);
+  - Auto Care em 92 % (P05, confirmado pelo Antônio);
+  - parado depois de 30 min (P06).
+
+  A P07 é respondida pela D16: a v2 traz arquivos parados e limpeza.
+- **D14** — Agente no chat, Claude ou GPT, pelos CLIs já logados nas assinaturas; sem chave de API. Ver
+  ADR 0006. Um turno por processo; as ferramentas vêm de um único servidor MCP, todas só de leitura.
+- **D15** — Avisos com três níveis (crítico, atenção, informação) e o ajuste "todos" ou "só críticos", à
+  moda do McAfee. Fontes:
+  - memória e disco;
+  - apps que travaram (log de Aplicativo do Windows, eventos 1000 e 1002);
+  - status do antivírus (Central de Segurança);
+  - Auto Care;
+  - sonda fora do ar.
+- **D16** — "Arquivos que não abro mais":
+  - **Sinal de uso:** a hora do último acesso do NTFS, que está habilitada nesta máquina
+    (`DisableLastAccess = 2`), reforçada pela pasta Recentes e, por último, pela data de modificação. A
+    tela diz qual sinal valeu.
+  - **Onde procura:** só nas pastas do usuário (Downloads, Área de Trabalho, Documentos, Imagens, Vídeos
+    e Músicas).
+  - **Ação:** mandar para a Lixeira, que dá para desfazer.
+- **D17** — Limpeza rápida por categoria, inspirada no removedor de rastreador do McAfee:
+  - temporários do usuário com mais de 7 dias e cache dos navegadores fechados; esses dados se refazem
+    sozinhos e são apagados de vez, só com aprovação;
+  - cookies e histórico ficam de fora, para não deslogar você;
+  - a lixeira só aparece como informação, porque esvaziá-la é com o Windows.
+- **D18** — Início no estilo do painel do Mint e do Relatório do McAfee:
+  - anel de memória e anel de disco;
+  - nota de saúde de 0 a 100 com palavra de status;
+  - os problemas, cada um com o lugar onde se resolve;
+  - os avisos e as sugestões pendentes.
+- **D19** — O agente nunca executa. Ele escreve sugestões num bloco `folga-sugestao`, e o servidor valida
+  e mostra cada uma como cartão; só a aprovação na tela executa (R20 a R24). Uma tentativa de dar
+  aprovação automática de ferramentas ao agente foi barrada pelo classificador de segurança, e este
+  desenho dispensa isso.
+
 ## Perguntas abertas (decisão do Antônio)
+Todas as perguntas abaixo foram decididas em 2026-10-18 (D11 a D13); os valores seguem ajustáveis em Ajustes.
 - **P01** — Nome do app. "Folga" é provisório. Não pode ser "Mint".
 - **P02** — Paleta: fundo escuro como o Mint, mas a cor de destaque não pode ser o verde-limão `#bdfe3a`.
   Proposta provisória em `docs/referencias-ui/README.md`.

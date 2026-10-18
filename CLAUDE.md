@@ -24,7 +24,8 @@ A sonda roda pelo `Add-Type` do PowerShell (D10); `FOLGA_PROBE_EXE=1` usa o `.ex
 - "Liberados X GB" é o disponível depois menos o de antes, nunca a soma dos apps (R08).
 - Servidor só em 127.0.0.1, com token em todo POST/PUT (R15–R17).
 - Pegada em segundo plano ≤ 120 MB (R18). Dependência nova só com motivo escrito.
-- Não usar o nome, o logo, a imagem da Terra nem o verde-limão do Mint.
+- Visual: cores, layout e animações do Mint, por pedido do Antônio (D12). Nunca o nome, o logo nem a imagem da Terra do Mint.
+- O agente só sugere; executar é sempre um clique do usuário, com o servidor revalidando tudo (R20–R25, ADR 0006).
 - Método ponytail: menor diff que funciona, sem abstração sem uso; lógica com regra deixa um teste `node:assert`.
 
 ## Armadilhas de Windows

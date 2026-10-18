@@ -1,19 +1,23 @@
-/* Paleta provisória (P02, docs/referencias-ui/README.md). Não usar a cor de destaque do Mint. */
+/* Tokens do Mint, por pedido do Antônio (D12). Nunca o nome, o logo nem a imagem da Terra do Mint. */
 :root {
-  --bg: #0a0c10;
-  --cell: #11151b;
-  --line: #262c35;
-  --fg: #eceae4;
-  --muted: #979ca6;
-  --accent: #5eead4;   /* destaque e "Liberados" */
-  --idle: #f5a524;     /* Parados */
-  --in-use: #6aa8ff;   /* Em uso */
-  --system: #6b7280;   /* Sistema e protegidos */
-  --danger: #ff9b8f;
-  --sans: "Geist", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  --mono: "Geist Mono", ui-monospace, Consolas, monospace;
+  --bg: #080b08;
+  --cell: #0e130f;
+  --stage: #0b110b;
+  --line: #2c322d;
+  --fg: #edebe5;
+  --muted: #979d97;
+  --accent: #bdfe3a;   /* destaque, "Liberados", foco */
+  --idle: #f0a33c;     /* Parados; aviso de atenção */
+  --in-use: #7aa2ff;   /* Em uso; aviso de informação */
+  --system: #6f766f;   /* Sistema e protegidos */
+  --danger: #ffb4a9;   /* aviso crítico, erro */
+  --tint: #edebe50f;
+  --tint-line: #edebe51a;
+  --sans: "DM Sans Variable", "DM Sans", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --mono: "Geist Mono Variable", "Geist Mono", ui-monospace, Consolas, monospace;
   --radius-pill: 999px;
-  --radius: 12px;
+  --radius: 14px;
+  --shadow: 0 1px 0 #ffffff0f, 0 40px 80px -28px #000000d9, 0 18px 36px -18px #0009;
   color-scheme: dark;
 }
 

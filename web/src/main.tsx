@@ -1,5 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import '@fontsource-variable/dm-sans';
+import '@fontsource-variable/geist-mono';
 import './tokens.css';
 import './app.css';
 import { App } from './App';

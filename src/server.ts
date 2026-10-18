@@ -9,7 +9,11 @@ import { classify, emptyHistory, type ClassifyHistory } from './classify.ts';
 import { startProbe } from './probe.ts';
 import { createReleaser } from './release.ts';
 import { openWindow, setStartup, startupInstalled } from './window.ts';
-import { DEFAULT_SETTINGS, type MemoryState, type ProbeSnapshot, type Settings } from './types.ts';
+import { createWarnings } from './warnings.ts';
+import { createFiles } from './files.ts';
+import { createSuggestions } from './suggestions.ts';
+import { createAgent } from './agent.ts';
+import { DEFAULT_SETTINGS, type AgentProvider, type Emit, type MemoryState, type ProbeSnapshot, type Settings, type SuggestionDraft } from './types.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const PORT = Number(process.env.FOLGA_PORT ?? 4780);
@@ -37,6 +41,10 @@ function saveSettings(s: Settings) {
 const RANGES: Partial<Record<keyof Settings, [number, number]>> = {
   idleMinutes: [5, 600], busyCpuPercent: [1, 100], sampleSeconds: [1, 60],
   autoCareThreshold: [50, 99], autoCareCooldownMinutes: [1, 240],
+  staleDays: [7, 3650], staleMinMB: [1, 100_000],
+};
+const ENUMS: Partial<Record<keyof Settings, readonly string[]>> = {
+  warningsLevel: ['todos', 'criticos'], agentProvider: ['claude', 'gpt'],
 };
 /** Valida um PUT parcial; devolve o ajuste completo ou uma mensagem de erro. */
 export function mergeSettings(current: Settings, patch: unknown): Settings | string {
@@ -52,6 +60,9 @@ export function mergeSettings(current: Settings, patch: unknown): Settings | str
     } else if (key === 'autoCareEnabled') {
       if (typeof v !== 'boolean') return `${k} deve ser verdadeiro ou falso`;
       next.autoCareEnabled = v;
+    } else if (ENUMS[key]) {
+      if (typeof v !== 'string' || !ENUMS[key]!.includes(v)) return `${k} deve ser um de: ${ENUMS[key]!.join(', ')}`;
+      (next[key] as string) = v;
     } else {
       if (!Array.isArray(v) || v.length > 200 || !v.every(x => typeof x === 'string' && x.length > 0 && x.length < 128)) return `${k} deve ser uma lista de nomes`;
       (next[key] as string[]) = v.map(x => x.trim().toLowerCase().replace(/\.exe$/, ''));
@@ -129,7 +140,8 @@ const probeArgs = (): [string, string[]] => {
   return [ps, ['-NoProfile', '-NonInteractive', '-Command', `Add-Type -Path '${cs}'; [Probe]::Main(@('--interval','${interval}'))`]];
 };
 const [probeCmd, probeArgv] = probeArgs();
-const probe = startProbe(probeCmd, probeArgv, s => onSnapshot(s, true));
+let probeUp = false;
+const probe = startProbe(probeCmd, probeArgv, s => onSnapshot(s, true), alive => { probeUp = alive; });
 
 const releaser = createReleaser({
   dataDir: DATA_DIR,
@@ -143,6 +155,26 @@ const releaser = createReleaser({
     snapshotListeners.push(fn);
   }),
 });
+
+// ---------- v2: avisos, arquivos, sugestões, agente (cada módulo recebe só o que usa) ----------
+const emit: Emit = (event, data) => {
+  const line = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of sse) res.write(line);
+};
+const warnings = createWarnings({
+  getState: () => state, getSettings: () => settings, probeAlive: () => probeUp,
+  lastAutoCareRun: () => ac.lastRunAt, emit,
+});
+const files = createFiles({ getSettings: () => settings });
+const suggestions = createSuggestions({
+  dataDir: DATA_DIR, files, getState: () => state, emit,
+  release: async keys => { const r = await releaser.release(keys, 'manual'); if (lastSnap) onSnapshot(lastSnap); return r; },
+});
+const agent = createAgent({
+  dataDir: DATA_DIR, port: PORT, emit, selfPids: extraSelfPids,
+  addSuggestion: draft => suggestions.add(draft, 'agente'),
+});
+warnings.start();
 
 // ---------- HTTP ----------
 const MIME: Record<string, string> = {
@@ -239,6 +271,43 @@ const server = createServer(async (req, res) => {
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100) || 100, 1), 1000);
       return send(res, 200, await releaser.readLog(limit));
     }
+
+    // ----- v2: avisos (F-15) -----
+    if (method === 'GET' && path === '/api/warnings') return send(res, 200, warnings.list());
+    if (method === 'GET' && path === '/api/disk') return send(res, 200, await warnings.disk());
+    if (method === 'GET' && path === '/api/startup-apps') return send(res, 200, await warnings.startupApps());
+
+    // ----- v2: arquivos e sugestões (F-17) -----
+    if (method === 'GET' && path === '/api/files/stale') return send(res, 200, files.last());
+    if (method === 'POST' && path === '/api/files/scan') {
+      const body = (await readJson(req) ?? {}) as { olderThanDays?: unknown; minMB?: unknown };
+      const num = (v: unknown, lo: number, hi: number) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi ? v : undefined;
+      return send(res, 200, await files.scan({ olderThanDays: num(body.olderThanDays, 7, 3650), minMB: num(body.minMB, 1, 100_000) }));
+    }
+    if (method === 'GET' && path === '/api/quickclean') return send(res, 200, await files.quickCleanPreview());
+    if (method === 'GET' && path === '/api/suggestions') return send(res, 200, suggestions.list());
+    if (method === 'POST' && path === '/api/suggestions') {
+      const r = await suggestions.add(await readJson(req) as SuggestionDraft, 'folga');
+      return 'erro' in r ? send(res, r.status, { erro: r.erro }) : send(res, 200, r);
+    }
+    const sug = path.match(/^\/api\/suggestions\/([\w-]{1,64})\/(approve|ignore)$/);
+    if (method === 'POST' && sug) {
+      const r = sug[2] === 'approve' ? await suggestions.approve(sug[1]!) : suggestions.ignore(sug[1]!);
+      return 'erro' in r ? send(res, r.status, { erro: r.erro }) : send(res, 200, r);
+    }
+
+    // ----- v2: assistente (F-18) -----
+    if (method === 'GET' && path === '/api/agent') return send(res, 200, agent.conversation());
+    if (method === 'POST' && path === '/api/agent/message') {
+      const body = await readJson(req) as { provider?: unknown; text?: unknown };
+      if (body?.provider !== 'claude' && body?.provider !== 'gpt') return send(res, 400, { erro: 'provider deve ser claude ou gpt' });
+      if (typeof body.text !== 'string' || !body.text.trim() || body.text.length > 4000) return send(res, 400, { erro: 'mensagem vazia ou longa demais' });
+      const r = await agent.send(body.provider as AgentProvider, body.text);
+      return 'erro' in r ? send(res, r.status, { erro: r.erro }) : send(res, 202, r);
+    }
+    if (method === 'POST' && path === '/api/agent/reset') return send(res, 200, agent.reset());
+    if (method === 'POST' && path === '/api/agent/stop') { agent.stop(); return send(res, 200, { ok: true }); }
+
     return send(res, 404, { erro: 'rota' });
   } catch {
     // R17: sem caminho, pilha ou detalhe interno
@@ -266,6 +335,8 @@ server.listen(PORT, '127.0.0.1', () => {
 });
 
 const shutdown = () => {
+  warnings.stop();
+  agent.stop();
   probe.stop();
   for (const res of sse) res.end();
   server.close();
