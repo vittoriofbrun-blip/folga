@@ -56,7 +56,13 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
 - **R16** — Todo POST/PUT exige `Content-Type: application/json` (415 se não) e o cabeçalho `X-Folga-Token`
   com o conteúdo de `%LOCALAPPDATA%\Folga\ui-token` (32 bytes hex, criado na primeira execução). Sem ele, 403.
   Assim um site aberto no navegador não consegue fechar seus apps.
-- **R17** — Mensagens de erro para a interface não trazem caminho, pilha nem detalhe interno.
+- **R16b Token do agente** (revisão de segurança, 2026-10-18) — O servidor cria a cada início um segundo
+  token, `agent-token`, aceito só em `POST /api/files/scan`. É o único que o servidor MCP do agente lê, e
+  ele nunca serve para aprovar, liberar ou mudar ajustes.
+- **R16c** — Toda resposta leva `X-Frame-Options: DENY`, CSP com `frame-ancestors 'none'` e `nosniff`.
+  Requisição a `/api/*` com `Sec-Fetch-Site: cross-site` recebe 403.
+- **R17** — Mensagens de erro para a interface não trazem caminho, pilha nem detalhe interno. Isso vale
+  também para o chat do assistente: o detalhe do CLI vai só para o console.
 
 ## Agente e sugestões (v2, D14, D19)
 - **R20 O agente só sugere** — As ferramentas MCP do Folga são todas de leitura. Uma ação só acontece

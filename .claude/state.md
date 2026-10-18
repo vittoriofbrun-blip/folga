@@ -1,5 +1,36 @@
 # Estado (mais recente no topo)
 
+## 2026-10-18 (tarde) — v2: McAfee, assistente Claude/GPT, avisos, arquivos e visual do Mint
+- Decisões D11 a D20 (nome Folga, visual do Mint, P03 a P07 como padrões, agente, avisos, arquivos parados,
+  limpeza rápida, Início, só sugere, projeto de código fora). Regras R20 a R28. ADR 0006 do agente.
+- Engenharia reversa do McAfee:
+  - relatório em `docs/engenharia-reversa-mcafee.md`;
+  - 18 capturas em `docs/referencias-ui/mcafee/`;
+  - a quarentena confirmou que o McAfee apagava o `probe.exe`.
+- Construído pelos tickets F-14, F-15, F-17 e F-18, em quatro trilhas paralelas, e depois corrigido pela
+  revisão de segurança, sem nenhum achado crítico:
+  - **A1:** o crash por URI malformada;
+  - **M1 a M6:** clickjacking, PID reaproveitado, temporários, Lixeira conferida, cartão restrito à busca e
+    com validade, token do agente e pasta de trabalho do agente;
+  - **B1 a B7:** os itens baixos.
+- Verificado:
+  - 11 suítes verdes, typecheck e build.
+  - Claude e GPT respondendo pela tela real com dados reais. A troca de provedor abre conversa nova, e a
+    conversa sobrevive ao reinício do servidor.
+  - Ponta a ponta: o Claude procurou, sugeriu mandar um arquivo de teste para a Lixeira e eu aprovei o
+    cartão. O resultado foi "Feita · 1 arquivo na Lixeira", e o arquivo está na Lixeira com a origem
+    Downloads.
+  - Busca real só de leitura: 1 arquivo depois da D20; antes eram 59, quase todos de um venv.
+  - CSP sem violações.
+  - Pegada do servidor mais sonda: 28 a 74 MB.
+  - Capturas em `docs/telas-v2/`.
+- Não verificado:
+  - Chrome do Antônio com várias janelas e app de bandeja dele (F-13);
+  - reinício do Windows com o atalho (F-08);
+  - o diálogo do Windows para arquivo grande demais para a Lixeira (M4).
+- Fica na Lixeira do Antônio: `folga-teste-lixeira.bin` (2 MB, arquivo de teste do QA), mais 2 arquivos do
+  teste real da Lixeira do F-17.
+
 ## 2026-10-18 — v1 construída (F-00 a F-11)
 - Feito e commitado:
   - sonda C# rodando pelo `Add-Type` do PowerShell (D10: o antivírus apaga o `.exe`);

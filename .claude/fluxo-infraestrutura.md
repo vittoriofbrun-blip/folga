@@ -44,7 +44,13 @@ src/autocare.ts                F-06  gatilho, freio (R10–R13)
 src/tests/*.test.ts            um por módulo com lógica
 web/index.html  web/src/{main,App,Memory,AutoCare,Log}.tsx  web/src/tokens.css
 ```
-Dados em `%LOCALAPPDATA%\Folga\`: `settings.json`, `log.jsonl`, `ui-token`, `edge-profile\`.
+Dados em `%LOCALAPPDATA%\Folga\`:
+- `settings.json`, `log.jsonl`, `ui-token` e `edge-profile\`;
+- desde a v2: `agent-token` (só para a busca, lido pelo MCP), `suggestions.json`, `agent.json`,
+  `agent-mcp.json` e `agent-cwd\` (pasta vazia, diretório de trabalho dos CLIs).
+
+v2: servidor MCP do agente em `src/mcp.ts`, assistente em `src/agent.ts` (ADR 0006), avisos em
+`src/warnings.ts`, arquivos e limpeza em `src/files.ts`, sugestões em `src/suggestions.ts`.
 
 ## Contrato (`src/types.ts`, F-00)
 Desde o F-00 a fonte é o `src/types.ts`, que também exporta `DEFAULT_SETTINGS`, `SYSTEM_PROCESSES` e
