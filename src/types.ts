@@ -55,8 +55,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoCareEnabled: false,
   autoCareThreshold: 92,
   autoCareCooldownMinutes: 10,
-  // terminais e editores rodam agentes e servidores; fechar mata o que está dentro (R05)
-  neverClose: ['windowsterminal', 'cmd', 'powershell', 'pwsh', 'code', 'cursor'],
+  // terminais, editores e apps de agente rodam agentes e servidores; fechar mata o que está dentro (R05)
+  neverClose: ['windowsterminal', 'cmd', 'powershell', 'pwsh', 'code', 'cursor', 'claude', 'antigravity ide', 'codex'],
   mayForceQuit: [],
 };
 

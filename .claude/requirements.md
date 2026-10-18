@@ -20,8 +20,9 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
   - `explorer`, `dwm`, `csrss`, `winlogon`, `ShellExperienceHost`, `StartMenuExperienceHost`,
     `SearchHost`, `TextInputHost`, `ApplicationFrameHost`, `LockApp`;
   - a árvore de processos do próprio app (Node, sonda e a janela do Edge com perfil próprio);
-  - a lista **"nunca fechar"** do usuário. O padrão traz terminais e editores, porque fechar um deles mata
-    agentes e servidores rodando dentro: `WindowsTerminal`, `cmd`, `powershell`, `pwsh`, `Code`, `Cursor`.
+  - a lista **"nunca fechar"** do usuário. O padrão traz terminais, editores e apps de agente, porque fechar
+    um deles mata agentes e servidores rodando dentro: `WindowsTerminal`, `cmd`, `powershell`, `pwsh`, `Code`,
+    `Cursor`, `Claude` (Claude Code), `Antigravity IDE`, `Codex`.
 - **R06 Grupos** — Na tela: Parados (marcados), Em uso (primeiro plano agora, ocupado ou usado há menos
   de `idleMinutes`), Sistema e protegidos (só o total e a contagem), Liberados (fechados nesta sessão).
 

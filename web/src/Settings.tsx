@@ -176,7 +176,7 @@ export function Settings({ state }: { state: MemoryState | null }) {
         </div>
 
         <AppList title="Nunca fechar" items={form.neverClose} apps={apps} onChange={(next) => edit({ neverClose: next })}
-          warning="Terminais e editores vêm aqui por padrão: fechar um deles derruba os agentes e servidores que rodam dentro." />
+          warning="Terminais, editores e apps de agente (Claude, Codex) vêm aqui por padrão: fechar um deles derruba os agentes e servidores que rodam dentro." />
         <AppList title="Pode encerrar de vez" danger items={form.mayForceQuit} apps={apps} onChange={(next) => edit({ mayForceQuit: next })}
           warning="Só vale para app que foi para a bandeja. Encerrar de vez pode perder trabalho não salvo." />
 
