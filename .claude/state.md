@@ -30,6 +30,12 @@
   - o diálogo do Windows para arquivo grande demais para a Lixeira (M4).
 - Fica na Lixeira do Antônio: `folga-teste-lixeira.bin` (2 MB, arquivo de teste do QA), mais 2 arquivos do
   teste real da Lixeira do F-17.
+- 13:41: o servidor real voltou ao ar com a v2, escondido (`launch.mjs --no-window`).
+  - Ajustes salvos intactos: Auto Care ligado em 92 % e o "nunca fechar" com Claude, Antigravity IDE e Codex.
+    Os campos novos entraram com os padrões.
+  - A pasta Inicializar não tem o atalho do Folga. Depois de reiniciar o Windows, o Auto Care só volta com
+    `npm run app` ou ligando "Abrir com o Windows" em Ajustes.
+- Cartões F-10, F-12, F-14, F-15, F-17 e F-18 em Revisar, para o Antônio fechar.
 
 ## 2026-10-18 — v1 construída (F-00 a F-11)
 - Feito e commitado:

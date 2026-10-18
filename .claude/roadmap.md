@@ -31,7 +31,9 @@ o resto muda. Por isso ele é o primeiro depois do esqueleto.
 | **F-15** | Avisos: monitor (memória, disco, travamentos, antivírus, Auto Care, sonda) e tela | `src/warnings.ts`, `web/src/Avisos.tsx` | F-14, F-17, F-18 |
 | **F-17** | Arquivos parados, limpeza rápida, sugestões com aprovação (R20 a R24) | `src/files.ts`, `src/suggestions.ts`, `web/src/Arquivos.tsx`, `SuggestionCard.tsx` | F-14, F-15, F-18 |
 | **F-18** | Assistente Claude/GPT (ADR 0006), ferramentas MCP de leitura, prompt de sistema | `src/agent.ts`, `src/agent-prompt.md`, `src/mcp.ts`, `web/src/Assistente.tsx` | F-14, F-15, F-17 |
-| F-19 | Integração, QA ao vivo com os dois provedores e pegada | o lead | depois dos quatro |
+| F-19 | Integração, QA ao vivo com os dois provedores e pegada. Feito em 2026-10-18 (ver `state.md`), sem cartão no board | o lead | depois dos quatro |
+
+O número F-16 ficou sem uso; não há ticket faltando.
 
 O contrato (`src/types.ts`, as rotas em `src/server.ts` e os esboços) foi escrito pelo lead antes das trilhas
 começarem; as trilhas não mexem nele.
