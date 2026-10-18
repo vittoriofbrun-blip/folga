@@ -1,0 +1,231 @@
+// Servidor local do Folga: sonda → classificador → HTTP/SSE (ADR 0001, R15–R17).
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { extname, join, normalize, sep } from 'node:path';
+import { classify, emptyHistory, type ClassifyHistory } from './classify.ts';
+import { startProbe } from './probe.ts';
+import { createReleaser } from './release.ts';
+import { DEFAULT_SETTINGS, type MemoryState, type ProbeSnapshot, type Settings } from './types.ts';
+
+const ROOT = join(import.meta.dirname, '..');
+const PORT = Number(process.env.FOLGA_PORT ?? 4780);
+const DATA_DIR = process.env.FOLGA_DATA_DIR ?? join(process.env.LOCALAPPDATA ?? ROOT, 'Folga');
+const DIST = join(ROOT, 'dist');
+const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
+
+mkdirSync(DATA_DIR, { recursive: true });
+
+// ---------- token (R16) ----------
+const tokenFile = join(DATA_DIR, 'ui-token');
+if (!existsSync(tokenFile)) writeFileSync(tokenFile, randomBytes(32).toString('hex'));
+const TOKEN = readFileSync(tokenFile, 'utf8').trim();
+
+// ---------- ajustes (ADR 0005: gravação atômica) ----------
+const settingsFile = join(DATA_DIR, 'settings.json');
+function loadSettings(): Settings {
+  try { return { ...DEFAULT_SETTINGS, ...JSON.parse(readFileSync(settingsFile, 'utf8')) }; }
+  catch { return { ...DEFAULT_SETTINGS }; }
+}
+function saveSettings(s: Settings) {
+  writeFileSync(settingsFile + '.tmp', JSON.stringify(s, null, 2));
+  renameSync(settingsFile + '.tmp', settingsFile);
+}
+const RANGES: Partial<Record<keyof Settings, [number, number]>> = {
+  idleMinutes: [5, 600], busyCpuPercent: [1, 100], sampleSeconds: [1, 60],
+  autoCareThreshold: [50, 99], autoCareCooldownMinutes: [1, 240],
+};
+/** Valida um PUT parcial; devolve o ajuste completo ou uma mensagem de erro. */
+export function mergeSettings(current: Settings, patch: unknown): Settings | string {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return 'corpo inválido';
+  const next: Settings = { ...current };
+  for (const [k, v] of Object.entries(patch)) {
+    if (!(k in DEFAULT_SETTINGS)) return `campo desconhecido: ${k}`;
+    const key = k as keyof Settings;
+    const range = RANGES[key];
+    if (range) {
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < range[0] || v > range[1]) return `${k} fora da faixa ${range[0]}–${range[1]}`;
+      (next[key] as number) = v;
+    } else if (key === 'autoCareEnabled') {
+      if (typeof v !== 'boolean') return `${k} deve ser verdadeiro ou falso`;
+      next.autoCareEnabled = v;
+    } else {
+      if (!Array.isArray(v) || v.length > 200 || !v.every(x => typeof x === 'string' && x.length > 0 && x.length < 128)) return `${k} deve ser uma lista de nomes`;
+      (next[key] as string[]) = v.map(x => x.trim().toLowerCase().replace(/\.exe$/, ''));
+    }
+  }
+  return next;
+}
+let settings = loadSettings();
+
+// ---------- estado vivo ----------
+const startedAt = Date.now();
+let history: ClassifyHistory = emptyHistory();
+let lastSnap: ProbeSnapshot | null = null;
+let state: MemoryState | null = null;
+const extraSelfPids = new Set<number>();   // janela do Edge (F-08)
+const sse = new Set<ServerResponse>();
+const snapshotListeners: ((s: MemoryState) => void)[] = [];
+
+/** PIDs do próprio app: este Node, a sonda e a árvore de filhos deles. */
+function selfPids(snap: ProbeSnapshot): number[] {
+  const roots = new Set<number>([process.pid, ...extraSelfPids]);
+  const probePid = probe.pid();
+  if (probePid) roots.add(probePid);
+  const children = new Map<number, number[]>();
+  for (const p of snap.processes) children.set(p.ppid, [...(children.get(p.ppid) ?? []), p.pid]);
+  const out = new Set<number>();
+  const walk = (pid: number) => { if (out.has(pid)) return; out.add(pid); for (const c of children.get(pid) ?? []) walk(c); };
+  for (const r of roots) walk(r);
+  return [...out];
+}
+
+function onSnapshot(snap: ProbeSnapshot) {
+  lastSnap = snap;
+  const userSession = snap.processes.find(p => p.pid === process.pid)?.session ?? 1;
+  const now = Date.now();
+  const r = classify(snap, history, settings, { selfPids: selfPids(snap), userSession, startedAt, now });
+  history = r.history;
+  state = {
+    t: now, memLoad: snap.memLoad, totalPhys: snap.totalPhys, availPhys: snap.availPhys,
+    apps: r.apps, freed: releaser.freed(), settings, startedAt,
+    autoCare: { nextEligibleAt: null, lastRunAt: null },
+  };
+  for (const fn of snapshotListeners) fn(state);
+  const line = `event: state\ndata: ${JSON.stringify(state)}\n\n`;
+  for (const res of sse) res.write(line);
+}
+
+const probeArgs = (): [string, string[]] => {
+  const fake = process.env.FOLGA_FAKE_PROBE;   // testes: script node que imita a sonda
+  const interval = String(settings.sampleSeconds);
+  if (fake) return [process.execPath, [fake, '--interval', interval]];
+  return [join(ROOT, 'probe', 'bin', 'probe.exe'), ['--interval', interval]];
+};
+const [probeCmd, probeArgv] = probeArgs();
+const probe = startProbe(probeCmd, probeArgv, onSnapshot);
+
+const releaser = createReleaser({
+  dataDir: DATA_DIR,
+  probe,
+  getState: () => state,
+  getSettings: () => settings,
+  closeWaitMs: Number(process.env.FOLGA_CLOSE_WAIT_MS) || undefined,     // testes encurtam as esperas
+  measureWaitMs: Number(process.env.FOLGA_MEASURE_WAIT_MS) || undefined,
+  waitForSnapshot: () => new Promise(resolve => {
+    const fn = (s: MemoryState) => { snapshotListeners.splice(snapshotListeners.indexOf(fn), 1); resolve(s); };
+    snapshotListeners.push(fn);
+  }),
+});
+
+// ---------- HTTP ----------
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.woff2': 'font/woff2',
+};
+
+function send(res: ServerResponse, status: number, body: unknown) {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.end(JSON.stringify(body));
+}
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const c of req) {
+    size += (c as Buffer).length;
+    if (size > 64 * 1024) throw new Error('corpo grande demais');
+    chunks.push(c as Buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf8') || 'null');
+}
+
+async function serveStatic(pathname: string, res: ServerResponse) {
+  const rel = normalize(decodeURIComponent(pathname)).replace(/^([\\/])+/, '');
+  let file = join(DIST, rel);
+  if (!file.startsWith(DIST + sep) && file !== DIST) return send(res, 404, { erro: 'não encontrado' });
+  if (!extname(file) || !existsSync(file)) file = join(DIST, 'index.html');   // SPA
+  try {
+    const body = await readFile(file);
+    res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' });
+    res.end(body);
+  } catch {
+    send(res, 404, { erro: 'interface não compilada; rode npm run build' });
+  }
+}
+
+const server = createServer(async (req, res) => {
+  try {
+    // R15: só 127.0.0.1/localhost (barra DNS rebinding)
+    if (!ALLOWED_HOSTS.has(req.headers.host ?? '')) return send(res, 403, { erro: 'host não permitido' });
+    const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
+    const path = url.pathname;
+    const method = req.method ?? 'GET';
+
+    if (!path.startsWith('/api/')) return method === 'GET' ? serveStatic(path, res) : send(res, 405, { erro: 'método' });
+
+    // R16: escrita só com JSON e token
+    if (method === 'POST' || method === 'PUT') {
+      if (!(req.headers['content-type'] ?? '').startsWith('application/json')) return send(res, 415, { erro: 'use application/json' });
+      if (req.headers['x-folga-token'] !== TOKEN) return send(res, 403, { erro: 'token inválido' });
+    }
+
+    if (method === 'GET' && path === '/api/token') return send(res, 200, { token: TOKEN });   // sem CORS: outro site não lê
+    if (method === 'GET' && path === '/api/state') return state ? send(res, 200, state) : send(res, 503, { erro: 'lendo…' });
+    if (method === 'GET' && path === '/api/events') {
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
+      res.write(': ok\n\n');
+      if (state) res.write(`event: state\ndata: ${JSON.stringify(state)}\n\n`);
+      sse.add(res);
+      req.on('close', () => sse.delete(res));
+      return;
+    }
+    if (method === 'GET' && path === '/api/settings') return send(res, 200, settings);
+    if (method === 'PUT' && path === '/api/settings') {
+      const merged = mergeSettings(settings, await readJson(req));
+      if (typeof merged === 'string') return send(res, 400, { erro: merged });
+      settings = merged;
+      saveSettings(settings);
+      if (lastSnap) onSnapshot(lastSnap);   // reclassifica já com o ajuste novo
+      return send(res, 200, settings);
+    }
+    if (method === 'POST' && path === '/api/release') {
+      const body = await readJson(req) as { keys?: unknown };
+      const keys = body?.keys;
+      if (!Array.isArray(keys) || keys.length === 0 || keys.length > 100 || !keys.every(k => typeof k === 'string')) {
+        return send(res, 400, { erro: 'keys deve ser uma lista de apps' });
+      }
+      const r = await releaser.release(keys as string[], 'manual');
+      if ('erro' in r) return send(res, r.status, { erro: r.erro });
+      if (lastSnap) onSnapshot(lastSnap);
+      return send(res, 200, r);
+    }
+    if (method === 'GET' && path === '/api/log') {
+      const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100) || 100, 1), 1000);
+      return send(res, 200, await releaser.readLog(limit));
+    }
+    return send(res, 404, { erro: 'rota' });
+  } catch {
+    // R17: sem caminho, pilha ou detalhe interno
+    if (!res.headersSent) send(res, 500, { erro: 'erro interno' });
+    else res.end();
+  }
+});
+
+server.on('error', (e: NodeJS.ErrnoException) => {
+  console.error(e.code === 'EADDRINUSE' ? `porta ${PORT} ocupada` : 'erro no servidor');
+  probe.stop();
+  process.exitCode = 1;
+});
+
+server.listen(PORT, '127.0.0.1', () => console.log(`Folga em http://127.0.0.1:${PORT}`));
+
+const shutdown = () => {
+  probe.stop();
+  for (const res of sse) res.end();
+  server.close();
+  setTimeout(() => process.exit(0), 1_500).unref();
+};
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
