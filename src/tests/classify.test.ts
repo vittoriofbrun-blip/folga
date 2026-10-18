@@ -182,6 +182,26 @@ caso('k) áudio ativo com janela no fundo -> in_use/audio; sem audioPids volta a
   assert.deepEqual([find(r, 'windowsterminal').state, find(r, 'windowsterminal').reason], ['protected', 'never_close']);
 });
 
+caso('l) histerese da R04: ocupado só volta a parado abaixo de 60 % da linha', () => {
+  const p = proc('excel.exe');
+  let h = emptyHistory(); let cpuMs = 0; let t = T0 + 5 * 60 * MIN;   // parado há horas, sem foco
+  const ler = (pct: number) => {   // uma leitura 2 s depois, com pct % de um núcleo nesse intervalo
+    t += 2000; cpuMs += 20 * pct;
+    const r = classify(snapOf([{ ...p, cpuTimeMs: cpuMs }], t), h, settings, ctxAt(t)); h = r.history;
+    return find(r, 'excel');
+  };
+  ler(0);
+  for (let i = 0; i < 15; i++) ler(10);
+  assert.equal(ler(10).reason, 'busy');                    // 30 s a 10 %
+  for (let i = 0; i < 15; i++) ler(4);
+  const g = ler(4);                                        // média em 4 %: abaixo de 5, acima de 3
+  assert.deepEqual([g.cpuPercent, g.reason], [4, 'busy']); // sem histerese já seria idle
+  for (let i = 0; i < 15; i++) ler(2);
+  assert.equal(ler(2).state, 'idle');                      // abaixo de 3 %: volta a parado
+  for (let i = 0; i < 15; i++) ler(4);
+  assert.equal(ler(4).state, 'idle');                      // de parado, 4 % não basta: precisa chegar a 5
+});
+
 caso('puro: snapshot e history recebidos não são alterados', () => {
   const p = proc('figma.exe', { cpuTimeMs: 500 });
   const snap = snapOf([p, proc('figma.exe')], T0 + 100, p.pid);

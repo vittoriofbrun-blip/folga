@@ -14,6 +14,10 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
   **na primeira execução nada vem marcado** até passar `idleMinutes`.
 - **R04 Ocupado** — CPU do grupo ≥ `busyCpuPercent` (padrão 5 % de um núcleo, ajustável) na média dos
   últimos 30 s. App ocupado nunca vem marcado e nunca é fechado pelo Auto Care.
+  - **Histerese:** depois de ocupado, o app só volta a parado quando a média cai abaixo de 60 % da linha
+    (3 % no padrão).
+  - **Por quê:** sem essa folga, um app que fica perto da linha troca de grupo a cada leitura. Isso foi visto
+    em 2026-10-18 com Chrome, Excel e PC Optimizer.
 - **R05 Protegido** — Só é candidato o processo da **sessão do usuário** que tem **janela de topo visível**.
   Ficam sempre em "Sistema e protegidos":
   - tudo sem janela visível, da sessão 0, ou que o token do usuário não consegue abrir;

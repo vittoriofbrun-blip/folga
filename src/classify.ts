@@ -7,11 +7,13 @@ export type ClassifyHistory = {
   lastFocusedAt: Record<string, number>;                        // por chave de app
   cpu: Record<number, { t: number; cpuTimeMs: number }>;        // última leitura por pid
   cpuSamples: Record<string, { t: number; percent: number }[]>; // por chave, últimos 30 s
+  busy?: Record<string, true>;                                  // acima da linha de CPU na leitura anterior (R04)
 };
-export const emptyHistory = (): ClassifyHistory => ({ lastFocusedAt: {}, cpu: {}, cpuSamples: {} });
+export const emptyHistory = (): ClassifyHistory => ({ lastFocusedAt: {}, cpu: {}, cpuSamples: {}, busy: {} });
 export type ClassifyContext = { selfPids: readonly number[]; userSession: number; startedAt: number; now: number };
 
 const CPU_WINDOW_MS = 30_000;
+const BUSY_RELEASE = 0.6;   // R04: ocupado só volta a parado abaixo de 60 % da linha (3 % no padrão de 5 %)
 const SELF_KEY = '__self';
 
 export function appKey(name: string): string {
@@ -27,6 +29,7 @@ export function classify(
   const lastFocusedAt = { ...history.lastFocusedAt };
   const cpu: ClassifyHistory['cpu'] = {};
   const cpuSamples: ClassifyHistory['cpuSamples'] = {};
+  const busy: Record<string, true> = {};
 
   // 1-2. agrupa (self antes, para a janela do Folga não se misturar ao msedge do usuário)
   const groups = new Map<string, ProbeProcess[]>();
@@ -54,6 +57,9 @@ export function classify(
       .filter((s) => snap.t - s.t <= CPU_WINDOW_MS);
     cpuSamples[key] = samples;
     const cpuPercent = Math.round((samples.reduce((a, s) => a + s.percent, 0) / samples.length) * 10) / 10;
+    // histerese: sem ela, um app rondando a linha troca de grupo a cada leitura
+    const busyNow = cpuPercent >= settings.busyCpuPercent * (history.busy?.[key] ? BUSY_RELEASE : 1);
+    if (busyNow) busy[key] = true;
 
     // 4. foco
     const inForeground = snap.foregroundPid !== null && procs.some((p) => p.pid === snap.foregroundPid);
@@ -72,7 +78,7 @@ export function classify(
     else if (neverClose.has(key)) { state = 'protected'; reason = 'never_close'; }
     else if (inForeground) { state = 'in_use'; reason = 'foreground'; }
     else if (procs.some((p) => audioPids.has(p.pid))) { state = 'in_use'; reason = 'audio'; }
-    else if (cpuPercent >= settings.busyCpuPercent) { state = 'in_use'; reason = 'busy'; }
+    else if (busyNow) { state = 'in_use'; reason = 'busy'; }
     else if (ctx.now - (focused ?? ctx.startedAt) < settings.idleMinutes * 60_000) { state = 'in_use'; reason = 'recent'; }
     else { state = 'idle'; reason = 'idle'; }
 
@@ -91,5 +97,5 @@ export function classify(
 
   // 6. idle, in_use, protected; maior primeiro dentro de cada um
   apps.sort((a, b) => ORDER[a.state] - ORDER[b.state] || b.privateWorkingSet - a.privateWorkingSet);
-  return { apps, history: { lastFocusedAt, cpu, cpuSamples } };
+  return { apps, history: { lastFocusedAt, cpu, cpuSamples, busy } };
 }
