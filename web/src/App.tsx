@@ -42,9 +42,9 @@ export function App() {
       <main className="main">
         {/* Memória fica montada para não perder a seleção nem o resultado ao trocar de aba. */}
         <div className="view" hidden={view !== 'memoria'}><Memory state={state} source={source} /></div>
-        {view === 'autocare' && <AutoCare />}
-        {view === 'registro' && <Log />}
-        {view === 'ajustes' && <Settings />}
+        {view === 'autocare' && <AutoCare state={state} />}
+        {view === 'registro' && <Log state={state} />}
+        {view === 'ajustes' && <Settings state={state} />}
       </main>
     </div>
   );
