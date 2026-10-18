@@ -62,6 +62,7 @@ try {
   assert.match(done.result ?? '', /fechou/);
   const log = await get<LogEntry[]>('/api/log?limit=5');
   assert.equal(log.length, 1);
+  assert.equal(log[0]!.origin, 'manual', 'foi o usuário que mandou, não o Auto Care');
   assert.deepEqual(log[0]!.results.map(x => [x.key, x.outcome]), [['notepad', 'fechou']]);
   assert.ok(!(await get<MemoryState>('/api/state')).apps.some(a => a.key === 'notepad'), 'o notepad fechou depois do OK');
   console.log('ok  com o OK do usuário, executou e entrou no Registro');

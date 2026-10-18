@@ -1,6 +1,6 @@
 # Estado (mais recente no topo)
 
-## 2026-10-18 (noite) — o vigia: o Folga propõe sozinho (D21, R30)
+## 2026-10-18 (15:51 a 16:20) — o vigia: o Folga propõe sozinho (D21, R30)
 - Pedido do Antônio: "monitorando o desempenho, traga opções, eu dou o ok e ele já resolve".
 - `src/watch.ts`: de minuto em minuto olha memória e disco e monta um cartão. **Não usa modelo de linguagem**
   (D21), e nada acontece sem o clique (R20).
@@ -16,8 +16,11 @@
   - na tela, num servidor de teste à parte (porta 4791, sonda falsa, Auto Care desligado): o cartão
     "do Folga · Memória em 91 %: dá para liberar 763 MB" apareceu sozinho no Início, e o clique em Aprovar
     levou a memória de 91 % para 86 %. Servidor e pasta temporária removidos.
-- No computador do Antônio agora o vigia está quieto, e é o esperado: memória em 81 % (linha 85 %) e o disco,
-  com 13,8 % livre, tem menos de 1 GB de limpeza rápida.
+- No computador do Antônio o vigia está quieto, e é o esperado. Medido às 16:17 no servidor real:
+  - memória em 81 %, contra a linha de 85 %;
+  - disco C: com 13,8 % livre (abaixo dos 15 %), mas só 47 MB de limpeza acionável, contra a linha de 1 GB;
+  - o cache do Chrome (47 MB) é quase tudo, e nem conta enquanto o Chrome estiver aberto;
+  - `/api/suggestions` tem só o cartão de teste do F-18, já feito. Nada pendente.
 - Correções de data e número que o registro do second-brain apontou no texto abaixo: o servidor reiniciou às
   15:34 (não 15:30) e o "Abrir com o Windows" foi ligado às 15:47 (não ~15:55). A oscilação medida foram
   7 trocas de grupo em 33 s, não "a cada 2 a 6 s".
