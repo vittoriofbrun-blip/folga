@@ -1,46 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AppGroup, MemoryState, Outcome, ReleaseResponse } from '../../src/types';
+import type { AppGroup, MemoryState, ReleaseResponse } from '../../src/types';
 import type { Source } from './mock';
-
-const MB = 1024 ** 2;
-const GB = 1024 ** 3;
-const NB = ' ';
-const nf1 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const nfAuto = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
-const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
-
-const gb = (b: number) => nfAuto.format(b / GB);                       // "11,8", "16"
-const size = (b: number) =>
-  b >= GB ? `${nf1.format(b / GB)}${NB}GB` : `${nf0.format(Math.max(0, b) / MB)}${NB}MB`;
-const pct = (n: number) => `${Math.round(n)}${NB}%`;
-const plural = (n: number, one: string, many: string) => `${nf0.format(n)} ${n === 1 ? one : many}`;
-
-function ago(ms: number) {
-  const m = Math.floor(Math.max(0, ms) / 60_000);
-  if (m < 1) return `menos de 1${NB}min`;
-  if (m < 60) return `${m}${NB}min`;
-  const h = Math.floor(m / 60);
-  return h < 24 ? `${h}${NB}h` : `${Math.floor(h / 24)}${NB}d`;
-}
+import { GB, MB, NB, OUTCOME, ago, gb, nf0, nf1, pct, plural, size } from './format';
 
 function reasonText(a: AppGroup, s: MemoryState) {
   const since = () => ago(s.t - (a.lastFocusedAt ?? s.startedAt));
   switch (a.reason) {
     case 'idle': return `parado há ${since()}`;
     case 'foreground': return 'em primeiro plano';
+    case 'audio': return 'tocando áudio';
     case 'busy': return `ocupado · ${pct(a.cpuPercent)} CPU`;
     case 'recent': return `usado há ${since()}`;
     default: return '';
   }
 }
-
-const OUTCOME: Record<Outcome, { text: string; tone: string }> = {
-  fechou: { text: 'fechou', tone: 'ok' },
-  ficou_aberto: { text: 'ficou aberto (talvez pedindo para salvar)', tone: 'warn' },
-  bandeja: { text: 'foi para a bandeja', tone: 'quiet' },
-  encerrado: { text: 'encerrado', tone: 'ok' },
-  recusado: { text: 'recusado', tone: 'bad' },
-};
 
 type Result = { res: ReleaseResponse; total: number } | 'erro' | null;
 
@@ -150,7 +123,7 @@ export function Memory({ state, source }: { state: MemoryState | null; source: S
             aria-valuenow={Math.round(state.memLoad)} aria-valuetext={`${pct(state.memLoad)} em uso`}>
             <div className="meter-label"><span>Memória usada</span><strong>{pct(state.memLoad)}</strong></div>
             <div className="meter-bar">
-              <div className="meter-fill" style={{ height: `${Math.min(100, state.memLoad)}%` }} />
+              <div className="meter-fill" style={{ transform: `scaleY(${Math.min(100, state.memLoad) / 100})` }} />
               {settings.autoCareEnabled && (
                 <div className="meter-tick" style={{ bottom: `${settings.autoCareThreshold}%` }} aria-hidden="true" />
               )}

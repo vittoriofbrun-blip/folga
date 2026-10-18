@@ -75,3 +75,5 @@ mudando de tamanho entre a leitura da sonda e a do contador (não são erro de m
 `description` = `"Notepad.exe"` (o `FileDescription` dele é o próprio nome do arquivo). `TextInputHost.exe`,
 `ApplicationFrameHost.exe` e `mc-web-view.exe` aparecem com `hasVisibleWindow:true` (janelas "fantasma" cloaked do shell
 e do antivírus); os dois primeiros já estão em `SYSTEM_PROCESSES`.
+
+**Áudio (F-11):** a sonda lista os PIDs com sessão de áudio *Active* no dispositivo de saída padrão (Core Audio, IAudioSessionManager2). Custa de 5 a 9 ms por leitura (107 ms na primeira, por causa do JIT e do COM). Teste real: um player tocando apareceu em udioPids nas 6 leituras e saiu quando o som parou. Limites: só o dispositivo padrão; sessão aberta em silêncio conta como áudio (erra para o lado seguro).

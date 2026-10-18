@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
+import { decide, emptyAutoCare, finishRun } from './autocare.ts';
 import { classify, emptyHistory, type ClassifyHistory } from './classify.ts';
 import { startProbe } from './probe.ts';
 import { createReleaser } from './release.ts';
@@ -81,18 +82,35 @@ function selfPids(snap: ProbeSnapshot): number[] {
   return [...out];
 }
 
-function onSnapshot(snap: ProbeSnapshot) {
+// R13: roda aqui no servidor, com ou sem janela. ponytail: lastRunAt/freio só em memória (somem ao reiniciar).
+let ac = emptyAutoCare();
+function runAutoCare(keys: string[]) {
+  ac.running = true;
+  releaser.release(keys, 'auto')
+    .then(r => !('erro' in r), () => true)   // erro de pedido (409/503) não conta; falha no meio conta, já pode ter fechado algo
+    .then(ran => { ac = finishRun(ac, ran, settings.autoCareCooldownMinutes, Date.now()); if (lastSnap) onSnapshot(lastSnap); });
+}
+
+/** fresh = leitura nova da sonda; releituras do mesmo snapshot (ajuste, liberação) não contam para o Auto Care. */
+function onSnapshot(snap: ProbeSnapshot, fresh = false) {
   lastSnap = snap;
   const userSession = snap.processes.find(p => p.pid === process.pid)?.session ?? 1;
   const now = Date.now();
   const r = classify(snap, history, settings, { selfPids: selfPids(snap), userSession, startedAt, now });
-  history = r.history;
+  if (fresh) history = r.history;   // releitura do mesmo snapshot não pode gerar amostra de CPU zerada
   state = {
     t: now, memLoad: snap.memLoad, totalPhys: snap.totalPhys, availPhys: snap.availPhys,
     apps: r.apps, freed: releaser.freed(), settings, startedAt,
     autoCare: { nextEligibleAt: null, lastRunAt: null },
   };
-  for (const fn of snapshotListeners) fn(state);
+  if (fresh) {
+    const d = decide({ ...ac, running: ac.running || releaser.isBusy() }, state, settings, now);
+    ac = { ...d.mem, running: ac.running };
+    if (d.keys) runAutoCare(d.keys);
+  }
+  state.autoCare = { nextEligibleAt: ac.nextEligibleAt, lastRunAt: ac.lastRunAt };
+  // só leitura nova acorda quem espera (a liberação confere o mundo real); cópia porque o ouvinte se remove
+  if (fresh) for (const fn of [...snapshotListeners]) fn(state);
   const line = `event: state\ndata: ${JSON.stringify(state)}\n\n`;
   for (const res of sse) res.write(line);
 }
@@ -109,7 +127,7 @@ const probeArgs = (): [string, string[]] => {
   return [ps, ['-NoProfile', '-NonInteractive', '-Command', `Add-Type -Path '${cs}'; [Probe]::Main(@('--interval','${interval}'))`]];
 };
 const [probeCmd, probeArgv] = probeArgs();
-const probe = startProbe(probeCmd, probeArgv, onSnapshot);
+const probe = startProbe(probeCmd, probeArgv, s => onSnapshot(s, true));
 
 const releaser = createReleaser({
   dataDir: DATA_DIR,

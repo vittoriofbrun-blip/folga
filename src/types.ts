@@ -10,7 +10,9 @@ export type ProbeProcess = {
 };
 export type ProbeSnapshot = {
   type: 'snapshot'; t: number; memLoad: number; totalPhys: number; availPhys: number;
-  foregroundPid: number | null; processes: ProbeProcess[];
+  foregroundPid: number | null;
+  audioPids?: number[];        // pids com sessão de áudio ativa no dispositivo padrão (F-11); ausente = sonda antiga
+  processes: ProbeProcess[];
 };
 // Node → sonda
 export type ProbeCommand =
@@ -20,7 +22,7 @@ export type ProbeReply = { type: 'reply'; id: string; ok: boolean; windowsClosed
 
 // Node → interface
 export type AppState = 'idle' | 'in_use' | 'protected';
-export type AppReason = 'foreground' | 'busy' | 'recent' | 'idle'
+export type AppReason = 'foreground' | 'audio' | 'busy' | 'recent' | 'idle'
   | 'no_window' | 'system' | 'never_close' | 'self' | 'other_session';
 export type AppGroup = {
   key: string; name: string; pids: number[]; privateWorkingSet: number;

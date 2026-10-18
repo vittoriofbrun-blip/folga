@@ -161,6 +161,22 @@ caso('j) ordem: idle, in_use, protected; tamanho decrescente em cada um', () => 
   assert.deepEqual(r.apps.map((a) => a.state), ['idle', 'idle', 'idle', 'in_use', 'protected', 'protected']);
 });
 
+caso('k) áudio ativo com janela no fundo -> in_use/audio; sem audioPids volta a idle', () => {
+  const sp = proc('Spotify.exe'); const helper = proc('Spotify.exe', { hasVisibleWindow: false });
+  const t = T0 + 5 * 60 * MIN; // parado há horas, sem foco
+  const comAudio = { ...snapOf([sp, helper], t), audioPids: [helper.pid] }; // o pid que toca pode ser o helper
+  const g = find(classify(comAudio, emptyHistory(), settings, ctxAt(t)), 'spotify');
+  assert.deepEqual([g.state, g.reason], ['in_use', 'audio']);
+  const sem = find(classify(snapOf([sp, helper], t), emptyHistory(), settings, ctxAt(t)), 'spotify');
+  assert.deepEqual([sem.state, sem.reason], ['idle', 'idle']);
+  const vazio = find(classify({ ...snapOf([sp, helper], t), audioPids: [] }, emptyHistory(), settings, ctxAt(t)), 'spotify');
+  assert.equal(vazio.state, 'idle');
+  // never_close continua mandando mais que o áudio
+  const wt = proc('WindowsTerminal.exe');
+  const r = classify({ ...snapOf([wt], t), audioPids: [wt.pid] }, emptyHistory(), settings, ctxAt(t));
+  assert.deepEqual([find(r, 'windowsterminal').state, find(r, 'windowsterminal').reason], ['protected', 'never_close']);
+});
+
 caso('puro: snapshot e history recebidos não são alterados', () => {
   const p = proc('figma.exe', { cpuTimeMs: 500 });
   const snap = snapOf([p, proc('figma.exe')], T0 + 100, p.pid);

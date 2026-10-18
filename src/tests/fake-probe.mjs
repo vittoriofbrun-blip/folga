@@ -15,7 +15,7 @@ const procs = new Map([
 const write = msg => process.stdout.write(JSON.stringify(msg) + '\n');
 const tick = () => write({
   type: 'snapshot', t: Date.now(), memLoad: Math.round(100 - (avail / (16 * GB)) * 100),
-  totalPhys: 16 * GB, availPhys: avail, foregroundPid: null, processes: [...procs.values()],
+  totalPhys: 16 * GB, availPhys: avail, foregroundPid: null, audioPids: [], processes: [...procs.values()],
 });
 tick();
 setInterval(tick, intervalMs);

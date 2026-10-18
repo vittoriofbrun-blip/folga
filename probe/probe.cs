@@ -91,6 +91,106 @@ public static class Probe
         return DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out cloaked, 4) == 0 && cloaked != 0;
     }
 
+    // ---------- audio (Core Audio, so o dispositivo de saida padrao) ----------
+    // Declaro so o que uso; os metodos anteriores na vtable entram como stubs (a ORDEM e o que vale).
+    [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorCom { }
+
+    [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IMMDeviceEnumerator
+    {
+        void EnumAudioEndpoints();                                              // 3 (stub)
+        void GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice dev); // 4
+    }
+
+    [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IMMDevice
+    {
+        void Activate(ref Guid iid, uint clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object iface);   // 3
+    }
+
+    [ComImport, Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IAudioSessionManager2
+    {
+        void GetAudioSessionControl();   // 3 (IAudioSessionManager, stub)
+        void GetSimpleAudioVolume();     // 4 (stub)
+        void GetSessionEnumerator(out IAudioSessionEnumerator e);   // 5
+    }
+
+    [ComImport, Guid("E2F5BB11-0570-40CA-ACDD-3AA01277DEE8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IAudioSessionEnumerator
+    {
+        void GetCount(out int count);
+        void GetSession(int index, out IAudioSessionControl2 session);   // o objeto devolvido tambem responde por Control2 (QI no marshal)
+    }
+
+    [ComImport, Guid("BFB7FF88-7239-4FC9-8FA2-07C950BE9C6D"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IAudioSessionControl2
+    {
+        void GetState(out int state);   // 3 (IAudioSessionControl); 0 inativa, 1 ativa, 2 expirada
+        void GetDisplayName();          // 4..11 stubs
+        void SetDisplayName();
+        void GetIconPath();
+        void SetIconPath();
+        void GetGroupingParam();
+        void SetGroupingParam();
+        void RegisterAudioSessionNotification();
+        void UnregisterAudioSessionNotification();
+        void GetSessionIdentifier();           // 12 (Control2) stubs
+        void GetSessionInstanceIdentifier();   // 13
+        void GetProcessId(out uint pid);       // 14
+    }
+
+    static readonly Guid IID_IAudioSessionManager2 = new Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F");
+
+    // Pids com sessao de audio Active (tocando). Qualquer falha -> lista vazia, nunca derruba a leitura.
+    // ponytail: so o dispositivo padrao (eRender/eMultimedia); app tocando por outro dispositivo nao aparece.
+    static List<uint> ActiveAudioPids()
+    {
+        List<uint> pids = new List<uint>();
+        object en = null, dev = null, mgrObj = null, sessEnum = null;
+        try
+        {
+            IMMDeviceEnumerator enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorCom();
+            en = enumerator;
+            IMMDevice device;
+            enumerator.GetDefaultAudioEndpoint(0, 1, out device);
+            dev = device;
+            Guid iid = IID_IAudioSessionManager2;
+            device.Activate(ref iid, 23, IntPtr.Zero, out mgrObj);   // CLSCTX_ALL
+            IAudioSessionManager2 mgr = (IAudioSessionManager2)mgrObj;
+            IAudioSessionEnumerator se;
+            mgr.GetSessionEnumerator(out se);
+            sessEnum = se;
+            int count;
+            se.GetCount(out count);
+            for (int i = 0; i < count; i++)
+            {
+                IAudioSessionControl2 ctl = null;
+                try
+                {
+                    se.GetSession(i, out ctl);
+                    int state;
+                    ctl.GetState(out state);
+                    if (state != 1) continue;
+                    uint pid;
+                    ctl.GetProcessId(out pid);
+                    if (pid != 0 && !pids.Contains(pid)) pids.Add(pid);
+                }
+                catch (Exception) { }
+                finally { if (ctl != null) Marshal.ReleaseComObject(ctl); }
+            }
+        }
+        catch (Exception ex) { if (debug) Console.Error.WriteLine("audio erro: " + ex.Message); pids.Clear(); }
+        finally
+        {
+            if (sessEnum != null) Marshal.ReleaseComObject(sessEnum);
+            if (mgrObj != null) Marshal.ReleaseComObject(mgrObj);
+            if (dev != null) Marshal.ReleaseComObject(dev);
+            if (en != null) Marshal.ReleaseComObject(en);
+        }
+        return pids;
+    }
+
     const uint TH32CS_SNAPPROCESS = 2;
     const uint PROCESS_TERMINATE = 0x0001, PROCESS_VM_READ = 0x0010, PROCESS_QUERY_LIMITED = 0x1000;
     const uint GW_OWNER = 4, WM_CLOSE = 0x0010;
@@ -202,7 +302,16 @@ public static class Probe
           .Append(",\"totalPhys\":").Append(ms.ullTotalPhys.ToString(CultureInfo.InvariantCulture))
           .Append(",\"availPhys\":").Append(ms.ullAvailPhys.ToString(CultureInfo.InvariantCulture))
           .Append(",\"foregroundPid\":").Append(fgPid == 0 ? "null" : fgPid.ToString(CultureInfo.InvariantCulture))
-          .Append(",\"processes\":[");
+          .Append(",\"audioPids\":[");
+        long audioT0 = Stopwatch.GetTimestamp();
+        List<uint> audio = ActiveAudioPids();
+        for (int i = 0; i < audio.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append(audio[i].ToString(CultureInfo.InvariantCulture));
+        }
+        if (debug) Console.Error.WriteLine("audio ms=" + ((Stopwatch.GetTimestamp() - audioT0) * 1000.0 / Stopwatch.Frequency).ToString("0.00", CultureInfo.InvariantCulture) + " pids=" + audio.Count);
+        sb.Append("],\"processes\":[");
 
         HashSet<string> alive = new HashSet<string>();
         bool first = true;

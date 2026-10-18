@@ -8,6 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "app": "node scripts/launch.mjs",
     "dev": "node scripts/dev.mjs",
     "build": "vite build",
     "build:probe": "node scripts/build-probe.mjs",

@@ -37,6 +37,7 @@ export function classify(
   }
 
   const neverClose = new Set(settings.neverClose.map(appKey));
+  const audioPids = new Set(snap.audioPids ?? []);
   const apps: AppGroup[] = [];
 
   for (const [key, procs] of groups) {
@@ -59,7 +60,8 @@ export function classify(
     if (inForeground) lastFocusedAt[key] = ctx.now;
     const focused = lastFocusedAt[key] ?? null;
 
-    // 5. estado, primeira regra que casar
+    // 5. estado, primeira regra que casar: self, other_session, system, no_window, never_close,
+    //    foreground, audio (tocando som com a janela no fundo), busy, recent, idle
     const mine = procs.filter((p) => p.session === ctx.userSession);
     let state: AppState;
     let reason: AppReason;
@@ -69,6 +71,7 @@ export function classify(
     else if (!mine.some((p) => p.hasVisibleWindow)) { state = 'protected'; reason = 'no_window'; }
     else if (neverClose.has(key)) { state = 'protected'; reason = 'never_close'; }
     else if (inForeground) { state = 'in_use'; reason = 'foreground'; }
+    else if (procs.some((p) => audioPids.has(p.pid))) { state = 'in_use'; reason = 'audio'; }
     else if (cpuPercent >= settings.busyCpuPercent) { state = 'in_use'; reason = 'busy'; }
     else if (ctx.now - (focused ?? ctx.startedAt) < settings.idleMinutes * 60_000) { state = 'in_use'; reason = 'recent'; }
     else { state = 'idle'; reason = 'idle'; }
