@@ -23,8 +23,8 @@
   - diálogo "Salvar?" (o Bloco de Notas do Win11 restaura abas e não pergunta);
   - Auto Care disparando de verdade (coberto por teste de unidade).
 - Atenção:
-  - `%LOCALAPPDATA%\Folga\settings.json` foi encontrado com `autoCareEnabled: true`, gravado por um PUT com token
-    vindo da tela às 11:10:46, com a janela do Edge aberta. Ninguém confirmou quem ligou.
+  - `%LOCALAPPDATA%\Folga\settings.json` está com `autoCareEnabled: true` em 92 %. Antônio confirmou que ligou
+    pela tela e quer manter (2026-10-18).
   - Com a memória em ~90 %, o Auto Care fecha apps parados há 30 min enquanto o app estiver rodando.
   - Claude Code, Antigravity IDE e Codex entraram no "nunca fechar" padrão e no `settings.json` salvo.
     Antes, a QA ao vivo mostrava os três como liberáveis.
