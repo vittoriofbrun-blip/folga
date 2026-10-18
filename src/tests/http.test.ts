@@ -1,7 +1,7 @@
 // Servidor real numa porta alta, com pasta de dados temporária e sonda falsa (R15–R17, R07–R09, R14).
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,13 +9,14 @@ import type { LogEntry, MemoryState, ReleaseResponse, Settings } from '../types.
 
 const PORT = 18000 + Math.floor(Math.random() * 1000);
 const dataDir = mkdtempSync(join(tmpdir(), 'folga-http-'));
+const startupDir = mkdtempSync(join(tmpdir(), 'folga-startup-'));   // nunca a pasta Inicializar real
 const root = join(import.meta.dirname, '..', '..');
 
 const server = spawn(process.execPath, ['--no-warnings', join(root, 'src', 'server.ts')], {
   env: {
     ...process.env, FOLGA_PORT: String(PORT), FOLGA_DATA_DIR: dataDir,
     FOLGA_FAKE_PROBE: join(root, 'src', 'tests', 'fake-probe.mjs'),
-    FOLGA_CLOSE_WAIT_MS: '300', FOLGA_MEASURE_WAIT_MS: '300',
+    FOLGA_CLOSE_WAIT_MS: '300', FOLGA_MEASURE_WAIT_MS: '300', FOLGA_STARTUP_DIR: startupDir,
   },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
@@ -102,9 +103,18 @@ try {
   assert.ok(!st.apps.some(a => a.key === 'notepad'));
   ok('R14: registro gravado e Liberados no estado');
 
+  assert.equal((await call('GET', '/api/startup')).body.on, false);
+  assert.equal((await call('PUT', '/api/startup', { body: { on: true } })).status, 403);
+  assert.equal((await call('PUT', '/api/startup', { body: { on: true }, token })).body.on, true);
+  assert.ok(existsSync(join(startupDir, 'Folga.lnk')));
+  assert.equal((await call('PUT', '/api/startup', { body: { on: false }, token })).body.on, false);
+  assert.ok(!existsSync(join(startupDir, 'Folga.lnk')));
+  ok('P04: atalho de inicialização liga e desliga (pasta temporária)');
+
   console.log(`http: ${passed} casos ok`);
 } finally {
   server.kill();
   await sleep(300);
   rmSync(dataDir, { recursive: true, force: true });
+  rmSync(startupDir, { recursive: true, force: true });
 }

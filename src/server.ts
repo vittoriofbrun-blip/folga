@@ -8,6 +8,7 @@ import { decide, emptyAutoCare, finishRun } from './autocare.ts';
 import { classify, emptyHistory, type ClassifyHistory } from './classify.ts';
 import { startProbe } from './probe.ts';
 import { createReleaser } from './release.ts';
+import { openWindow, setStartup, startupInstalled } from './window.ts';
 import { DEFAULT_SETTINGS, type MemoryState, type ProbeSnapshot, type Settings } from './types.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -224,6 +225,15 @@ const server = createServer(async (req, res) => {
       if (lastSnap) onSnapshot(lastSnap);
       return send(res, 200, r);
     }
+    if (method === 'POST' && path === '/api/window') {
+      return showWindow() ? send(res, 200, { ok: true }) : send(res, 500, { erro: 'Edge não encontrado' });
+    }
+    if (method === 'GET' && path === '/api/startup') return send(res, 200, { on: startupInstalled() });
+    if (method === 'PUT' && path === '/api/startup') {
+      const body = await readJson(req) as { on?: unknown };
+      if (typeof body?.on !== 'boolean') return send(res, 400, { erro: 'on deve ser verdadeiro ou falso' });
+      return send(res, 200, { on: await setStartup(body.on, ROOT) });
+    }
     if (method === 'GET' && path === '/api/log') {
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100) || 100, 1), 1000);
       return send(res, 200, await releaser.readLog(limit));
@@ -242,7 +252,17 @@ server.on('error', (e: NodeJS.ErrnoException) => {
   process.exitCode = 1;
 });
 
-server.listen(PORT, '127.0.0.1', () => console.log(`Folga em http://127.0.0.1:${PORT}`));
+/** Abre a janela do Edge e põe a árvore dela entre os PIDs do próprio app (R05). */
+function showWindow(): boolean {
+  const pid = openWindow(`http://127.0.0.1:${PORT}`, DATA_DIR, gone => extraSelfPids.delete(gone));
+  if (pid) extraSelfPids.add(pid);
+  return pid !== null;
+}
+
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`Folga em http://127.0.0.1:${PORT}`);
+  if (process.env.FOLGA_OPEN_WINDOW === '1') showWindow();
+});
 
 const shutdown = () => {
   probe.stop();

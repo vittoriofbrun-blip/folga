@@ -209,3 +209,6 @@
 .set-foot { display: flex; align-items: center; gap: 20px; }
 .set-status { margin: 0; min-height: 1.4em; }
 .set-status-bad { color: var(--danger); }
+
+.set-startup { display: flex; gap: 10px; align-items: flex-start; max-width: 60ch; color: var(--muted); line-height: 1.5; cursor: pointer; }
+.set-startup input { margin-top: 3px; accent-color: var(--accent); }

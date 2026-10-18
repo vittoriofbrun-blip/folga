@@ -29,3 +29,5 @@ export const apiSource: Source = {
 export const getLog = (limit = 100): Promise<LogEntry[]> => fetch(`/api/log?limit=${limit}`).then(r => r.json());
 export const getSettings = (): Promise<Settings> => fetch('/api/settings').then(r => r.json());
 export const putSettings = (patch: Partial<Settings>) => write<Settings>('PUT', '/api/settings', patch);
+export const getStartup = (): Promise<{ on: boolean }> => fetch('/api/startup').then(r => r.json());
+export const putStartup = (on: boolean) => write<{ on: boolean }>('PUT', '/api/startup', { on });

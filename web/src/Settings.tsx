@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import type { AppGroup, MemoryState, Settings as SettingsData } from '../../src/types';
-import { getSettings, putSettings } from './api';
+import { getSettings, getStartup, putSettings, putStartup } from './api';
 
 // Faixas iguais às do servidor (RANGES em src/server.ts). Ajuste lá e aqui juntos.
 const FIELDS = {
@@ -185,6 +185,31 @@ export function Settings({ state }: { state: MemoryState | null }) {
           <p className={`set-status${status && !status.ok ? ' set-status-bad' : ''}`} role="status" aria-live="polite">{status?.text}</p>
         </div>
       </form>
+
+      <Startup />
+    </section>
+  );
+}
+
+/** P04: atalho na pasta Inicializar que sobe só o servidor no logon. Aplica na hora, fora do formulário. */
+function Startup() {
+  const [on, setOn] = useState<boolean | null>(null);
+  const [problem, setProblem] = useState('');
+  useEffect(() => { getStartup().then(r => setOn(r.on), () => setProblem('Não deu para ler este ajuste.')); }, []);
+  const toggle = async (next: boolean) => {
+    setProblem('');
+    try { setOn((await putStartup(next)).on); }
+    catch (e) { setProblem(e instanceof Error ? e.message : 'Não salvou.'); }
+  };
+  return (
+    <section className="set-list" aria-labelledby="startup-t">
+      <h2 className="set-h" id="startup-t">Abrir com o Windows</h2>
+      <label className="set-startup">
+        <input type="checkbox" role="switch" checked={on ?? false} disabled={on === null}
+          onChange={e => void toggle(e.target.checked)} />
+        <span>Ligar o Folga quando você entrar no Windows, sem abrir a janela. O Auto Care passa a valer o dia todo.</span>
+      </label>
+      <p className="set-err" role="status">{problem}</p>
     </section>
   );
 }
