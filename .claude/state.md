@@ -5,7 +5,8 @@
   limpeza rápida, Início, só sugere, projeto de código fora). Regras R20 a R28. ADR 0006 do agente.
 - Engenharia reversa do McAfee:
   - relatório em `docs/engenharia-reversa-mcafee.md`;
-  - 18 capturas em `docs/referencias-ui/mcafee/`;
+  - 17 capturas em `docs/referencias-ui/mcafee/` (16 do LiveSafe e 1 do PC Optimizer; o `pco-02` era cópia
+    idêntica do `pco-01` e saiu);
   - a quarentena confirmou que o McAfee apagava o `probe.exe`.
 - Construído pelos tickets F-14, F-15, F-17 e F-18, em quatro trilhas paralelas, e depois corrigido pela
   revisão de segurança, sem nenhum achado crítico:
@@ -13,6 +14,10 @@
   - **M1 a M6:** clickjacking, PID reaproveitado, temporários, Lixeira conferida, cartão restrito à busca e
     com validade, token do agente e pasta de trabalho do agente;
   - **B1 a B7:** os itens baixos.
+  - **B8 ficou aberto, como risco aceito:** o ambiente dos CLIs tira só 4 variáveis (`ANTHROPIC_API_KEY`,
+    `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, `CODEX_API_KEY`), e as outras passam. O risco é pequeno,
+    porque o Claude roda sem ferramentas além das do Folga e o Codex roda sem shell. Uma lista do que pode
+    passar exigiria testar de novo os dois provedores ao vivo.
 - Verificado:
   - 11 suítes verdes, typecheck e build.
   - Claude e GPT respondendo pela tela real com dados reais. A troca de provedor abre conversa nova, e a

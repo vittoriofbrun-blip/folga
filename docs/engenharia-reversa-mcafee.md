@@ -10,10 +10,14 @@ Cada item diz se é **O** (observado), **I** (inferido) ou **U** (desconhecido).
 - **Painel LiveSafe:** cliques mandados direto para a janela do WebView, sem mover o mouse nem roubar o
   foco, e capturas com `PrintWindow`. 16 capturas em `docs/referencias-ui/mcafee/wps-01` a `wps-16`. Nenhum
   interruptor, botão de varredura ou de exclusão foi acionado.
-- **PC Optimizer:** roda com privilégio elevado. O Windows bloqueia leitura e cliques vindos de um
-  processo comum, e eu não elevei nada. Por isso há só a tela visível (`pco-01`, `pco-02`), e a lista de
-  telas veio dos recursos de interface, lidos em modo só-reflexão, sem executar o programa (REA:
-  `inspect_managed_artifact`, evidência `ev_ec49b51b…`).
+- **PC Optimizer:**
+  - Roda com privilégio elevado, e eu não elevei nada.
+  - Há uma captura só (`pco-01`), feita no meio de uma varredura, com a barra lateral travada. Um clique
+    não mudou a tela.
+  - **(I)** Pela regra do Windows (UIPI), um processo comum não manda cliques nem mensagens para uma janela
+    elevada. Não testei isso nele.
+  - A lista de telas veio dos recursos de interface, lidos em modo só-reflexão, sem executar o programa
+    (REA: `inspect_managed_artifact`, evidência `ev_ec49b51b…`).
 - O pacote da interface do LiveSafe (`wpsui.pam`) é um formato proprietário cifrado ou comprimido. Não foi aberto.
 
 ## O que o McAfee oferece
@@ -49,7 +53,7 @@ sonda compilada era o McAfee. Restaurar ou excluir da quarentena é decisão do 
   - modos de energia ativados por programa;
   - manutenção automática quando o PC está ocioso, com um aviso pequeno de progresso;
   - relatórios com histórico e status do PC, e **desfazer** uma ação do histórico.
-- **Tela observada (O, `pco-02`):** anel grande com "itens escaneados" e "problemas encontrados", uma
+- **Tela observada (O, `pco-01`):** anel grande com "itens escaneados" e "problemas encontrados", uma
   palavra de status em vermelho e, à direita, uma lista de verificações com barra de progresso.
 - **(I)** Pelo nome do recurso, o "liberar memória" do PC Optimizer funciona como desfragmentação ou
   esvaziamento de memória, o que o ADR 0004 do Folga rejeita.
