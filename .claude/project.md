@@ -86,6 +86,11 @@ Fora da v1: disco, otimizar, organizar, desinstalar, MCP para agentes, partícul
   na validação. Uma pasta conta como projeto se tiver `.git`, `package.json`, `pyvenv.cfg`, `pyproject.toml`,
   `Cargo.toml` ou `go.mod`. Motivo: o QA ao vivo achou dependências de um ambiente virtual Python como
   "paradas", e mandá-las para a Lixeira quebraria o projeto. (2026-10-18)
+- **D21 O vigia é de regra, não de modelo** (R30) — Quem monitora e propõe sozinho é código com limites fixos
+  (`src/watch.ts`), não o assistente. Motivos: um turno de CLI por ciclo gastaria a assinatura do Antônio e a
+  pegada da R18 o dia todo; os números já estão no servidor; e regra fixa é testável e repetível. O assistente
+  continua para conversar e para o que precisa de julgamento. Pedido do Antônio: "fique monitorando o
+  desempenho e traga opções, eu dou o ok e ele já resolve". (2026-10-18)
 
 ## Perguntas abertas (decisão do Antônio)
 Todas as perguntas abaixo foram decididas em 2026-10-18 (D11 a D13); os valores seguem ajustáveis em Ajustes.

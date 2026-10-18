@@ -1,5 +1,27 @@
 # Estado (mais recente no topo)
 
+## 2026-10-18 (noite) — o vigia: o Folga propõe sozinho (D21, R30)
+- Pedido do Antônio: "monitorando o desempenho, traga opções, eu dou o ok e ele já resolve".
+- `src/watch.ts`: de minuto em minuto olha memória e disco e monta um cartão. **Não usa modelo de linguagem**
+  (D21), e nada acontece sem o clique (R20).
+  - Memória: duas leituras seguidas acima de 85 % (7 pontos antes do Auto Care), apps parados somando
+    500 MB ou mais, no máximo 5.
+  - Disco: menos de 15 % livre e pelo menos 1 GB de limpeza. A medição roda no máximo a cada 30 min.
+  - Freio: 1 h depois de propor ou decidir; 6 h se o usuário ignorou; expirar não conta como "não".
+  - `watchEnabled` em Ajustes, ligado por padrão.
+- Verificado:
+  - 14 suítes verdes (`watch` com 13 casos, `watch-server` com 3), typecheck e build;
+  - `watch-server.test.ts`: no servidor real com sonda falsa, o vigia propôs sozinho, **nada foi executado**
+    e o cartão não se repetiu; depois do POST de aprovação o app fechou e entrou no Registro;
+  - na tela, num servidor de teste à parte (porta 4791, sonda falsa, Auto Care desligado): o cartão
+    "do Folga · Memória em 91 %: dá para liberar 763 MB" apareceu sozinho no Início, e o clique em Aprovar
+    levou a memória de 91 % para 86 %. Servidor e pasta temporária removidos.
+- No computador do Antônio agora o vigia está quieto, e é o esperado: memória em 81 % (linha 85 %) e o disco,
+  com 13,8 % livre, tem menos de 1 GB de limpeza rápida.
+- Correções de data e número que o registro do second-brain apontou no texto abaixo: o servidor reiniciou às
+  15:34 (não 15:30) e o "Abrir com o Windows" foi ligado às 15:47 (não ~15:55). A oscilação medida foram
+  7 trocas de grupo em 33 s, não "a cada 2 a 6 s".
+
 ## 2026-10-18 (fim da tarde) — R04 com histerese, R29 e o F-13 isolado
 - **Histerese no "ocupado"** (`bac7075`): um app que passou da linha de CPU só volta a parado abaixo de 60 %
   dela (3 % no padrão). Chrome, Excel e PC Optimizer, que rondavam os 5 %, pararam de pular de grupo.
@@ -11,9 +33,9 @@
   - por isso ele não vem marcado e o Auto Care não o fecha;
   - a sonda agora manda `windowCount`;
   - Edge e os outros Chromium têm o mesmo efeito por inferência; o Firefox não foi testado.
-- 15:30: servidor real reiniciado com a sonda nova. Ajustes intactos, com o Auto Care em 92 %. O Chrome do
+- 15:34: servidor real reiniciado com a sonda nova. Ajustes intactos, com o Auto Care em 92 %. O Chrome do
   Antônio tem 1 janela agora.
-- **"Abrir com o Windows" ligado** pela tela, a pedido do Antônio (2026-10-18, ~15:55).
+- **"Abrir com o Windows" ligado** pela tela, a pedido do Antônio (2026-10-18, 15:47).
   - O atalho `Folga.lnk` está na pasta Inicializar real e roda `node.exe scripts\launch.mjs --no-window`,
     minimizado, com a pasta Mint como diretório de trabalho.
   - O F-08 agora só depende de reiniciar o Windows.
@@ -75,8 +97,8 @@
     (`web/src/selection.ts`, teste `selection.test.ts`, 12 suítes verdes).
   - Visto ao vivo: com a primeira versão da correção, a marca caía quando o app ficava ocupado. Com a
     versão final, o Excel desmarcado à mão continuou desmarcado.
-- **Observado, sem mudança:** Chrome, Excel e PC Optimizer oscilam entre parado e ocupado a cada poucos
-  segundos, perto da linha de 5 % de CPU da R04. Não há histerese, então a lista pula de grupo.
+- **Observado:** perto da linha de 5 % de CPU da R04, Chrome, Excel e PC Optimizer trocaram de grupo 7 vezes
+  em 33 s de observação. Foi o que motivou a histerese; depois dela, só o teste unitário prova a correção.
 
 ## 2026-10-18 — v1 construída (F-00 a F-11)
 - Feito e commitado:

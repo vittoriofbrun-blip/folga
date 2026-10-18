@@ -12,6 +12,7 @@ import { openWindow, setStartup, startupInstalled } from './window.ts';
 import { createWarnings } from './warnings.ts';
 import { createFiles } from './files.ts';
 import { createSuggestions } from './suggestions.ts';
+import { createWatch } from './watch.ts';
 import { createAgent } from './agent.ts';
 import { DEFAULT_SETTINGS, type AgentProvider, type Emit, type MemoryState, type ProbeSnapshot, type Settings, type SuggestionDraft } from './types.ts';
 
@@ -61,6 +62,7 @@ const RANGES: Partial<Record<keyof Settings, [number, number]>> = {
 const ENUMS: Partial<Record<keyof Settings, readonly string[]>> = {
   warningsLevel: ['todos', 'criticos'], agentProvider: ['claude', 'gpt'],
 };
+const BOOLS: readonly (keyof Settings)[] = ['autoCareEnabled', 'watchEnabled'];
 /** Valida um PUT parcial; devolve o ajuste completo ou uma mensagem de erro. */
 export function mergeSettings(current: Settings, patch: unknown): Settings | string {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return 'corpo inválido';
@@ -72,9 +74,9 @@ export function mergeSettings(current: Settings, patch: unknown): Settings | str
     if (range) {
       if (typeof v !== 'number' || !Number.isFinite(v) || v < range[0] || v > range[1]) return `${k} fora da faixa ${range[0]}–${range[1]}`;
       (next[key] as number) = v;
-    } else if (key === 'autoCareEnabled') {
+    } else if (BOOLS.includes(key)) {
       if (typeof v !== 'boolean') return `${k} deve ser verdadeiro ou falso`;
-      next.autoCareEnabled = v;
+      (next[key] as boolean) = v;
     } else if (ENUMS[key]) {
       if (typeof v !== 'string' || !ENUMS[key]!.includes(v)) return `${k} deve ser um de: ${ENUMS[key]!.join(', ')}`;
       (next[key] as string) = v;
@@ -189,7 +191,15 @@ const agent = createAgent({
   dataDir: DATA_DIR, port: PORT, emit, selfPids: extraSelfPids,
   addSuggestion: draft => suggestions.add(draft, 'agente'),
 });
+// R30: o vigia propõe sozinho; quem executa continua sendo o clique do usuário em suggestions.approve
+const watch = createWatch({
+  getState: () => state, getSettings: () => settings,
+  disks: () => warnings.disk(), quickClean: () => files.quickCleanPreview(),
+  listSuggestions: () => suggestions.list(), propose: draft => suggestions.add(draft, 'folga'),
+  checkMs: Number(process.env.FOLGA_WATCH_MS) || undefined,   // testes encurtam o ciclo
+});
 warnings.start();
+watch.start();
 
 // ---------- HTTP ----------
 const MIME: Record<string, string> = {

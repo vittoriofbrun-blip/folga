@@ -27,7 +27,8 @@ const MAX_APPS = 100;
 const KINDS: readonly SuggestionKind[] = ['lixeira', 'limpeza_rapida', 'liberar_memoria'];
 const DAY = 86_400_000;
 const TTL = 3_600_000;   // M5: cartão pendente vale 1 h
-const EXPIRED = 'expirou depois de 1 h; peça de novo';
+/** Motivo gravado em quem expirou. O vigia usa para saber que ninguém disse "não" (R30). */
+export const EXPIRED = 'expirou depois de 1 h; peça de novo';
 // bidi (U+202A–202E, U+2066–2069) esconde o fim do nome do arquivo; fora de título e motivo
 const BAD_TITLE = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
 const BAD_REASON = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
@@ -36,7 +37,7 @@ const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
 
 const err = (erro: string, status = 400): SuggestionError => ({ erro, status });
 const plural = (n: number, one: string, many: string) => `${nf0.format(n)} ${n === 1 ? one : many}`;
-function size(b: number) {
+export function size(b: number) {
   if (b >= 1024 ** 3) return `${nf1.format(b / 1024 ** 3)} GB`;
   if (b >= 1024 ** 2) return `${nf0.format(b / 1024 ** 2)} MB`;
   if (b >= 1024) return `${nf0.format(b / 1024)} KB`;

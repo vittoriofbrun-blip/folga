@@ -21,11 +21,13 @@ const PROVIDERS: Option[] = [{ value: 'claude', label: 'Claude' }, { value: 'gpt
 type Form = Record<NumKey, string> & {
   neverClose: string[]; mayForceQuit: string[];
   warningsLevel: SettingsData['warningsLevel']; staleDays: string; staleMinMB: string; agentProvider: AgentProvider;
+  watchEnabled: boolean;
 };
 const toForm = (s: SettingsData): Form => ({
   idleMinutes: String(s.idleMinutes), busyCpuPercent: String(s.busyCpuPercent), sampleSeconds: String(s.sampleSeconds),
   neverClose: s.neverClose, mayForceQuit: s.mayForceQuit,
   warningsLevel: s.warningsLevel, staleDays: String(s.staleDays), staleMinMB: String(s.staleMinMB), agentProvider: s.agentProvider,
+  watchEnabled: s.watchEnabled,
 });
 
 function numError(k: NumKey, raw: string): string | null {
@@ -180,7 +182,7 @@ export function Settings({ state }: { state: MemoryState | null }) {
         idleMinutes: Number(form.idleMinutes), busyCpuPercent: Number(form.busyCpuPercent), sampleSeconds: Number(form.sampleSeconds),
         neverClose: form.neverClose, mayForceQuit: form.mayForceQuit,
         warningsLevel: form.warningsLevel, staleDays: Number(form.staleDays), staleMinMB: Number(form.staleMinMB),
-        agentProvider: form.agentProvider,
+        agentProvider: form.agentProvider, watchEnabled: form.watchEnabled,
       });
       setForm(toForm(saved));   // mostra o que o servidor guardou (nomes já normalizados)
       setStatus({ ok: true, text: 'Salvo' });
@@ -217,6 +219,11 @@ export function Settings({ state }: { state: MemoryState | null }) {
             <SelectField id={`${uid}-ap`} label="Assistente padrão" value={form.agentProvider} options={PROVIDERS}
               onChange={(v) => edit({ agentProvider: v === 'gpt' ? 'gpt' : 'claude' })} />
           </div>
+          <label className="set-startup">
+            <input type="checkbox" role="switch" checked={form.watchEnabled} onChange={(e) => edit({ watchEnabled: e.target.checked })} />
+            <span>Propor sozinho o que dá para liberar e limpar, quando a memória subir ou o disco apertar.
+              A proposta espera o seu OK: o Folga não faz nada antes disso.</span>
+          </label>
         </section>
 
         <AppList title="Nunca fechar" items={form.neverClose} apps={apps} onChange={(next) => edit({ neverClose: next })}

@@ -104,6 +104,19 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
   `package.json`, `pyvenv.cfg`, `pyproject.toml`, `Cargo.toml` ou `go.mod` aparece na busca nem passa na
   validação de uma sugestão de Lixeira.
 
+## Vigia (v3, D21)
+- **R30 O Folga propõe sozinho** — De minuto em minuto o servidor olha a memória e o disco e monta um cartão
+  de sugestão sem ninguém pedir. É só proposta: vale tudo da R20 à R25, e quem executa é o clique.
+  - **Memória:** duas leituras seguidas (como a R10) acima da linha, que é 7 pontos antes do Auto Care
+    (85 % no padrão) ou 85 % com ele desligado, nunca abaixo de 70 %. Pega os apps parados, no máximo 5,
+    maiores primeiro, e só se somarem 500 MB.
+  - **Disco:** menos de 15 % livre no disco do sistema e pelo menos 1 GB de limpeza rápida. A medição é cara,
+    então acontece no máximo a cada 30 min.
+  - **Freio:** não propõe o mesmo tipo com um cartão esperando resposta, nem antes de 1 h depois de propor
+    ou de uma decisão. Se o usuário **ignorou**, espera 6 h. Cartão que expirou sozinho não conta como "não".
+  - **Desligar:** `watchEnabled` em Ajustes. Desligado, nada é proposto.
+  - O vigia não usa modelo de linguagem: os números vêm das mesmas leituras das telas.
+
 ## Avisos (v2, D15)
 - **R26** — Cada aviso tem um id estável por causa, nível, título, uma frase e o lugar onde se resolve.
   Avisos iguais não se repetem; quando a causa some, o aviso sai.

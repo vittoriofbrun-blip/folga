@@ -52,6 +52,10 @@ Dados em `%LOCALAPPDATA%\Folga\`:
 v2: servidor MCP do agente em `src/mcp.ts`, assistente em `src/agent.ts` (ADR 0006), avisos em
 `src/warnings.ts`, arquivos e limpeza em `src/files.ts`, sugestões em `src/suggestions.ts`.
 
+v3: o vigia em `src/watch.ts` (R30, D21). Ele só chama `suggestions.add(draft, 'folga')`; executar continua
+sendo `suggestions.approve`, que só roda no clique. Testes: `FOLGA_WATCH_MS` encurta o ciclo, e a sonda falsa
+aceita `FAKE_AVAIL_GB` e `FAKE_NOTEPAD_MB`.
+
 ## Contrato (`src/types.ts`, F-00)
 Desde o F-00 a fonte é o `src/types.ts`, que também exporta `DEFAULT_SETTINGS`, `SYSTEM_PROCESSES` e
 `ReleaseResponse`. Este bloco é o resumo.

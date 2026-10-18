@@ -3,11 +3,11 @@ import { createInterface } from 'node:readline';
 
 const intervalMs = Number(process.env.FAKE_INTERVAL_MS ?? 200);
 const GB = 1024 ** 3;
-let avail = 6 * GB;
+let avail = Number(process.env.FAKE_AVAIL_GB ?? 6) * GB;   // memLoad = 100 - avail/16 GB
 const procs = new Map([
   [process.ppid, { pid: process.ppid, ppid: 1, name: 'node.exe', description: 'Node.js', session: 1, privateWorkingSet: 50e6, cpuTimeMs: 0, hasVisibleWindow: false, accessible: true }],
   [process.pid, { pid: process.pid, ppid: process.ppid, name: 'node.exe', description: 'Node.js', session: 1, privateWorkingSet: 30e6, cpuTimeMs: 0, hasVisibleWindow: false, accessible: true }],
-  [9001, { pid: 9001, ppid: 4, name: 'notepad.exe', description: 'Bloco de Notas', session: 1, privateWorkingSet: 40e6, cpuTimeMs: 0, hasVisibleWindow: true, accessible: true }],
+  [9001, { pid: 9001, ppid: 4, name: 'notepad.exe', description: 'Bloco de Notas', session: 1, privateWorkingSet: Number(process.env.FAKE_NOTEPAD_MB ?? 40) * 1e6, cpuTimeMs: 0, hasVisibleWindow: true, accessible: true }],
   [9002, { pid: 9002, ppid: 4, name: 'explorer.exe', description: 'Windows Explorer', session: 1, privateWorkingSet: 90e6, cpuTimeMs: 0, hasVisibleWindow: true, accessible: true }],
   [9003, { pid: 9003, ppid: 4, name: 'svchost.exe', description: '', session: 0, privateWorkingSet: 20e6, cpuTimeMs: 0, hasVisibleWindow: false, accessible: false }],
 ]);

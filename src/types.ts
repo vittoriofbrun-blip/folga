@@ -46,6 +46,7 @@ export type Settings = {
   staleDays: number;                      // D16: "não abro há N dias"
   staleMinMB: number;                     // D16: ignora arquivos menores que isto
   agentProvider: AgentProvider;           // D14
+  watchEnabled: boolean;                  // R30: o vigia propõe sozinho (só propõe)
 };
 export type MemoryState = {
   t: number; memLoad: number; totalPhys: number; availPhys: number;
@@ -69,6 +70,7 @@ export const DEFAULT_SETTINGS: Settings = {
   staleDays: 180,
   staleMinMB: 10,
   agentProvider: 'claude',
+  watchEnabled: true,
 };
 
 // ======================= v2: telas, avisos, arquivos, sugestões, agente =======================
