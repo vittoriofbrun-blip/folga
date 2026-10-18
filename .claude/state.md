@@ -1,6 +1,6 @@
 # Estado (mais recente no topo)
 
-## 2026-10-18 (16:30 a 17:00) — o vigia avisa (R31) e cartão de máquina não fecha app em uso
+## 2026-10-18 (16:10 a 16:36) — o vigia avisa (R31) e cartão de máquina não fecha app em uso
 - **Furo fechado antes de qualquer coisa:** o vigia nascia com `source: 'folga'`, que é o do cartão montado
   na tela, e esse aceita fechar app **não parado** porque o usuário está olhando a lista. Um cartão de
   máquina pode envelhecer, então ele passou a ter `source: 'vigia'` e a mesma conferência do assistente:
@@ -11,10 +11,16 @@
     nome de app nunca vira comando. Conferido: com título e corpo cheios de `"`, `<tag>`, `&`, `$(...)` e
     crase, o script saiu com 0.
   - Usa o AppId do próprio PowerShell, que é o jeito de tocar um toast sem registrar um app no Windows.
-    Efeito colateral: a notificação aparece como "Windows PowerShell". O primeiro texto é "Folga".
+    Por isso o primeiro texto é "Folga". **Não conferido:** a previsão é que o Windows mostre a notificação
+    sob o nome "Windows PowerShell", mas ninguém olhou a tela.
 - Verificado ao vivo: num servidor de teste (porta 4791, sonda falsa), o vigia propôs e **o processo do
   toast foi pego no ar**, com o título do cartão fora da linha de comando. 15 suítes verdes, typecheck, build.
-- Servidor real reiniciado às 16:47 com tudo isto.
+  - **O limite dessa prova:** ela mostra que o processo rodou e saiu com 0. Ninguém confirmou ter **visto** a
+    notificação na tela nem ter tocado nela para abrir o Folga. Falta o Antônio dizer.
+  - Armadilha pela qual passei: o módulo engole falhas de propósito, então a primeira conferência imprimiu
+    "disparado" com o script quebrado. Só rodar o `SCRIPT` exportado por `spawnSync` e ler o status 1 pegou.
+  - Uma olhada única 9 s depois da proposta achou 0 processos de toast: foi o laço de 100 ms que pegou.
+- Servidor real reiniciado às 16:31 com tudo isto (o commit veio depois, às 16:35).
 
 ## 2026-10-18 (15:51 a 16:20) — o vigia: o Folga propõe sozinho (D21, R30)
 - Pedido do Antônio: "monitorando o desempenho, traga opções, eu dou o ok e ele já resolve".
@@ -35,7 +41,8 @@
 - No computador do Antônio o vigia está quieto, e é o esperado. Medido às 16:17 no servidor real:
   - memória em 81 %, contra a linha de 85 %;
   - disco C: com 13,8 % livre (abaixo dos 15 %), mas só 47 MB de limpeza acionável, contra a linha de 1 GB;
-  - o cache do Chrome (47 MB) é quase tudo, e nem conta enquanto o Chrome estiver aberto;
+  - os 47 MB são o cache do **Edge**, que está fechado. O cache do Chrome não entra na conta, porque o Chrome
+    está aberto e o `files.ts` só conta o navegador fechado;
   - `/api/suggestions` tem só o cartão de teste do F-18, já feito. Nada pendente.
 - Correções de data e número que o registro do second-brain apontou no texto abaixo: o servidor reiniciou às
   15:34 (não 15:30) e o "Abrir com o Windows" foi ligado às 15:47 (não ~15:55). A oscilação medida foram
