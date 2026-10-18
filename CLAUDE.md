@@ -1,0 +1,34 @@
+# Folga (nome provisório) — economizar memória no Windows
+
+App pessoal de Windows inspirado na frente "Free up memory" do Mint para Mac. Mostra quais apps seguram
+a memória e fecha, do jeito normal, os que estão parados. Também tem Auto Care por porcentagem e um registro.
+
+## Leia conforme a tarefa
+- Visão, decisões D## e perguntas abertas P##: `.claude/project.md`
+- Regras R## (a "lei"): `.claude/requirements.md`
+- Stack, árvore de arquivos, **contrato de tipos** e API: `.claude/fluxo-infraestrutura.md`
+- Jornada de liberar memória e casos de borda: `.claude/fluxo-memoria.md`
+- Ordem dos tickets: `.claude/roadmap.md` · briefs no kanban http://localhost:4747/b/folga
+- Por que cada escolha: `.claude/adr/`
+- O que o Mint faz (observado × inferido): `docs/engenharia-reversa-mint.md`, telas em `docs/referencias-ui/`
+- Estado da última sessão: `.claude/state.md` (só o topo)
+
+## Comandos (depois do F-00)
+`npm run dev` (servidor + Vite) · `npm test` · `npm run typecheck` · `npm run build` · `node scripts/build-probe.mjs`
+
+## Regras que não se quebram
+- Nunca encerrar app à força por padrão. Liberar é `WM_CLOSE` (ADR 0003, R07).
+- Nada de `EmptyWorkingSet` nem de esvaziar a lista standby (ADR 0004).
+- "Liberados X GB" é o disponível depois menos o de antes, nunca a soma dos apps (R08).
+- Servidor só em 127.0.0.1, com token em todo POST/PUT (R15–R17).
+- Pegada em segundo plano ≤ 120 MB (R18). Dependência nova só com motivo escrito.
+- Não usar o nome, o logo, a imagem da Terra nem o verde-limão do Mint.
+- Método ponytail: menor diff que funciona, sem abstração sem uso; lógica com regra deixa um teste `node:assert`.
+
+## Armadilhas de Windows
+`spawn` com caminho absoluto e `shell:false`; o caminho tem acento (`C:\Users\Antônio`), então nada de
+`fs.cpSync` recursivo; arquivo gravado pelo Node, não por `Set-Content` (BOM); a sonda morre junto com o
+servidor; matar por árvore (`taskkill /T`) e conferir o PID dono da porta. Detalhes em `fluxo-infraestrutura.md`.
+
+## Agentes despachados pelo kanban
+Não rodam PowerShell nem `csc.exe` direto: chamam `node scripts/...`. Sem push, deploy ou segredo.

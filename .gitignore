@@ -1,0 +1,9 @@
+node_modules/
+dist/
+probe/bin/
+.claude/.work/
+skill-observations/
+*.log
+# logs de outro projeto (MCP do WhatsApp) que estavam na pasta; têm dados de pareamento
+mcp-logs.txt
+wa-logs.txt
