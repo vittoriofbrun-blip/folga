@@ -76,11 +76,13 @@ export function classify(
     else if (ctx.now - (focused ?? ctx.startedAt) < settings.idleMinutes * 60_000) { state = 'in_use'; reason = 'recent'; }
     else { state = 'idle'; reason = 'idle'; }
 
-    const description = procs.map((p) => p.description.trim()).find((d) => d !== '');
+    // apps empacotados (Paint, Bloco de Notas) trazem o próprio "x.exe" como descrição: não serve de nome
+    const description = procs.map((p) => p.description.trim()).find((d) => d !== '' && !/\.exe$/i.test(d));
     const first = procs[0]!; // grupo nunca é vazio
+    const fileName = first.name.replace(/\.exe$/i, '');
     apps.push({
       key,
-      name: key === SELF_KEY ? 'Folga' : description ?? first.name.replace(/\.exe$/i, ''),
+      name: key === SELF_KEY ? 'Folga' : description ?? fileName.charAt(0).toUpperCase() + fileName.slice(1),
       pids: procs.map((p) => p.pid),
       privateWorkingSet: procs.reduce((a, p) => a + p.privateWorkingSet, 0),
       cpuPercent, state, reason, lastFocusedAt: focused,

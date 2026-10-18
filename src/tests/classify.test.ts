@@ -76,6 +76,11 @@ caso('nome de exibição sem description: nome original sem .exe', () => {
   assert.equal(find(classify(snapOf([proc('Figma.exe')], T0), emptyHistory(), settings, ctxAt(T0)), 'figma').name, 'Figma');
 });
 
+caso('descrição que é só "x.exe" (apps empacotados) não vira nome: "mspaint.exe" -> "Mspaint"', () => {
+  const p = { ...proc('mspaint.exe'), description: 'mspaint.exe' };
+  assert.equal(find(classify(snapOf([p], T0), emptyHistory(), settings, ctxAt(T0)), 'mspaint').name, 'Mspaint');
+});
+
 caso('e) never_close (WindowsTerminal) e SYSTEM (explorer) -> protected', () => {
   const r = classify(snapOf([proc('WindowsTerminal.exe'), proc('explorer.exe')], T0 + 99 * MIN), emptyHistory(), settings, ctxAt(T0 + 99 * MIN));
   const wt = find(r, 'windowsterminal'); const ex = find(r, 'explorer');

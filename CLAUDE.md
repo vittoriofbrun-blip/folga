@@ -13,8 +13,10 @@ a memória e fecha, do jeito normal, os que estão parados. Também tem Auto Car
 - O que o Mint faz (observado × inferido): `docs/engenharia-reversa-mint.md`, telas em `docs/referencias-ui/`
 - Estado da última sessão: `.claude/state.md` (só o topo)
 
-## Comandos (depois do F-00)
-`npm run dev` (servidor + Vite) · `npm test` · `npm run typecheck` · `npm run build` · `node scripts/build-probe.mjs`
+## Comandos
+`npm run build` e depois `npm run app` (sobe o servidor escondido e abre a janela) · `npm run dev` (servidor + Vite em 5180) ·
+`npm test` · `npm run typecheck` · `node scripts/probe-smoke.mjs` (sonda real) · `node scripts/footprint.mjs --minutes 10` (R18).
+A sonda roda pelo `Add-Type` do PowerShell (D10); `FOLGA_PROBE_EXE=1` usa o `.exe`, que o antivírus apaga.
 
 ## Regras que não se quebram
 - Nunca encerrar app à força por padrão. Liberar é `WM_CLOSE` (ADR 0003, R07).
