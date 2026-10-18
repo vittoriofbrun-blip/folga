@@ -127,6 +127,10 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
   - Se o Windows recusar uma vez, o Folga para de tentar até reiniciar. Avisar nunca derruba o que estava
     acontecendo.
 
+- **R33 O logon abre a janela** (pedido do Antônio, 2026-10-18) — O atalho da pasta Inicializar roda o
+  `launch.mjs` **sem** `--no-window`: sobe o servidor e abre a janela. O `--no-window` continua existindo para
+  quem quiser só o servidor. O Auto Care vale com a janela aberta ou fechada (R13).
+
 - **R32 O início deixa rastro** (2026-10-18) — O `launch.mjs` manda a saída do servidor para
   `%LOCALAPPDATA%\Folga\server.log` (acréscimo, zerado acima de 1 MB), e o servidor grava uma linha ao subir:
   data, porta, pasta de dados, de onde vieram os ajustes e o estado do Auto Care.

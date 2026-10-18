@@ -1,5 +1,13 @@
 # Estado (mais recente no topo)
 
+## 2026-10-18 (17:40) — o logon passa a abrir a janela (R33)
+- O Antônio pediu a janela aberta no logon, e não só o servidor. O atalho deixou de passar `--no-window`.
+- O atalho foi refeito pela API (desligar e ligar), e o caminho do logon foi testado de verdade: servidor
+  derrubado, `node scripts\launch.mjs` rodado como o atalho roda, e a janela do Edge com o perfil do Folga
+  abriu, com o servidor lendo o `settings.json` e o Auto Care em 92 %.
+- O texto do interruptor em Ajustes foi corrigido: antes dizia "sem abrir a janela".
+- 15 suítes verdes, typecheck e build.
+
 ## 2026-10-18 (17:15 a 17:35) — F-08 passou, e um início no logon que não leu os ajustes
 - **F-08 está feito.** O Antônio reiniciou o Windows (boot 17:07:51) e disse "não apareceu o app". O servidor
   **subiu sozinho**: PID 5400 às 17:09:30, pelo atalho (`FOLGA_OPEN_WINDOW=0` no ambiente dele, pai já morto),

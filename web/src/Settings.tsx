@@ -258,7 +258,7 @@ function Startup() {
       <label className="set-startup">
         <input type="checkbox" role="switch" checked={on ?? false} disabled={on === null}
           onChange={e => void toggle(e.target.checked)} />
-        <span>Ligar o Folga quando você entrar no Windows, sem abrir a janela. O Auto Care passa a valer o dia todo.</span>
+        <span>Abrir o Folga quando você entrar no Windows. O Auto Care passa a valer o dia todo, com a janela aberta ou fechada.</span>
       </label>
       <p className="set-err" role="status">{problem}</p>
     </section>

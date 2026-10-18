@@ -32,14 +32,15 @@ const psQuote = (s: string) => `'${s.replaceAll("'", "''")}'`;
 
 export const startupInstalled = () => existsSync(lnkPath());
 
-/** Cria ou remove o atalho que sobe só o servidor no logon (sem abrir a janela). */
+/** Cria ou remove o atalho que sobe o Folga no logon e abre a janela. */
 export function setStartup(on: boolean, root: string): Promise<boolean> {
   // unlinkSync, não rmSync: no Node 24.13 o rmSync não apaga arquivo em caminho com acento (C:\Users\Antônio) nem dá erro
   if (!on) { try { unlinkSync(lnkPath()); } catch { /* já não existia */ } return Promise.resolve(startupInstalled()); }
   const script = [
     `$s = (New-Object -ComObject WScript.Shell).CreateShortcut(${psQuote(lnkPath())})`,
     `$s.TargetPath = ${psQuote(process.execPath)}`,
-    `$s.Arguments = '"' + ${psQuote(join(root, 'scripts', 'launch.mjs'))} + '" --no-window'`,
+    // sem --no-window: o Antônio pediu a janela aberta no logon (2026-10-18). O servidor sobe junto de qualquer jeito.
+    `$s.Arguments = '"' + ${psQuote(join(root, 'scripts', 'launch.mjs'))} + '"'`,
     `$s.WorkingDirectory = ${psQuote(root)}`,
     '$s.WindowStyle = 7',   // minimizado: o console do node pisca menos
     '$s.Description = "Folga: liberar memória"',
