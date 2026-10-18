@@ -1,7 +1,13 @@
 # Referências de interface (Mint para Mac, capturadas em 2026-10-18)
 
-Capturas das imagens públicas de https://mintstorage.app/, só para referência de layout. **Não copiar
-a marca** (nome, logo, imagem da Terra, verde-limão).
+Capturas das imagens públicas de https://mintstorage.app/, só para referência de layout.
+
+**Desde a D12 (2026-10-18), por pedido do Antônio, o Folga usa as cores, o layout e as animações do
+Mint.** A paleta está em `web/src/tokens.css`. Continua proibido usar o nome, o logo e a imagem da Terra
+do Mint. A seção "Paleta provisória" mais abaixo ficou só como histórico.
+
+As telas do McAfee (LiveSafe e PC Optimizer) estão em `mcafee/`, explicadas em
+`docs/engenharia-reversa-mcafee.md`.
 
 | Arquivo | Tela | O que levar para o nosso app |
 |---|---|---|

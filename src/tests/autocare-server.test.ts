@@ -2,7 +2,8 @@
 // grava origin 'auto' e liga o freio.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_SETTINGS, type LogEntry, type MemoryState } from '../types.ts';
@@ -48,5 +49,5 @@ try {
 } finally {
   server.kill();
   await sleep(300);
-  rmSync(dataDir, { recursive: true, force: true });
+  await rm(dataDir, { recursive: true, force: true, maxRetries: 5 });
 }

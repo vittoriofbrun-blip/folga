@@ -1,0 +1,264 @@
+// Arquivos parados, revalidação e limpeza rápida. Só pastas temporárias criadas aqui: nunca toca em arquivo real
+// do usuário e nunca chama a Lixeira de verdade (R21, R22, D16, D17).
+import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { createFiles, type FilesDeps } from '../files.ts';
+import { DEFAULT_SETTINGS } from '../types.ts';
+
+const DAY = 86_400_000;
+const MB = 1024 * 1024;
+// nome com acento de propósito (o caminho real do usuário tem: C:\Users\Antônio)
+const base = mkdtempSync(join(tmpdir(), 'folga-arq-ção-'));
+const dir = (...p: string[]) => { const d = join(base, ...p); mkdirSync(d, { recursive: true }); return d; };
+const file = (path: string, bytes: number, daysOld: number) => {
+  writeFileSync(path, '');
+  truncateSync(path, bytes);
+  const t = new Date(Date.now() - daysOld * DAY);
+  utimesSync(path, t, t);
+  return path;
+};
+
+let passed = 0;
+const ok = (name: string) => { passed++; console.log(`ok  ${name}`); };
+
+try {
+  const downloads = dir('Downloads');
+  const docs = dir('Documentos');
+  const recent = dir('Recent');
+  const mk = (over: Partial<FilesDeps> = {}) => createFiles({
+    getSettings: () => DEFAULT_SETTINGS, roots: [downloads, docs], recentDir: recent, accessTracking: true,
+    tempDirs: [join(base, 'sem-temp')], cacheDirs: {}, browsersOpen: async () => ({ chrome: false, edge: false }),
+    trash: async () => ({ bytes: 0, files: 0 }), ...over,
+  });
+
+  // ---------- allowedRoots ----------
+  {
+    const f = mk({ roots: [downloads, docs.toUpperCase(), docs, join(base, 'nao-existe'), join(downloads, '..', 'Downloads'), dir('Downloads', 'filha')] });
+    const r = f.allowedRoots();
+    assert.equal(r.length, 2, `esperava 2 raízes, veio ${r.join(' | ')}`);   // sem inexistente, sem duplicata, sem pasta dentro de outra
+    assert.ok(r.every(x => existsSync(x)));
+    await rm(join(downloads, 'filha'), { recursive: true });
+    // as pastas reais do usuário: só existentes e sem duplicata
+    const real = createFiles({ getSettings: () => DEFAULT_SETTINGS }).allowedRoots();
+    assert.equal(new Set(real.map(x => x.toLowerCase())).size, real.length);
+    assert.ok(real.every(x => existsSync(x)));
+    ok('allowedRoots: só existentes, realpath, sem duplicata nem pasta dentro de pasta');
+  }
+
+  // ---------- scan ----------
+  file(join(downloads, 'velho-grande.iso'), 5 * MB, 400);
+  file(join(downloads, 'novo-grande.iso'), 5 * MB, 1);
+  file(join(downloads, 'velho-pequeno.txt'), 100 * 1024, 400);
+  file(join(dir('Documentos', 'a', 'b'), 'meio.zip'), 2 * MB, 200);
+  file(join(dir('Documentos', 'node_modules', 'x'), 'ignorado.bin'), 3 * MB, 500);
+  file(join(dir('Documentos', '.oculta'), 'ignorado.bin'), 3 * MB, 500);
+  // 11 níveis de profundidade: passa do limite de 10
+  let deep = docs;
+  for (let i = 0; i < 11; i++) deep = join(deep, `n${i}`);
+  mkdirSync(deep, { recursive: true });
+  file(join(deep, 'fundo.bin'), 3 * MB, 500);
+  // junção para fora das raízes: nunca atravessada
+  const outside = dir('Fora');
+  file(join(outside, 'fora.bin'), 8 * MB, 900);
+  let junction = true;
+  try { symlinkSync(outside, join(docs, 'atalho-fora'), 'junction'); } catch { junction = false; }
+
+  {
+    const f = mk();
+    assert.equal(f.last(), null);
+    const s = await f.scan({ olderThanDays: 30, minMB: 1 });
+    assert.deepEqual(s.files.map(x => x.name), ['velho-grande.iso', 'meio.zip']);   // por tamanho decrescente
+    assert.equal(s.totalBytes, 7 * MB);
+    assert.equal(s.truncated, false);
+    assert.equal(s.accessTracking, true);
+    assert.equal(s.olderThanDays, 30);
+    assert.equal(s.minBytes, MB);
+    assert.equal(s.files[0]!.basis, 'acesso');
+    assert.equal(s.files[0]!.root.toLowerCase(), realpathSync.native(downloads).toLowerCase());
+    assert.ok(s.scanned > 5 && s.durationMs >= 0 && s.t > 0);
+    assert.equal(f.last(), s);
+    ok(`scan: filtro de idade e tamanho, ignora node_modules/.oculta/profundidade >10${junction ? ' e junção' : ' (sem junção: pulado)'}`);
+
+    const s2 = await f.scan({ olderThanDays: 300, minMB: 1 });
+    assert.deepEqual(s2.files.map(x => x.name), ['velho-grande.iso']);
+    ok('scan: parâmetros mudam o resultado');
+
+    const def = await createFiles({ getSettings: () => ({ ...DEFAULT_SETTINGS, staleDays: 300, staleMinMB: 1 }), roots: [downloads, docs], recentDir: recent, accessTracking: true }).scan();
+    assert.equal(def.files.length, 1);
+    ok('scan: sem parâmetros usa os Ajustes (staleDays/staleMinMB)');
+  }
+
+  {
+    const s = await mk({ accessTracking: false }).scan({ olderThanDays: 30, minMB: 1 });
+    assert.equal(s.accessTracking, false);
+    assert.ok(s.files.every(x => x.basis === 'modificacao'));
+    ok("scan: rastreio de acesso desligado → basis 'modificacao'");
+  }
+
+  {
+    // atalho em Recent mais novo que o acesso → o arquivo "foi usado"; atalho mais velho → vale o acesso
+    const used = file(join(downloads, 'usado-pelo-atalho.iso'), 4 * MB, 400);
+    const lnk = join(recent, 'usado-pelo-atalho.iso.lnk');
+    writeFileSync(lnk, 'x');
+    const f = mk();
+    let s = await f.scan({ olderThanDays: 30, minMB: 1 });
+    assert.ok(!s.files.some(x => x.name === 'usado-pelo-atalho.iso'), 'atalho de hoje: não é parado');
+    s = await f.scan({ olderThanDays: 5, minMB: 1 });   // atalho de hoje, mas agora o corte é 5 dias: atalho venceria, ainda recente
+    assert.ok(!s.files.some(x => x.name === 'usado-pelo-atalho.iso'));
+    const t = new Date(Date.now() - 100 * DAY);
+    utimesSync(lnk, t, t);   // atalho de 100 dias, acesso de 400 → vale o atalho
+    s = await f.scan({ olderThanDays: 30, minMB: 1 });
+    const hit = s.files.find(x => x.name === 'usado-pelo-atalho.iso');
+    assert.ok(hit);
+    assert.equal(hit.basis, 'recentes');
+    assert.ok(Math.abs(hit.lastUsed - t.getTime()) < 2000);
+    s = await f.scan({ olderThanDays: 150, minMB: 1 });   // 100 d de atalho < 150: sai da lista
+    assert.ok(!s.files.some(x => x.name === used.split('\\').pop()));
+    ok("scan: basis 'recentes' pelo atalho de mesmo nome em Recent");
+  }
+
+  {
+    const s = await mk({ maxEntries: 3 }).scan({ olderThanDays: 30, minMB: 1 });
+    assert.equal(s.truncated, true);
+    assert.ok(s.scanned <= 3);
+    const t = await mk({ maxMs: -1 }).scan({ olderThanDays: 30, minMB: 1 });
+    assert.equal(t.truncated, true);
+    ok('scan: teto de entradas e de tempo → truncated');
+  }
+
+  {
+    const many = dir('Documentos', 'muitos');
+    for (let i = 0; i < 520; i++) file(join(many, `f${String(i).padStart(3, '0')}.bin`), 2000 + i, 400);
+    const s = await mk().scan({ olderThanDays: 30, minMB: 0.001 });
+    assert.equal(s.files.length, 500);
+    assert.ok(s.files[0]!.size >= s.files[499]!.size);
+    const expected = s.files.reduce((a, x) => a + x.size, 0);
+    assert.ok(s.totalBytes > expected, 'totalBytes soma todos os achados, não só os 500');
+    ok('scan: no máximo 500 achados, totalBytes de todos');
+    await rm(many, { recursive: true });
+  }
+
+  {
+    // uma varredura por vez: a segunda espera a primeira
+    const f = mk();
+    const order: string[] = [];
+    const a = f.scan({ olderThanDays: 30, minMB: 1 }).then(r => { order.push('a'); return r; });
+    const b = f.scan({ olderThanDays: 300, minMB: 1 }).then(r => { order.push('b'); return r; });
+    const [ra, rb] = await Promise.all([a, b]);
+    assert.deepEqual(order, ['a', 'b']);
+    assert.ok(ra.t <= rb.t);
+    assert.equal(f.last(), rb);
+    ok('scan: uma por vez, last() devolve a última');
+  }
+
+  // ---------- inspect / recycle (revalidação, R21) ----------
+  {
+    const f = mk();
+    const good = join(downloads, 'velho-grande.iso');
+    const r = await f.inspect([good, good.toUpperCase()]);
+    assert.ok(!('erro' in r[0]!) && !('erro' in r[1]!));
+    assert.equal((r[0] as { size: number }).size, 5 * MB);
+    assert.equal((r[1] as { path: string }).path, (r[0] as { path: string }).path);   // caminho real, caixa corrigida
+    const bad = [
+      'C:\\Windows\\System32\\drivers\\etc\\hosts',
+      join(docs, '..', '..', 'Windows', 'win.ini'),
+      join(docs, '..', 'Fora', 'fora.bin'),
+      '\\\\servidor\\compartilhado\\arquivo.txt',
+      '\\\\?\\C:\\Windows\\win.ini',
+      '\\\\.\\PhysicalDrive0',
+      '//servidor/pasta/a.txt',
+      'relativo\\arquivo.txt',
+      join(downloads, 'velho-grande.iso') + ':fluxo',
+      join(downloads, 'nao-existe.iso'),
+      downloads,                                  // a própria raiz
+      join(docs, 'a'),                            // pasta
+      '', 'C:', 42 as unknown as string,
+    ];
+    const rb = await f.inspect(bad);
+    rb.forEach((x, i) => assert.ok('erro' in x, `deveria recusar: ${String(bad[i])}`));
+    if (junction) {
+      const viaJunction = await f.inspect([join(docs, 'atalho-fora', 'fora.bin'), join(docs, 'atalho-fora')]);
+      viaJunction.forEach(x => assert.ok('erro' in x, 'junção para fora não passa'));
+    }
+    ok('inspect: fora das raízes, travessia, UNC, \\\\?\\, dispositivo, fluxo NTFS, inexistente, pasta, junção → recusados');
+
+    // recycle com caminhos inválidos: tudo em failed e a Lixeira nem é chamada
+    const rr = await f.recycle(['C:\\Windows\\win.ini', join(downloads, 'nao-existe.iso')]);
+    assert.deepEqual(rr.ok, []);
+    assert.equal(rr.failed.length, 2);
+    assert.ok(existsSync(good));
+    ok('recycle: caminho inválido vai para failed sem tocar em nada');
+  }
+
+  // ---------- limpeza rápida ----------
+  {
+    const tmp = dir('Temp');
+    file(join(tmp, 'velho.tmp'), 3000, 10);
+    file(join(dir('Temp', 'sub', 'sub2'), 'velho2.tmp'), 2000, 30);
+    file(join(tmp, 'novo.tmp'), 4000, 1);
+    const travado = file(join(tmp, 'travado.tmp'), 1000, 20);
+    // arquivo travado de verdade: um PowerShell o abre sem compartilhar (o unlink do Windows falha)
+    const holder = spawn(join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+      ['-NoProfile', '-NonInteractive', '-Command', "$f=[IO.File]::Open($env:FOLGA_LOCK,'Open','Read','None');'ready';Start-Sleep 60"],
+      { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, FOLGA_LOCK: travado } });
+    await new Promise<void>((res, rej) => { holder.stdout.once('data', () => res()); holder.once('error', rej); setTimeout(() => rej(new Error('PowerShell não travou o arquivo')), 15_000); });
+    const chromeC = dir('Cache', 'chrome', 'Default', 'Cache', 'Cache_Data');
+    const edgeC = dir('Cache', 'edge', 'Default', 'Code Cache');
+    file(join(chromeC, 'data_0'), 5000, 0);
+    file(join(chromeC, 'data_1'), 6000, 0);
+    file(join(edgeC, 'js_1'), 7000, 0);
+    const caches = { chrome: [chromeC], edge: [edgeC] };
+    let open = { chrome: true, edge: false };
+    const mkc = () => mk({ tempDirs: [tmp], cacheDirs: caches, browsersOpen: async () => open, trash: async () => ({ bytes: 123, files: 2 }) });
+
+    let items = await mkc().quickCleanPreview();
+    const by = (c: string) => items.find(i => i.category === c)!;
+    assert.deepEqual(items.map(i => i.category), ['temp_usuario', 'cache_navegador', 'lixeira']);
+    assert.equal(by('temp_usuario').files, 3);
+    assert.equal(by('temp_usuario').bytes, 6000);
+    assert.equal(by('temp_usuario').actionable, true);
+    assert.equal(by('cache_navegador').bytes, 7000);   // só o Edge (fechado) é "a apagar"
+    assert.equal(by('cache_navegador').files, 1);
+    assert.equal(by('cache_navegador').actionable, true);
+    assert.equal(by('cache_navegador').note, 'Chrome aberto: feche para limpar o cache');
+    assert.equal(by('lixeira').actionable, false);
+    assert.equal(by('lixeira').bytes, 123);
+    assert.equal(by('lixeira').note, 'Esvazie pela Lixeira do Windows');
+    assert.ok(items.every(i => /[a-zç]/.test(i.label)));
+    ok('quickCleanPreview: temporários > 7 dias, cache só de navegador fechado, Lixeira só informativa');
+
+    open = { chrome: true, edge: true };
+    items = await mkc().quickCleanPreview();
+    assert.equal(by('cache_navegador').actionable, false);
+    assert.equal(by('cache_navegador').bytes, 18000);
+    assert.equal(by('cache_navegador').note, 'Chrome e Edge abertos: feche para limpar o cache');
+    ok('quickCleanPreview: todos os navegadores abertos → não acionável');
+
+    open = { chrome: true, edge: false };
+    const r = await mkc().quickClean({ categories: ['temp_usuario'] });
+    assert.equal(r.files, 2);
+    assert.equal(r.bytes, 5000);
+    assert.equal(r.skipped, 1);   // o travado
+    assert.ok(existsSync(join(tmp, 'novo.tmp')) && existsSync(travado));
+    assert.ok(!existsSync(join(tmp, 'velho.tmp')));
+    assert.ok(existsSync(join(edgeC, 'js_1')), 'categoria fora do pedido não é tocada');
+    ok('quickClean: só temporários antigos; novo e travado ficam; categorias limitadas ao pedido');
+
+    const r2 = await mkc().quickClean();
+    assert.equal(r2.files, 1);   // o cache do Edge; o do Chrome (aberto) fica; o travado continua travado e é pulado
+    assert.ok(!existsSync(join(edgeC, 'js_1')));
+    assert.ok(existsSync(join(chromeC, 'data_0')) && existsSync(join(chromeC, 'data_1')), 'cache de navegador aberto nunca é apagado');
+    ok('quickClean: cache de navegador aberto não é apagado');
+
+    holder.kill();
+    await new Promise(r => holder.once('exit', r));   // solta o arquivo antes da limpeza
+  }
+
+  console.log(`files: ${passed} casos ok`);
+} finally {
+  await rm(base, { recursive: true, force: true });
+}

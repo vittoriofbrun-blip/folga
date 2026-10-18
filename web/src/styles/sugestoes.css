@@ -1,0 +1,53 @@
+/* Cartão de sugestão (SuggestionCard). Só variáveis de tokens.css. */
+.sug-card {
+  --tone: var(--accent);
+  display: flex; flex-direction: column; gap: 8px; padding: 16px 18px;
+  background: var(--cell); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.sug-card[data-status='feita'] { --tone: var(--accent); }
+.sug-card[data-status='falhou'] { --tone: var(--danger); }
+.sug-card[data-status='ignorada'] { --tone: var(--system); opacity: 0.8; }
+.sug-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sug-title { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; min-width: 0; overflow-wrap: anywhere; }
+.sug-origin {
+  flex: none; padding: 2px 9px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600;
+  border: 1px solid var(--line); color: var(--muted); background: var(--tint);
+}
+.sug-origin[data-source='agente'] { color: var(--in-use); border-color: color-mix(in srgb, var(--in-use) 45%, transparent); }
+.sug-reason { margin: 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; white-space: pre-line; }
+.sug-card[data-compact] .sug-reason { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.sug-items { list-style: none; margin: 4px 0 0; padding: 0; border-top: 1px solid var(--line); }
+.sug-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; padding: 7px 0;
+  border-bottom: 1px solid var(--tint-line);
+}
+.sug-item-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sug-item-size { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
+.sug-item-detail { grid-column: 1 / -1; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sug-more { padding: 7px 0 0; color: var(--muted); font-size: 12px; }
+
+.sug-total { margin: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.sug-total strong { font-weight: 600; }
+.sug-promise { margin: 0; color: var(--muted); font-size: 12px; }
+.sug-total .sug-promise { font-size: 13px; }
+
+.sug-actions { display: flex; align-items: center; gap: 16px; margin-top: 4px; }
+.sug-card .pill { padding: 9px 26px; }
+.sug-link {
+  border: 0; background: none; padding: 6px 4px; color: var(--muted); font-size: 13px; text-decoration: underline; cursor: pointer;
+}
+.sug-link:hover:not(:disabled) { color: var(--fg); }
+.sug-link:disabled { cursor: not-allowed; opacity: 0.5; }
+.sug-danger { background: var(--danger); border-color: var(--danger); }
+.sug-confirm {
+  margin-top: 4px; padding: 12px 14px; border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 10%, var(--cell)); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+}
+.sug-confirm p { margin: 0 0 8px; font-size: 13px; }
+
+.sug-status { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.sug-status strong { color: var(--tone); font-weight: 600; }
+.sug-status[data-tone='ok'] strong { color: var(--accent); }
+.sug-status[data-tone='bad'] strong { color: var(--danger); }
+.sug-error { margin: 0; color: var(--danger); font-size: 13px; }

@@ -6,6 +6,13 @@ assinatura. **Padrão desde então:** o mesmo `probe.cs`, compilado em memória 
 O `.exe` só roda com `FOLGA_PROBE_EXE=1`, se um dia `probe\bin\` for excluído do antivírus ou o exe for
 assinado. Essa decisão é do dono; o código não mexe em segurança.
 
+**Causa confirmada (2026-10-18):**
+- **O que mostra a quarentena:** a quarentena do McAfee LiveSafe
+  (`docs/referencias-ui/mcafee/wps-12-quarentena.png`) lista o `probe.exe` às 10:45, 10:46 e 10:54, com
+  ameaças de reputação `ti!…`, e o `hello.exe` com "Real Protect-LS".
+- **Quem apagou:** foi o McAfee.
+- **O que fazer com os itens:** restaurar ou excluir da quarentena é decisão do Antônio.
+
 Filtros de janela acrescentados depois do spike: janela *cloaked* pelo DWM e janela de ferramenta
 (`WS_EX_TOOLWINDOW` sem `WS_EX_APPWINDOW`) não contam. Sem eles, `mc-web-view` (McAfee) e `cua-driver`
 apareciam como apps com janela.

@@ -1,5 +1,9 @@
-// ESBOÇO (contrato do F-15): monitor de avisos, disco e apps de inicialização. A trilha F-15 substitui.
-import type { DiskInfo, Emit, MemoryState, Settings, StartupApp, Warning } from './types.ts';
+// F-15: monitor de avisos (D15, R26), discos e apps de inicialização. Só leitura.
+import { spawn, type ChildProcess } from 'node:child_process';
+import { readdir, statfs as fsStatfs } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join, parse } from 'node:path';
+import type { DiskInfo, Emit, MemoryState, Settings, StartupApp, Severity, View, Warning, WarningKind } from './types.ts';
 
 export type WarningsDeps = {
   getState: () => MemoryState | null;
@@ -7,15 +11,278 @@ export type WarningsDeps = {
   probeAlive: () => boolean;
   lastAutoCareRun: () => number | null;
   emit: Emit;
+  // opcionais, só para testes: o servidor passa apenas os obrigatórios
+  exec?: (file: string, args: string[]) => Promise<string>;
+  now?: () => number;
+  statfs?: (path: string) => Promise<{ bsize: number; blocks: number; bavail: number }>;
+  startupFolder?: string;
 };
 
-export function createWarnings(_deps: WarningsDeps) {
+const FAST_MS = 30_000;            // memória, disco, Auto Care
+const PROBE_MS = 5_000;            // sonda (sem spawn; só para o limite de 30 s ser preciso)
+const CRASH_MS = 10 * 60_000;
+const AV_MS = 30 * 60_000;
+const PROBE_DOWN_MS = 30_000;
+const AUTOCARE_SHOWN_MS = 60 * 60_000;
+const STARTUP_CACHE_MS = 5 * 60_000;
+const MEM_CRITICAL = 97;
+const DISK_ATTENTION = 10;
+const DISK_CRITICAL = 5;
+
+const SYSROOT = () => process.env.SystemRoot ?? 'C:\\Windows';
+const PS = () => join(SYSROOT(), 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+const CMD = () => join(SYSROOT(), 'System32', 'cmd.exe');
+const REG = () => join(SYSROOT(), 'System32', 'reg.exe');
+const U8 = '[Console]::OutputEncoding=[Text.Encoding]::UTF8;';
+
+// Scripts fixos: nenhum dado entra neles. Application Error (1000) e Application Hang (1002); sem filtrar o
+// provedor, outros softwares que usam os mesmos Ids (ex.: serviços com Id 1000 = "iniciado") viram falso travamento.
+const PS_CRASHES = U8 + "$e=@(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='Application Error','Application Hang';Id=1000,1002;StartTime=(Get-Date).AddHours(-24)} -MaxEvents 50 -ErrorAction SilentlyContinue | ForEach-Object { [pscustomobject]@{id=$_.Id;app=[string]$_.Properties[0].Value} }); ConvertTo-Json -InputObject $e -Compress";
+const PS_AV = U8 + "ConvertTo-Json -InputObject @(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct -ErrorAction Stop | Select-Object displayName,productState) -Compress";
+
+// ---------------------------------------------------------------- funções puras (testadas)
+
+/** productState do SecurityCenter2: bits 12-15 = produto ativo (1); bits 4-7 = definições em dia (0). */
+export function decodeAvState(state: number) {
+  return { active: ((state >> 12) & 0xF) === 1, upToDate: ((state >> 4) & 0xF) === 0 };
+}
+
+export type AvProduct = { displayName: string; productState: number };
+export function parseAv(json: string): AvProduct[] {
+  const raw: unknown = json.trim() ? JSON.parse(json) : [];
+  return (Array.isArray(raw) ? raw : [raw]).flatMap(p => {
+    const o = p as { displayName?: unknown; productState?: unknown } | null;
+    return o && typeof o.displayName === 'string' && typeof o.productState === 'number'
+      ? [{ displayName: o.displayName, productState: o.productState }] : [];
+  });
+}
+
+type Candidate = Omit<Warning, 'firstSeen' | 'lastSeen' | 'active'> & { since?: number };
+const cand = (kind: WarningKind, id: string, severity: Severity, title: string, detail: string, view?: View, since?: number): Candidate =>
+  ({ id, kind, severity, title, detail, ...(view ? { view } : {}), ...(since ? { since } : {}) });
+
+/** Aviso só se nenhum produto está ativo, ou se nenhum ativo está com as definições em dia. */
+export function avWarning(products: AvProduct[]): Candidate | null {
+  const active = products.filter(p => decodeAvState(p.productState).active);
+  if (!active.length) {
+    return cand('antivirus', 'antivirus', 'critico', 'Antivírus desligado',
+      products.length ? `Nenhum antivírus está ativo (${products.map(p => p.displayName).join(', ')}).` : 'O Windows não encontrou nenhum antivírus.');
+  }
+  if (!active.some(p => decodeAvState(p.productState).upToDate)) {
+    return cand('antivirus', 'antivirus', 'critico', 'Antivírus desatualizado',
+      `${active[0]?.displayName ?? 'O antivírus'} está com as definições antigas.`);
+  }
+  return null;
+}
+
+/** Saída do Get-WinEvent → um aviso por app (nome sem .exe, minúsculo no id). */
+export function parseCrashes(json: string): Candidate[] {
+  const raw: unknown = json.trim() ? JSON.parse(json) : [];
+  const byApp = new Map<string, { name: string; n: number }>();
+  for (const e of Array.isArray(raw) ? raw : [raw]) {
+    const app = (e as { app?: unknown } | null)?.app;
+    if (typeof app !== 'string') continue;
+    const name = app.trim().replace(/\.exe$/i, '');
+    if (!name) continue;
+    const cur = byApp.get(name.toLowerCase());
+    if (cur) cur.n++; else byApp.set(name.toLowerCase(), { name, n: 1 });
+  }
+  return [...byApp].map(([key, { name, n }]) =>
+    cand('travamento', `travamento:${key}`, 'atencao', `${name} travou`,
+      `Travou ${n === 1 ? '1 vez' : `${n} vezes`} nas últimas 24 h.`));
+}
+
+const nf1 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
+const hm = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const GB = 1024 ** 3;
+
+export function memoryWarning(memLoad: number, threshold: number): Candidate | null {
+  if (memLoad < Math.min(threshold, MEM_CRITICAL)) return null;
+  const critical = memLoad >= MEM_CRITICAL;
+  return cand('memoria', 'memoria', critical ? 'critico' : 'atencao',
+    critical ? 'Memória quase esgotada' : 'Memória alta',
+    `${nf0.format(memLoad)} % da memória está em uso.`, 'memoria');
+}
+
+export function diskWarning(d: DiskInfo): Candidate | null {
+  if (!(d.total > 0)) return null;
+  const freePct = (d.free / d.total) * 100;
+  if (freePct >= DISK_ATTENTION) return null;
+  const critical = freePct < DISK_CRITICAL;
+  return cand('disco', `disco:${d.drive}`, critical ? 'critico' : 'atencao',
+    critical ? `Disco ${d.drive} quase cheio` : `Pouco espaço no disco ${d.drive}`,
+    `${nf1.format(d.free / GB)} GB livres de ${nf1.format(d.total / GB)} GB (${nf1.format(freePct)} % livre).`, 'arquivos');
+}
+
+export function autoCareWarning(lastRun: number | null, now: number): Candidate | null {
+  if (lastRun === null || now - lastRun >= AUTOCARE_SHOWN_MS) return null;
+  return cand('autocare', 'autocare', 'info', `O Auto Care liberou memória às ${hm.format(lastRun)}`,
+    'Ele fechou apps parados para abrir espaço. Veja o que saiu no Registro.', 'registro', lastRun);
+}
+
+/** reg.exe query: linhas "    Nome    REG_SZ    dado". Nome pode ter espaços; tipo REG_* delimita. */
+export function parseRegQuery(text: string): { name: string; type: string; data: string }[] {
+  const out: { name: string; type: string; data: string }[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^\s+(.+?)\s+(REG_[A-Z_]+)(?:\s+(.*))?$/.exec(line);
+    if (m) out.push({ name: m[1]!, type: m[2]!, data: (m[3] ?? '').trim() });
+  }
+  return out;
+}
+
+/** StartupApproved: primeiro byte com o bit baixo ligado (03, 07) = desativado; 02/06 = ativo. */
+export function approvedEnabled(hex: string | undefined): boolean {
+  if (!hex || hex.length < 2) return true;
+  const b = parseInt(hex.slice(0, 2), 16);
+  return Number.isNaN(b) ? true : (b & 1) === 0;
+}
+
+// ---------------------------------------------------------------- monitor
+
+const RANK: Record<Severity, number> = { critico: 0, atencao: 1, info: 2 };
+const RUN = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run';
+const APPR = 'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\';
+const REG_SOURCES: { key: string; approved: string; source: StartupApp['source'] }[] = [
+  { key: `HKCU\\${RUN}`, approved: `HKCU\\${APPR}Run`, source: 'registro_usuario' },
+  { key: `HKLM\\${RUN}`, approved: `HKLM\\${APPR}Run`, source: 'registro_maquina' },
+  { key: `HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run`, approved: `HKLM\\${APPR}Run32`, source: 'registro_maquina' },
+];
+
+export function createWarnings(deps: WarningsDeps) {
+  const now = deps.now ?? Date.now;
+  const children = new Set<ChildProcess>();
+  let stopped = false;   // só stop() liga; apply() antes de start() vale (testes chamam run.* direto)
+  const timers: NodeJS.Timeout[] = [];
+  const busy = new Set<string>();
+  const active = new Map<string, Warning>();
+  let lastSig = '';
+  let downSince: number | null = null;
+  let startupCache: { t: number; apps: StartupApp[] } | null = null;
+
+  // Padrão: spawn com caminho absoluto, shell:false, sem janela. stop() mata o que estiver rodando.
+  const exec = deps.exec ?? ((file: string, args: string[]) => new Promise<string>((resolve, reject) => {
+    const c = spawn(file, args, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    children.add(c);
+    const chunks: Buffer[] = [];
+    const timeout = setTimeout(() => c.kill(), 20_000);
+    timeout.unref();
+    c.stdout.on('data', (d: Buffer) => chunks.push(d));
+    c.on('error', e => { clearTimeout(timeout); children.delete(c); reject(e); });
+    c.on('close', code => {
+      clearTimeout(timeout); children.delete(c);
+      if (code === 0) resolve(Buffer.concat(chunks).toString('utf8').replace(/^\uFEFF/, ''));
+      else reject(new Error(`saiu com ${code}`));
+    });
+  }));
+  const statfs = deps.statfs ?? ((p: string) => fsStatfs(p));
+  const ps = (script: string) => exec(PS(), ['-NoProfile', '-NonInteractive', '-Command', script]);
+  // cmd + chcp 65001: sem isso o reg.exe escreve em cp850 e "Antônio" sai errado. Chaves fixas, sem espaços.
+  const regQuery = (key: string) => exec(CMD(), ['/d', '/c', 'chcp', '65001', '>nul', '&', REG(), 'query', key]).catch(() => '');
+
+  function list(): Warning[] {
+    return [...active.values()].sort((a, b) => RANK[a.severity] - RANK[b.severity] || b.lastSeen - a.lastSeen);
+  }
+
+  // R26: id estável; mesmo aviso só atualiza lastSeen; causa que some sai da lista; emite só se algo visível mudou.
+  function apply(kind: WarningKind, found: (Candidate | null)[]) {
+    if (stopped) return;
+    const t = now();
+    const keep = new Set<string>();
+    for (const c of found) {
+      if (!c) continue;
+      const { since, ...w } = c;
+      keep.add(w.id);
+      active.set(w.id, { ...w, firstSeen: since ?? active.get(w.id)?.firstSeen ?? t, lastSeen: t, active: true });
+    }
+    for (const [id, w] of active) if (w.kind === kind && !keep.has(id)) active.delete(id);
+    const sig = [...active.values()].map(w => `${w.id}|${w.severity}|${w.title}|${w.detail}`).sort().join('\n');
+    if (sig !== lastSig) { lastSig = sig; deps.emit('warnings', list()); }
+  }
+
+  async function disk(): Promise<DiskInfo[]> {
+    const sys = (process.env.SystemDrive ?? 'C:').toUpperCase();
+    const profile = parse(homedir()).root.replace(/\\$/, '').toUpperCase();
+    const drives = [...new Set([sys, profile].filter(d => /^[A-Z]:$/.test(d)))];
+    const out: DiskInfo[] = [];
+    for (const drive of drives) {
+      try {
+        const s = await statfs(`${drive}\\`);
+        out.push({ drive, total: s.bsize * s.blocks, free: s.bsize * s.bavail });
+      } catch { /* disco sumiu/sem acesso: fica de fora */ }
+    }
+    return out;
+  }
+
+  const job = (name: string, fn: () => Promise<void> | void) => async () => {
+    if (busy.has(name)) return;
+    busy.add(name);
+    try { await fn(); } catch { /* falha de consulta não muda os avisos que já existem */ } finally { busy.delete(name); }
+  };
+
+  const run = {
+    probe: job('probe', () => {
+      const t = now();
+      if (deps.probeAlive()) downSince = null; else downSince ??= t;
+      apply('sonda', [downSince !== null && t - downSince > PROBE_DOWN_MS
+        ? cand('sonda', 'sonda', 'critico', 'A sonda parou de responder',
+          'O Folga não está recebendo leituras de memória. Feche e abra o app.') : null]);
+    }),
+    fast: job('fast', async () => {
+      const s = deps.getState();
+      if (s) apply('memoria', [memoryWarning(s.memLoad, deps.getSettings().autoCareThreshold)]);
+      apply('autocare', [autoCareWarning(deps.lastAutoCareRun(), now())]);
+      const disks = await disk();
+      if (disks.length) apply('disco', disks.map(diskWarning));
+    }),
+    crashes: job('crashes', async () => apply('travamento', parseCrashes(await ps(PS_CRASHES)))),
+    antivirus: job('antivirus', async () => apply('antivirus', [avWarning(parseAv(await ps(PS_AV)))])),
+  };
+
+  async function readStartupApps(): Promise<StartupApp[]> {
+    const apps: StartupApp[] = [];
+    const queries = await Promise.all(REG_SOURCES.map(async s => [s, await regQuery(s.key), await regQuery(s.approved)] as const));
+    for (const [s, runText, apprText] of queries) {
+      const approved = new Map(parseRegQuery(apprText).map(r => [r.name.toLowerCase(), r.data]));
+      for (const r of parseRegQuery(runText)) {
+        apps.push({ name: r.name, command: r.data, source: s.source, enabled: approvedEnabled(approved.get(r.name.toLowerCase())) });
+      }
+    }
+    const folder = deps.startupFolder ?? join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup');
+    const approved = new Map(parseRegQuery(await regQuery(`HKCU\\${APPR}StartupFolder`)).map(r => [r.name.toLowerCase(), r.data]));
+    for (const f of await readdir(folder).catch(() => [] as string[])) {
+      if (!/\.(lnk|url)$/i.test(f)) continue;
+      apps.push({ name: f.replace(/\.(lnk|url)$/i, ''), command: join(folder, f), source: 'pasta_inicializar', enabled: approvedEnabled(approved.get(f.toLowerCase())) });
+    }
+    return apps.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }
+
   return {
-    start(): void {},
-    stop(): void {},
-    list(): Warning[] { return []; },
-    async disk(): Promise<DiskInfo[]> { return []; },
-    async startupApps(): Promise<StartupApp[]> { return []; },
+    start(): void {
+      if (timers.length) return;
+      stopped = false;
+      const every = (fn: () => Promise<void>, ms: number) => { fn(); timers.push(setInterval(fn, ms).unref()); };
+      every(run.probe, PROBE_MS);
+      every(run.fast, FAST_MS);
+      every(run.crashes, CRASH_MS);
+      every(run.antivirus, AV_MS);
+    },
+    stop(): void {
+      stopped = true;
+      for (const t of timers.splice(0)) clearInterval(t);
+      for (const c of children) c.kill();
+      children.clear();
+    },
+    list,
+    disk,
+    async startupApps(): Promise<StartupApp[]> {
+      if (startupCache && now() - startupCache.t < STARTUP_CACHE_MS) return startupCache.apps;
+      const apps = await readStartupApps();
+      startupCache = { t: now(), apps };
+      return apps;
+    },
+    /** Um ciclo de cada fonte, direto (testes e script de verificação). */
+    run,
   };
 }
 export type Warnings = ReturnType<typeof createWarnings>;

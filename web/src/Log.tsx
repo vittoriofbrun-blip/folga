@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { LogEntry, MemoryState } from '../../src/types';
 import { getLog } from './api';
-import { OUTCOME, size } from './format';
+import { GB, NB, OUTCOME, nf0, nf1, size } from './format';
 
 const hm = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const dm = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' });
@@ -17,10 +17,34 @@ function when(t: number, now = new Date()) {
   return `${dm.format(d)} ${clock}`;
 }
 
+const PERIODS = [7, 30] as const;
+
+/** GB liberados, apps fechados e execuções do Auto Care dentro do período (a partir do registro). */
+function summarize(entries: LogEntry[], days: number, now = Date.now()) {
+  const since = now - days * 86_400_000;
+  const list = entries.filter((e) => e.t >= since);
+  return {
+    freed: list.reduce((n, e) => n + Math.max(0, e.availAfter - e.availBefore), 0),   // R08: nunca a soma dos apps
+    closed: list.reduce((n, e) => n + e.results.filter((r) => r.outcome === 'fechou' || r.outcome === 'encerrado').length, 0),
+    auto: list.filter((e) => e.origin === 'auto').length,
+  };
+}
+
+function Stat({ num, unit, title, text }: { num: string; unit?: string; title: string; text: string }) {
+  return (
+    <li className="stat-card">
+      <span className="stat-num">{num}{unit && <small>{NB}{unit}</small>}</span>
+      <h2 className="stat-t">{title}</h2>
+      <p className="stat-text">{text}</p>
+    </li>
+  );
+}
+
 type Load = { kind: 'loading' } | { kind: 'error' } | { kind: 'ok'; entries: LogEntry[] };
 
 export function Log({ state }: { state: MemoryState | null }) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
+  const [days, setDays] = useState<number>(7);
   // Nova liberação = a lista "Liberados" mudou de tamanho; sem polling.
   const freedCount = state?.freed.length ?? 0;
 
@@ -44,11 +68,34 @@ export function Log({ state }: { state: MemoryState | null }) {
       <h1 className="page-title" id="log-title">Registro</h1>
       <p className="muted">As liberações mais recentes primeiro.</p>
 
+      {load.kind === 'ok' && (() => {
+        const sum = summarize(load.entries, days);
+        const big = sum.freed >= GB;
+        return (
+          <div className="stats">
+            <div className="stats-bar">
+              <label htmlFor="log-period">Filtrar por período</label>
+              <select id="log-period" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+                {PERIODS.map((d) => <option key={d} value={d}>{d} dias</option>)}
+              </select>
+            </div>
+            <ul className="stat-cards" aria-live="polite" aria-label={`Resumo dos últimos ${days} dias`}>
+              <Stat num={big ? nf1.format(sum.freed / GB) : nf0.format(sum.freed / 1024 ** 2)} unit={big ? 'GB' : 'MB'}
+                title="Liberados" text="Memória que voltou de verdade, medida antes e depois de cada liberação." />
+              <Stat num={nf0.format(sum.closed)} title="Apps fechados" text="Apps que fecharam do jeito normal ou foram encerrados." />
+              <Stat num={nf0.format(sum.auto)} title="Execuções do Auto Care" text="Vezes em que o Auto Care liberou memória sozinho." />
+            </ul>
+          </div>
+        );
+      })()}
+
       {load.kind === 'loading' && <p className="log-note" role="status">Carregando…</p>}
       {load.kind === 'error' && <p className="log-note log-error" role="alert">Não deu para ler o registro agora.</p>}
       {load.kind === 'ok' && load.entries.length === 0 && <p className="log-note">Nenhuma liberação ainda.</p>}
 
       {load.kind === 'ok' && load.entries.length > 0 && (
+        <>
+        <h2 className="log-h">Histórico</h2>
         <ol className="log-list">
           {load.entries.map((e, i) => {
             const back = e.availAfter - e.availBefore;   // R08: nunca a soma dos apps
@@ -71,6 +118,7 @@ export function Log({ state }: { state: MemoryState | null }) {
             );
           })}
         </ol>
+        </>
       )}
     </section>
   );

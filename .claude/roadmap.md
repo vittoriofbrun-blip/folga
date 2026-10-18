@@ -24,5 +24,17 @@ visto em http://localhost:4747/b/folga. Aqui fica a ordem, para não duplicar o 
 O F-01 é o risco do projeto: se a sonda não ler o working set privado e o primeiro plano com pegada baixa,
 o resto muda. Por isso ele é o primeiro depois do esqueleto.
 
-## Depois da v1 (sem ticket até você pedir)
-Disco e limpeza, organizar pastas, desinstalar, MCP/CLI para agentes, ícone na bandeja, ícones reais dos apps.
+## v2 (2026-10-18): McAfee, assistente e visual do Mint
+| Ticket | O quê | Arquivos donos | Pode rodar junto com |
+|---|---|---|---|
+| **F-14** | Visual do Mint, Início (saúde, anéis), partículas na Memória (absorve o F-12) e os campos novos de Ajustes | `web/src/app.css`, `App.tsx`, `Inicio.tsx`, `health.ts`, `Particles.tsx`, `Memory.tsx`, `Settings.tsx`, `AutoCare.tsx`, `Log.tsx` | F-15, F-17, F-18 |
+| **F-15** | Avisos: monitor (memória, disco, travamentos, antivírus, Auto Care, sonda) e tela | `src/warnings.ts`, `web/src/Avisos.tsx` | F-14, F-17, F-18 |
+| **F-17** | Arquivos parados, limpeza rápida, sugestões com aprovação (R20 a R24) | `src/files.ts`, `src/suggestions.ts`, `web/src/Arquivos.tsx`, `SuggestionCard.tsx` | F-14, F-15, F-18 |
+| **F-18** | Assistente Claude/GPT (ADR 0006), ferramentas MCP de leitura, prompt de sistema | `src/agent.ts`, `src/agent-prompt.md`, `src/mcp.ts`, `web/src/Assistente.tsx` | F-14, F-15, F-17 |
+| F-19 | Integração, QA ao vivo com os dois provedores e pegada | o lead | depois dos quatro |
+
+O contrato (`src/types.ts`, as rotas em `src/server.ts` e os esboços) foi escrito pelo lead antes das trilhas
+começarem; as trilhas não mexem nele.
+
+## Depois da v2 (sem ticket até você pedir)
+Organizar pastas, desinstalar, ícone na bandeja, notificação do Windows para aviso crítico, ícones reais dos apps.

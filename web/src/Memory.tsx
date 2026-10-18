@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AppGroup, MemoryState, ReleaseResponse } from '../../src/types';
 import type { Source } from './mock';
-import { GB, MB, NB, OUTCOME, ago, gb, nf0, nf1, pct, plural, size } from './format';
+import { NB, OUTCOME, ago, gb, pct, plural, size } from './format';
+import { Particles } from './Particles';
 
 function reasonText(a: AppGroup, s: MemoryState) {
   const since = () => ago(s.t - (a.lastFocusedAt ?? s.startedAt));
@@ -52,6 +53,7 @@ export function Memory({ state, source }: { state: MemoryState | null; source: S
   const [result, setResult] = useState<Result>(null);
   const [showList, setShowList] = useState(true);
   const prevIdle = useRef<Set<string>>(new Set());
+  const barRef = useRef<HTMLDivElement>(null);
 
   // Mantém a escolha do usuário; só marca por padrão os parados que acabaram de aparecer (R03).
   useEffect(() => {
@@ -119,10 +121,11 @@ export function Memory({ state, source }: { state: MemoryState | null; source: S
 
       <div className="mem-body">
         <div className="meter-col">
+          <Particles memLoad={state.memLoad} anchor={barRef} />
           <div className="meter" role="meter" aria-label="Memória usada" aria-valuemin={0} aria-valuemax={100}
             aria-valuenow={Math.round(state.memLoad)} aria-valuetext={`${pct(state.memLoad)} em uso`}>
             <div className="meter-label"><span>Memória usada</span><strong>{pct(state.memLoad)}</strong></div>
-            <div className="meter-bar">
+            <div className="meter-bar" ref={barRef}>
               <div className="meter-fill" style={{ transform: `scaleY(${Math.min(100, state.memLoad) / 100})` }} />
               {settings.autoCareEnabled && (
                 <div className="meter-tick" style={{ bottom: `${settings.autoCareThreshold}%` }} aria-hidden="true" />
@@ -181,7 +184,7 @@ export function Memory({ state, source }: { state: MemoryState | null; source: S
 
       <footer className="mem-foot">
         <p className="summary" role="status" aria-live="polite">{summary}</p>
-        <button type="button" className="pill" disabled={sel.size === 0 && !busy} aria-busy={busy}
+        <button type="button" className="pill pill-accent" disabled={sel.size === 0 && !busy} aria-busy={busy}
           aria-disabled={busy} onClick={() => { if (!busy) void release(); }}>
           {busy ? 'Liberando…' : 'Liberar'}
         </button>

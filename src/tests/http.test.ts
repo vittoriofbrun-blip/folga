@@ -1,7 +1,8 @@
 // Servidor real numa porta alta, com pasta de dados temporária e sonda falsa (R15–R17, R07–R09, R14).
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -115,6 +116,6 @@ try {
 } finally {
   server.kill();
   await sleep(300);
-  rmSync(dataDir, { recursive: true, force: true });
-  rmSync(startupDir, { recursive: true, force: true });
+  await rm(dataDir, { recursive: true, force: true, maxRetries: 5 });
+  await rm(startupDir, { recursive: true, force: true, maxRetries: 5 });
 }

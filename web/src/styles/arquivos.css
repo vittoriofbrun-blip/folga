@@ -1,0 +1,78 @@
+/* Tela Arquivos (prefixo .arq-). Só variáveis de tokens.css. */
+.arq { display: flex; flex-direction: column; height: 100%; }
+.arq-head { padding-bottom: 4px; }
+.arq-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 20px; margin-top: 20px; }
+.arq-field { display: flex; flex-direction: column; gap: 4px; }
+.arq-field label { color: var(--muted); font-size: 12px; }
+.arq-field select {
+  min-width: 130px; padding: 9px 12px; border-radius: var(--radius); border: 1px solid var(--line);
+  background: var(--cell); color: var(--fg); font: inherit;
+}
+.arq-field select:disabled { opacity: 0.6; }
+.arq-controls .pill { padding: 10px 28px; }
+.arq-result { margin: 0; align-self: center; color: var(--fg); font-size: 13px; font-variant-numeric: tabular-nums; }
+.arq-error { margin: 8px 0 0; color: var(--danger); font-size: 13px; }
+.arq-sum .arq-error { margin: 0; }
+
+.arq-body { flex: 1; min-height: 0; overflow-y: auto; padding: 32px 40px 24px; display: flex; flex-direction: column; gap: 28px; }
+.arq-h {
+  display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--muted);
+  text-transform: none; letter-spacing: 0;
+}
+.arq-count {
+  padding: 1px 8px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent); font-size: 11px; font-weight: 600;
+}
+.arq-empty { margin: 0; padding: 4px 0; color: var(--muted); font-size: 13px; }
+.arq-link { border: 0; background: none; padding: 2px 4px; color: var(--muted); font-size: 12px; font-weight: 400; text-decoration: underline; cursor: pointer; }
+.arq-link:hover { color: var(--fg); }
+.arq-review { border-radius: var(--radius); outline-offset: 4px; }
+.arq-review:focus-visible { outline: 2px solid var(--accent); }
+
+/* tabela, no feitio da quarentena do McAfee: colunas ordenáveis e ação em lote embaixo */
+.arq-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--cell); }
+.arq-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.arq-table th, .arq-table td { padding: 9px 12px; text-align: left; font-weight: 400; vertical-align: middle; }
+.arq-table thead th { color: var(--muted); font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.arq-table tbody tr + tr > * { border-top: 1px solid var(--tint-line); }
+.arq-table tbody tr:hover { background: var(--tint); }
+.arq-table tbody tr[data-on] { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.arq-table tbody tr[data-done] { opacity: 0.55; }
+.arq-chk { width: 40px; padding-right: 0; }
+.arq-chk input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); cursor: pointer; vertical-align: middle; }
+.arq-chk input:disabled { cursor: not-allowed; }
+.arq-sort { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+.arq-sort:hover { color: var(--fg); }
+.arq-table th[aria-sort='ascending'] .arq-sort, .arq-table th[aria-sort='descending'] .arq-sort { color: var(--fg); }
+.arq-name { max-width: 280px; }
+.arq-name span:first-child { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arq-tag { display: inline-block; margin-top: 2px; padding: 0 7px; border-radius: var(--radius-pill); border: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.arq-folder { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.arq-num { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.arq-when { white-space: nowrap; color: var(--muted); }
+
+/* limpeza rápida */
+.arq-card { max-width: 640px; padding: 14px 16px 18px; background: var(--cell); border: 1px solid var(--line); border-radius: var(--radius); }
+.arq-cats { list-style: none; margin: 0 0 8px; padding: 0; }
+.arq-cats li { display: grid; grid-template-columns: 1fr auto; column-gap: 16px; padding: 9px 0; }
+.arq-cats li + li { border-top: 1px solid var(--tint-line); }
+.arq-cats li[data-info] .arq-cat-name { color: var(--muted); }
+.arq-cat-name { font-size: 14px; }
+.arq-cat-size { font-variant-numeric: tabular-nums; }
+.arq-cat-note { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.arq-fine { margin: 4px 0 14px; color: var(--muted); font-size: 12px; }
+.arq-card .pill { padding: 10px 28px; }
+
+.arq-sugs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; max-width: 760px; }
+
+/* barra inferior */
+.arq-foot {
+  display: flex; justify-content: space-between; align-items: center; gap: 24px;
+  padding: 16px 40px 24px; border-top: 1px solid var(--line);
+}
+.arq-sum { margin: 0; font-variant-numeric: tabular-nums; min-height: 1.4em; }
+
+@media (max-width: 1100px) {
+  .arq-foot { padding-left: 28px; padding-right: 28px; }
+  .arq-body { padding-left: 28px; padding-right: 28px; }
+}

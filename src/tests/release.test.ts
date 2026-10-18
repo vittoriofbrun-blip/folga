@@ -1,6 +1,7 @@
 // Liberar sem processos reais: sonda e estado falsos (R07–R09, ADR 0003).
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createReleaser } from '../release.ts';
@@ -56,7 +57,7 @@ const ok = (name: string) => { passed++; console.log(`ok  ${name}`); };
   assert.deepEqual(await releaser.readLog(10), log);
   assert.deepEqual(releaser.freed().map(f => f.key), ['calc']);
   ok('R14: uma linha no log.jsonl e calc em Liberados');
-  rmSync(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 }
 
 {
@@ -70,7 +71,7 @@ const ok = (name: string) => { passed++; console.log(`ok  ${name}`); };
   assert.equal(r.results[0]!.outcome, 'encerrado');
   assert.deepEqual(sent.at(-1), { type: 'kill', pids: [4] });
   ok('P03: app de bandeja em mayForceQuit é encerrado, só os pids vivos');
-  rmSync(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 }
 
 {
@@ -85,7 +86,7 @@ const ok = (name: string) => { passed++; console.log(`ok  ${name}`); };
   const none = await releaser.release(['sumiu'], 'manual');
   assert.ok('erro' in none && none.status === 409);
   ok('app que sumiu é ignorado; pedido vazio recusado');
-  rmSync(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 }
 
 {
@@ -97,7 +98,7 @@ const ok = (name: string) => { passed++; console.log(`ok  ${name}`); };
   assert.ok('erro' in second && second.status === 409);
   await first;
   ok('uma liberação por vez (409 na segunda)');
-  rmSync(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 }
 
 console.log(`release: ${passed} casos ok`);

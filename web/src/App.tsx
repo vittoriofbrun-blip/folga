@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { MemoryState, View } from '../../src/types';
+import type { MemoryState, View, Warning } from '../../src/types';
 import { mockSource, type Source } from './mock';
-import { apiSource } from './api';
+import { apiSource, getWarnings, onEvent } from './api';
 import { Inicio } from './Inicio';
 import { Memory } from './Memory';
 import { Arquivos } from './Arquivos';
@@ -34,11 +34,33 @@ export function App() {
   const [view, setView] = useState<View>('inicio');
   const [state, setState] = useState<MemoryState | null>(null);
 
+  const [warnings, setWarnings] = useState<Warning[]>([]);
+
   useEffect(() => source.subscribe(setState), []);
 
+  // Selo de Avisos: só os ativos; em "só críticos" (R27) contam apenas os críticos.
+  useEffect(() => {
+    let alive = true;
+    const set = (l: unknown) => { if (alive && Array.isArray(l)) setWarnings(l as Warning[]); };
+    getWarnings().then(set, () => {});
+    const off = onEvent('warnings', set);
+    return () => { alive = false; off(); };
+  }, []);
+  const onlyCritical = state?.settings.warningsLevel === 'criticos';
+  const counted = warnings.filter(w => w.active && (!onlyCritical || w.severity === 'critico'));
+  const badge = counted.length;
+  const badgeCritical = counted.some(w => w.severity === 'critico');
+
   const item = ([v, label]: [View, string]) => (
-    <button key={v} type="button" className="nav-item" aria-current={view === v ? 'page' : undefined} onClick={() => setView(v)}>
-      {ICONS[v]}<span>{label}</span>
+    <button key={v} type="button" className="nav-item" aria-current={view === v ? 'page' : undefined} onClick={() => setView(v)}
+      aria-label={v === 'avisos' && badge > 0 ? `${label}, ${badge} ${badge === 1 ? 'ativo' : 'ativos'}` : undefined}>
+      <span className="nav-ic">
+        {ICONS[v]}
+        {v === 'avisos' && badge > 0 && (
+          <span className={`nav-badge${badgeCritical ? ' nav-badge-crit' : ''}`} aria-hidden="true">{badge > 9 ? '9+' : badge}</span>
+        )}
+      </span>
+      <span className="nav-label">{label}</span>
     </button>
   );
 

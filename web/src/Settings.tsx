@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react';
-import type { AppGroup, MemoryState, Settings as SettingsData } from '../../src/types';
+import type { AgentProvider, AppGroup, MemoryState, Settings as SettingsData } from '../../src/types';
 import { getSettings, getStartup, putSettings, putStartup } from './api';
 
 // Faixas iguais às do servidor (RANGES em src/server.ts). Ajuste lá e aqui juntos.
@@ -11,10 +11,21 @@ const FIELDS = {
 type NumKey = keyof typeof FIELDS;
 const NUM_KEYS = Object.keys(FIELDS) as NumKey[];
 
-type Form = Record<NumKey, string> & { neverClose: string[]; mayForceQuit: string[] };
+// Escolhas fixas dos campos novos (v2). O servidor valida a faixa: staleDays 7–3650, staleMinMB 1–100000.
+type Option = { value: string; label: string };
+const WARNING_LEVELS: Option[] = [{ value: 'todos', label: 'Todos' }, { value: 'criticos', label: 'Só críticos' }];
+const STALE_DAYS: Option[] = [30, 90, 180, 365].map(n => ({ value: String(n), label: `${n} dias` }));
+const STALE_MB: Option[] = [1, 10, 50, 100].map(n => ({ value: String(n), label: `${n} MB` }));
+const PROVIDERS: Option[] = [{ value: 'claude', label: 'Claude' }, { value: 'gpt', label: 'GPT' }];
+
+type Form = Record<NumKey, string> & {
+  neverClose: string[]; mayForceQuit: string[];
+  warningsLevel: SettingsData['warningsLevel']; staleDays: string; staleMinMB: string; agentProvider: AgentProvider;
+};
 const toForm = (s: SettingsData): Form => ({
   idleMinutes: String(s.idleMinutes), busyCpuPercent: String(s.busyCpuPercent), sampleSeconds: String(s.sampleSeconds),
   neverClose: s.neverClose, mayForceQuit: s.mayForceQuit,
+  warningsLevel: s.warningsLevel, staleDays: String(s.staleDays), staleMinMB: String(s.staleMinMB), agentProvider: s.agentProvider,
 });
 
 function numError(k: NumKey, raw: string): string | null {
@@ -41,6 +52,22 @@ function NumberField({ id, k, value, error, onChange, hint }: {
       </div>
       {hint && <p className="set-hint" id={`${id}-hint`}>{hint}</p>}
       {error && <p className="set-err" id={`${id}-err`}>{error}</p>}
+    </div>
+  );
+}
+
+function SelectField({ id, label, value, options, hint, onChange }: {
+  id: string; label: string; value: string; options: Option[]; hint?: string; onChange: (v: string) => void;
+}) {
+  // um valor salvo fora das escolhas (ex.: 7 dias, definido por outro caminho) continua aparecendo
+  const all = options.some(o => o.value === value) ? options : [...options, { value, label: value }];
+  return (
+    <div className="set-field">
+      <label htmlFor={id}>{label}</label>
+      <select id={id} value={value} aria-describedby={hint ? `${id}-hint` : undefined} onChange={(e) => onChange(e.target.value)}>
+        {all.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+      {hint && <p className="set-hint" id={`${id}-hint`}>{hint}</p>}
     </div>
   );
 }
@@ -152,6 +179,8 @@ export function Settings({ state }: { state: MemoryState | null }) {
       const saved = await putSettings({
         idleMinutes: Number(form.idleMinutes), busyCpuPercent: Number(form.busyCpuPercent), sampleSeconds: Number(form.sampleSeconds),
         neverClose: form.neverClose, mayForceQuit: form.mayForceQuit,
+        warningsLevel: form.warningsLevel, staleDays: Number(form.staleDays), staleMinMB: Number(form.staleMinMB),
+        agentProvider: form.agentProvider,
       });
       setForm(toForm(saved));   // mostra o que o servidor guardou (nomes já normalizados)
       setStatus({ ok: true, text: 'Salvo' });
@@ -165,7 +194,7 @@ export function Settings({ state }: { state: MemoryState | null }) {
   return (
     <section className="page set" aria-labelledby={`${uid}-title`}>
       <h1 className="page-title" id={`${uid}-title`}>Ajustes</h1>
-      <p className="muted">Quando um app conta como parado e o que nunca deve ser fechado.</p>
+      <p className="muted">Quando um app conta como parado, o que nunca deve ser fechado e como o Folga avisa.</p>
 
       <form className="set-form" noValidate onSubmit={(e) => { e.preventDefault(); if (!saving) void save(); }}>
         <div className="set-nums">
@@ -175,13 +204,28 @@ export function Settings({ state }: { state: MemoryState | null }) {
             hint="vale depois de reiniciar o Folga" />
         </div>
 
+        <section className="set-list" aria-labelledby={`${uid}-more`}>
+          <h2 className="set-h" id={`${uid}-more`}>Avisos, arquivos e assistente</h2>
+          <div className="set-nums set-selects">
+            <SelectField id={`${uid}-wl`} label="Avisos no ícone" value={form.warningsLevel} options={WARNING_LEVELS}
+              hint="Em “Só críticos”, os avisos de atenção ficam na tela Avisos, mas não aparecem no ícone da barra."
+              onChange={(v) => edit({ warningsLevel: v === 'criticos' ? 'criticos' : 'todos' })} />
+            <SelectField id={`${uid}-sd`} label="Arquivos parados há" value={form.staleDays} options={STALE_DAYS}
+              onChange={(v) => edit({ staleDays: v })} />
+            <SelectField id={`${uid}-sm`} label="Ignorar arquivos menores que" value={form.staleMinMB} options={STALE_MB}
+              onChange={(v) => edit({ staleMinMB: v })} />
+            <SelectField id={`${uid}-ap`} label="Assistente padrão" value={form.agentProvider} options={PROVIDERS}
+              onChange={(v) => edit({ agentProvider: v === 'gpt' ? 'gpt' : 'claude' })} />
+          </div>
+        </section>
+
         <AppList title="Nunca fechar" items={form.neverClose} apps={apps} onChange={(next) => edit({ neverClose: next })}
           warning="Terminais, editores e apps de agente (Claude, Codex) vêm aqui por padrão: fechar um deles derruba os agentes e servidores que rodam dentro." />
         <AppList title="Pode encerrar de vez" danger items={form.mayForceQuit} apps={apps} onChange={(next) => edit({ mayForceQuit: next })}
           warning="Só vale para app que foi para a bandeja. Encerrar de vez pode perder trabalho não salvo." />
 
         <div className="set-foot">
-          <button type="submit" className="pill" disabled={saving} aria-busy={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
+          <button type="submit" className="pill pill-accent" disabled={saving} aria-busy={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
           <p className={`set-status${status && !status.ok ? ' set-status-bad' : ''}`} role="status" aria-live="polite">{status?.text}</p>
         </div>
       </form>
