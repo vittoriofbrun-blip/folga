@@ -96,6 +96,9 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
     - "Sair" do navegador: as 3 janelas voltaram;
     - WM_CLOSE em cada janela: só 1 voltou.
   - Edge e os outros usam o mesmo motor: o efeito neles é inferido. Firefox não foi testado.
+  - **Limite conhecido:** janela em outra área de trabalho virtual está "cloaked" e não entra na conta.
+    - Exemplo: um Chrome com 1 janela aqui e 2 em outra área conta como 1, então a R29 não vale.
+    - O WM_CLOSE também só chega à janela visível.
 
 - **R28 Projeto de código não é lixo** (D20) — Nenhum arquivo dentro de uma pasta com `.git`,
   `package.json`, `pyvenv.cfg`, `pyproject.toml`, `Cargo.toml` ou `go.mod` aparece na busca nem passa na
