@@ -14,6 +14,9 @@ export type ClassifyContext = { selfPids: readonly number[]; userSession: number
 
 const CPU_WINDOW_MS = 30_000;
 const BUSY_RELEASE = 0.6;   // R04: ocupado só volta a parado abaixo de 60 % da linha (3 % no padrão de 5 %)
+// R29: navegador Chromium fechado janela por janela reabre só a última (visto em scripts/qa-chrome.ts).
+// ponytail: Edge, Brave e os outros são o mesmo motor (inferido, só o Chrome foi testado); Firefox sem teste.
+const CHROMIUM = new Set(['chrome', 'msedge', 'brave', 'vivaldi', 'opera', 'chromium']);
 const SELF_KEY = '__self';
 
 export function appKey(name: string): string {
@@ -69,6 +72,7 @@ export function classify(
     // 5. estado, primeira regra que casar: self, other_session, system, no_window, never_close,
     //    foreground, audio (tocando som com a janela no fundo), busy, recent, idle
     const mine = procs.filter((p) => p.session === ctx.userSession);
+    const windows = mine.reduce((n, p) => n + (p.windowCount ?? (p.hasVisibleWindow ? 1 : 0)), 0);
     let state: AppState;
     let reason: AppReason;
     if (key === SELF_KEY) { state = 'protected'; reason = 'self'; }
@@ -80,6 +84,7 @@ export function classify(
     else if (procs.some((p) => audioPids.has(p.pid))) { state = 'in_use'; reason = 'audio'; }
     else if (busyNow) { state = 'in_use'; reason = 'busy'; }
     else if (ctx.now - (focused ?? ctx.startedAt) < settings.idleMinutes * 60_000) { state = 'in_use'; reason = 'recent'; }
+    else if (CHROMIUM.has(key) && windows > 1) { state = 'in_use'; reason = 'multi_window'; }
     else { state = 'idle'; reason = 'idle'; }
 
     // apps empacotados (Paint, Bloco de Notas) trazem o próprio "x.exe" como descrição: não serve de nome
@@ -91,7 +96,7 @@ export function classify(
       name: key === SELF_KEY ? 'Folga' : description ?? fileName.charAt(0).toUpperCase() + fileName.slice(1),
       pids: procs.map((p) => p.pid),
       privateWorkingSet: procs.reduce((a, p) => a + p.privateWorkingSet, 0),
-      cpuPercent, state, reason, lastFocusedAt: focused,
+      cpuPercent, state, reason, lastFocusedAt: focused, windows,
     });
   }
 

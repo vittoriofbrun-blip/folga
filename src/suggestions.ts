@@ -51,7 +51,7 @@ function since(ms: number) {
 }
 const REASON: Record<AppReason, string> = {
   foreground: 'em primeiro plano agora', audio: 'tocando áudio', busy: 'usando o processador', recent: 'usado há pouco',
-  idle: 'parado, sem uso recente', no_window: 'sem janela aberta', system: 'do sistema', never_close: 'marcado para nunca fechar',
+  multi_window: 'navegador com várias janelas: fechar faria ele reabrir só a última', idle: 'parado, sem uso recente', no_window: 'sem janela aberta', system: 'do sistema', never_close: 'marcado para nunca fechar',
   self: 'é o próprio Folga', other_session: 'de outra sessão do Windows',
 };
 // pasta do arquivo sem depender de path.dirname em caminhos com barra mista

@@ -13,6 +13,7 @@ function reasonText(a: AppGroup, s: MemoryState) {
     case 'audio': return 'tocando áudio';
     case 'busy': return `ocupado · ${pct(a.cpuPercent)} CPU`;
     case 'recent': return `usado há ${since()}`;
+    case 'multi_window': return `${a.windows ?? 2} janelas · fechar faz o navegador reabrir só a última`;
     default: return '';
   }
 }

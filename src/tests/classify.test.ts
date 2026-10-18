@@ -202,6 +202,18 @@ caso('l) histerese da R04: ocupado só volta a parado abaixo de 60 % da linha', 
   assert.equal(ler(4).state, 'idle');                      // de parado, 4 % não basta: precisa chegar a 5
 });
 
+caso('m) R29: Chrome com 2 janelas, parado há horas -> in_use/multi_window; com 1 janela -> idle', () => {
+  const t = T0 + 5 * 60 * MIN;
+  const r = classify(snapOf([proc('chrome.exe', { windowCount: 2 }), proc('chrome.exe', { hasVisibleWindow: false, windowCount: 0 })], t),
+    emptyHistory(), settings, ctxAt(t));
+  const g = find(r, 'chrome');
+  assert.deepEqual([g.state, g.reason, g.windows], ['in_use', 'multi_window', 2]);
+  const uma = find(classify(snapOf([proc('chrome.exe', { windowCount: 1 })], t), emptyHistory(), settings, ctxAt(t)), 'chrome');
+  assert.deepEqual([uma.state, uma.reason], ['idle', 'idle']);
+  // app que não é navegador, com várias janelas, continua parado
+  assert.equal(find(classify(snapOf([proc('winword.exe', { windowCount: 3 })], t), emptyHistory(), settings, ctxAt(t)), 'winword').state, 'idle');
+});
+
 caso('puro: snapshot e history recebidos não são alterados', () => {
   const p = proc('figma.exe', { cpuTimeMs: 500 });
   const snap = snapOf([p, proc('figma.exe')], T0 + 100, p.pid);

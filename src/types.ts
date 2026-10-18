@@ -6,6 +6,7 @@ export type ProbeProcess = {
   privateWorkingSet: number;   // bytes (R02)
   cpuTimeMs: number;           // acumulado; o Node calcula o delta (R04)
   hasVisibleWindow: boolean;   // janela de topo visível, sem dono
+  windowCount?: number;        // quantas dessas janelas (R29); sondas antigas não mandam
   accessible: boolean;         // OpenProcess com o token do usuário funcionou
 };
 export type ProbeSnapshot = {
@@ -22,12 +23,13 @@ export type ProbeReply = { type: 'reply'; id: string; ok: boolean; windowsClosed
 
 // Node → interface
 export type AppState = 'idle' | 'in_use' | 'protected';
-export type AppReason = 'foreground' | 'audio' | 'busy' | 'recent' | 'idle'
+export type AppReason = 'foreground' | 'audio' | 'busy' | 'recent' | 'multi_window' | 'idle'
   | 'no_window' | 'system' | 'never_close' | 'self' | 'other_session';
 export type AppGroup = {
   key: string; name: string; pids: number[]; privateWorkingSet: number;
   cpuPercent: number; state: AppState; reason: AppReason;
   lastFocusedAt: number | null;   // epoch ms; null = nunca visto em primeiro plano
+  windows?: number;               // janelas de topo visíveis do grupo
 };
 export type Outcome = 'fechou' | 'ficou_aberto' | 'bandeja' | 'encerrado' | 'recusado';
 export type ReleaseResult = { key: string; name: string; outcome: Outcome };

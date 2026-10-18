@@ -407,6 +407,7 @@ public static class Probe
           .Append(",\"privateWorkingSet\":").Append(pws.ToString(CultureInfo.InvariantCulture))
           .Append(",\"cpuTimeMs\":").Append(cpuMs.ToString(CultureInfo.InvariantCulture))
           .Append(",\"hasVisibleWindow\":").Append(wins.ContainsKey(pid) ? "true" : "false")
+          .Append(",\"windowCount\":").Append((wins.ContainsKey(pid) ? wins[pid].Count : 0).ToString(CultureInfo.InvariantCulture))
           .Append(",\"accessible\":").Append(accessible ? "true" : "false")
           .Append('}');
         return sb.ToString();

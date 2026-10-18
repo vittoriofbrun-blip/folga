@@ -88,6 +88,15 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
 - **R25 Um turno por vez** — Teto de 120 s por turno; ao estourar, o servidor mata a árvore do processo do
   agente. O processo termina ao fim de cada turno.
 
+- **R29 Navegador com várias janelas** (F-13, 2026-10-18) — Navegador Chromium (Chrome, Edge, Brave, Vivaldi,
+  Opera) com mais de uma janela fica "em uso", com o motivo à mostra.
+  - Consequência: não vem marcado e o Auto Care não o fecha. O usuário ainda pode marcá-lo à mão.
+  - Motivo: fechar janela por janela (R07) faz o navegador reabrir só a última. Medido com um Chrome de perfil
+    temporário em `scripts/qa-chrome.ts`:
+    - "Sair" do navegador: as 3 janelas voltaram;
+    - WM_CLOSE em cada janela: só 1 voltou.
+  - Edge e os outros usam o mesmo motor: o efeito neles é inferido. Firefox não foi testado.
+
 - **R28 Projeto de código não é lixo** (D20) — Nenhum arquivo dentro de uma pasta com `.git`,
   `package.json`, `pyvenv.cfg`, `pyproject.toml`, `Cargo.toml` ou `go.mod` aparece na busca nem passa na
   validação de uma sugestão de Lixeira.

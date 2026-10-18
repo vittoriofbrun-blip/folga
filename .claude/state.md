@@ -1,5 +1,24 @@
 # Estado (mais recente no topo)
 
+## 2026-10-18 (fim da tarde) — R04 com histerese, R29 e o F-13 isolado
+- **Histerese no "ocupado"** (`bac7075`): um app que passou da linha de CPU só volta a parado abaixo de 60 %
+  dela (3 % no padrão). Chrome, Excel e PC Optimizer, que rondavam os 5 %, pararam de pular de grupo.
+- **F-13, a parte que dá para testar sem o Chrome do Antônio** (`scripts/qa-chrome.ts`, Chrome com perfil
+  temporário, duas rodadas com o mesmo resultado):
+  - "Sair" do navegador: as 3 janelas voltaram;
+  - WM_CLOSE do Folga em cada janela: só 1 voltou;
+  - virou a **R29**: navegador Chromium com mais de uma janela fica "em uso", com o motivo "N janelas";
+  - por isso ele não vem marcado e o Auto Care não o fecha;
+  - a sonda agora manda `windowCount`;
+  - Edge e os outros Chromium têm o mesmo efeito por inferência; o Firefox não foi testado.
+- 15:30: servidor real reiniciado com a sonda nova. Ajustes intactos, com o Auto Care em 92 %. O Chrome do
+  Antônio tem 1 janela agora.
+- **Falta com o Antônio:**
+  - F-13 com o Chrome dele: ver o motivo "N janelas" na tela Memória e testar um app de bandeja dele;
+  - F-08;
+  - decidir o envio dos prints pelo WhatsApp. Só a mensagem de abertura foi; as imagens pararam na proteção
+    de credencial do modo automático.
+
 ## 2026-10-18 (tarde) — v2: McAfee, assistente Claude/GPT, avisos, arquivos e visual do Mint
 - Decisões D11 a D20 (nome Folga, visual do Mint, P03 a P07 como padrões, agente, avisos, arquivos parados,
   limpeza rápida, Início, só sugere, projeto de código fora). Regras R20 a R28. ADR 0006 do agente.
