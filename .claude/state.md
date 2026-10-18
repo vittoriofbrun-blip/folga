@@ -1,5 +1,27 @@
 # Estado (mais recente no topo)
 
+## 2026-10-18 (17:15 a 17:35) — F-08 passou, e um início no logon que não leu os ajustes
+- **F-08 está feito.** O Antônio reiniciou o Windows (boot 17:07:51) e disse "não apareceu o app". O servidor
+  **subiu sozinho**: PID 5400 às 17:09:30, pelo atalho (`FOLGA_OPEN_WINDOW=0` no ambiente dele, pai já morto),
+  escutando na 4780, com a sonda viva. Não aparecer janela é o combinado do `--no-window`.
+  - Lição de produto: o único jeito de saber que ele subiu era abrir o navegador. Faltava feedback.
+- **Anomalia naquele processo, sem causa fechada:**
+  - `/api/settings` devolvia `autoCareEnabled: false`, com o `settings.json` do disco dizendo `true`;
+  - `/api/token` devolvia um token diferente do `ui-token` do disco;
+  - ele nunca reescreveu `agent-token` (escrita incondicional no início);
+  - um `PUT /api/settings` nele respondeu 200 e **não** alterou nenhum `settings.json` do perfil;
+  - o ambiente dele, lido do PEB, estava correto: `LOCALAPPDATA` certo e **sem** `FOLGA_DATA_DIR`.
+  - Descartados: BOM e JSON inválido (o arquivo parseia e `mergeSettings` o aceita numa cópia), pasta de dados
+    dentro do projeto, variável de ambiente persistente, link na pasta, e código antigo (ele tinha
+    `watchEnabled`, que é de hoje).
+  - Um servidor subido à mão pelo mesmo `launch.mjs` fica **correto**: token igual ao do disco, Auto Care em
+    92 % vindo do arquivo, `agent-token` reescrito.
+- **Por isso a R32:** o `launch.mjs` passou a gravar a saída em `%LOCALAPPDATA%\Folga\server.log`, e o servidor
+  grava uma linha ao subir com pasta de dados, origem dos ajustes e Auto Care. No logon ele usava
+  `stdio: 'ignore'`, ou seja, nenhuma testemunha. No próximo reinício o arquivo responde.
+- **Auto Care religado** em 92 % no processo que estava no ar, e o servidor foi reiniciado com o código novo.
+  15 suítes verdes e typecheck.
+
 ## 2026-10-18 (16:10 a 16:36) — o vigia avisa (R31) e cartão de máquina não fecha app em uso
 - **Furo fechado antes de qualquer coisa:** o vigia nascia com `source: 'folga'`, que é o do cartão montado
   na tela, e esse aceita fechar app **não parado** porque o usuário está olhando a lista. Um cartão de

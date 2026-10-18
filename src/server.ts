@@ -44,13 +44,15 @@ writeAtomic(join(DATA_DIR, 'agent-token'), AGENT_TOKEN);
 // ---------- ajustes (ADR 0005: gravação atômica) ----------
 const settingsFile = join(DATA_DIR, 'settings.json');
 // o disco passa pela mesma validação do PUT (sampleSeconds entra no comando da sonda); inválido volta aos padrões
+let settingsFrom = 'padrões (sem arquivo)';   // vai para o server.log: sem isso, um ajuste perdido no logon é invisível
 function loadSettings(): Settings {
   try {
     const r = mergeSettings(DEFAULT_SETTINGS, JSON.parse(readFileSync(settingsFile, 'utf8')));
     if (typeof r === 'string') throw new Error(r);
+    settingsFrom = 'settings.json';
     return r;
-  } catch {
-    if (existsSync(settingsFile)) console.error('settings.json inválido: usando os padrões');
+  } catch (e) {
+    if (existsSync(settingsFile)) settingsFrom = `padrões (settings.json recusado: ${e instanceof Error ? e.message : 'ilegível'})`;
     return { ...DEFAULT_SETTINGS };
   }
 }
@@ -377,7 +379,8 @@ function showWindow(): boolean {
 }
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Folga em http://127.0.0.1:${PORT}`);
+  // uma linha por início: no logon é a única testemunha do que o servidor leu (R32)
+  console.log(`[${new Date().toISOString()}] Folga em http://127.0.0.1:${PORT} | dados em ${DATA_DIR} | ajustes de ${settingsFrom} | Auto Care ${settings.autoCareEnabled ? `em ${settings.autoCareThreshold} %` : 'desligado'}`);
   if (process.env.FOLGA_OPEN_WINDOW === '1') showWindow();
 });
 

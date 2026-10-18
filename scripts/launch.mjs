@@ -1,7 +1,7 @@
 // npm run app: sobe o servidor escondido (se ainda não estiver no ar) e abre a janela.
 //   --no-window   só garante o servidor (usado pelo atalho da pasta Inicializar)
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, statSync, truncateSync } from 'node:fs';
 import { request } from 'node:http';
 import { join } from 'node:path';
 
@@ -31,6 +31,21 @@ function call(method, path, body) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// server.log em modo acréscimo, zerado se passar de 1 MB. Um fd só, usado para stdout e stderr.
+let fd;
+function logFd() {
+  if (fd !== undefined) return fd;
+  const file = join(dataDir, 'server.log');
+  try {
+    mkdirSync(dataDir, { recursive: true });
+    if (statSync(file, { throwIfNoEntry: false })?.size > 1_000_000) truncateSync(file, 0);
+    fd = openSync(file, 'a');
+  } catch {
+    fd = 'ignore';   // sem log é melhor que não subir
+  }
+  return fd;
+}
+
 if (!existsSync(join(root, 'dist', 'index.html'))) {
   console.error('interface não compilada: rode npm run build');
   process.exit(1);
@@ -39,8 +54,9 @@ if (!existsSync(join(root, 'dist', 'index.html'))) {
 // /api/settings responde mesmo antes da primeira leitura da sonda
 let up = (await call('GET', '/api/settings')) === 200;
 if (!up) {
+  // R32: a saída vai para um arquivo. Com 'ignore', um erro no logon não deixava rastro nenhum.
   const server = spawn(process.execPath, ['--no-warnings', join(root, 'src', 'server.ts')], {
-    cwd: root, detached: true, stdio: 'ignore', windowsHide: true, shell: false,
+    cwd: root, detached: true, stdio: ['ignore', logFd(), logFd()], windowsHide: true, shell: false,
     env: { ...process.env, FOLGA_OPEN_WINDOW: noWindow ? '0' : '1' },
   });
   server.unref();

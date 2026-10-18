@@ -127,6 +127,13 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
   - Se o Windows recusar uma vez, o Folga para de tentar até reiniciar. Avisar nunca derruba o que estava
     acontecendo.
 
+- **R32 O início deixa rastro** (2026-10-18) — O `launch.mjs` manda a saída do servidor para
+  `%LOCALAPPDATA%\Folga\server.log` (acréscimo, zerado acima de 1 MB), e o servidor grava uma linha ao subir:
+  data, porta, pasta de dados, de onde vieram os ajustes e o estado do Auto Care.
+  - Motivo: no logon o servidor subia com `stdio: 'ignore'`. Quando ele leu os padrões em vez do
+    `settings.json` do Antônio, não sobrou nenhuma evidência do porquê.
+  - Sem log nunca impede o servidor de subir.
+
 ## Avisos (v2, D15)
 - **R26** — Cada aviso tem um id estável por causa, nível, título, uma frase e o lugar onde se resolve.
   Avisos iguais não se repetem; quando a causa some, o aviso sai.
