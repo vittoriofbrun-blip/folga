@@ -10,7 +10,7 @@ import { DEFAULT_SETTINGS, type LogEntry, type MemoryState, type ReleaseResponse
 
 const PORT = 18000 + Math.floor(Math.random() * 1000);
 const dataDir = mkdtempSync(join(tmpdir(), 'folga-http-'));
-const startupDir = mkdtempSync(join(tmpdir(), 'folga-startup-'));   // nunca a pasta Inicializar real
+const startupDir = mkdtempSync(join(tmpdir(), 'folga-início-'));   // nunca a pasta Inicializar real; acento como em C:\Users\Antônio
 const filesRoot = mkdtempSync(join(tmpdir(), 'folga-files-'));   // varredura de teste: pasta vazia, nunca as pastas reais do usuário
 const root = join(import.meta.dirname, '..', '..');
 // já no disco antes de subir: ui-token curto demais (B5) e settings.json com valor que iria para o comando da sonda (B7)

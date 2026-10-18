@@ -13,11 +13,20 @@
   - Edge e os outros Chromium têm o mesmo efeito por inferência; o Firefox não foi testado.
 - 15:30: servidor real reiniciado com a sonda nova. Ajustes intactos, com o Auto Care em 92 %. O Chrome do
   Antônio tem 1 janela agora.
+- **"Abrir com o Windows" ligado** pela tela, a pedido do Antônio (2026-10-18, ~15:55).
+  - O atalho `Folga.lnk` está na pasta Inicializar real e roda `node.exe scripts\launch.mjs --no-window`,
+    minimizado, com a pasta Mint como diretório de trabalho.
+  - O F-08 agora só depende de reiniciar o Windows.
+- **Bug corrigido antes de ligar:** desligar não apagava o atalho.
+  - Causa: o `rmSync` em caminho com acento (`C:\Users\Antônio`) não apaga nada e não dá erro.
+  - Correção: `unlinkSync` em `src/window.ts`.
+  - O `http.test.ts` agora usa uma pasta Inicializar com acento. Antes da correção ele falhava.
+- Os 8 prints chegaram ao WhatsApp do Antônio pelo script autorizado por ele.
+  - A chave da Evolution foi lida só dentro do processo.
+  - O WhatsApp confirmou o recebimento (SERVER_ACK).
 - **Falta com o Antônio:**
   - F-13 com o Chrome dele: ver o motivo "N janelas" na tela Memória e testar um app de bandeja dele;
-  - F-08;
-  - decidir o envio dos prints pelo WhatsApp. Só a mensagem de abertura foi; as imagens pararam na proteção
-    de credencial do modo automático.
+  - F-08: reiniciar o Windows e conferir que o Folga sobe sozinho.
 
 ## 2026-10-18 (tarde) — v2: McAfee, assistente Claude/GPT, avisos, arquivos e visual do Mint
 - Decisões D11 a D20 (nome Folga, visual do Mint, P03 a P07 como padrões, agente, avisos, arquivos parados,

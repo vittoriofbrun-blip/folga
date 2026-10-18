@@ -1,6 +1,6 @@
 // Janela do app: Edge em modo app com perfil próprio (ADR 0001) e atalho opcional na pasta Inicializar (P04).
 import { spawn } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
 const EDGE_CANDIDATES = [
@@ -34,7 +34,8 @@ export const startupInstalled = () => existsSync(lnkPath());
 
 /** Cria ou remove o atalho que sobe só o servidor no logon (sem abrir a janela). */
 export function setStartup(on: boolean, root: string): Promise<boolean> {
-  if (!on) { rmSync(lnkPath(), { force: true }); return Promise.resolve(false); }
+  // unlinkSync, não rmSync: no Node 24.13 o rmSync não apaga arquivo em caminho com acento (C:\Users\Antônio) nem dá erro
+  if (!on) { try { unlinkSync(lnkPath()); } catch { /* já não existia */ } return Promise.resolve(startupInstalled()); }
   const script = [
     `$s = (New-Object -ComObject WScript.Shell).CreateShortcut(${psQuote(lnkPath())})`,
     `$s.TargetPath = ${psQuote(process.execPath)}`,
