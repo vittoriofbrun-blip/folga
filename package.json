@@ -1,0 +1,30 @@
+{
+  "name": "folga",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Economizar memória no Windows: mostra quem segura a RAM e fecha, do jeito normal, os apps parados.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "vite build",
+    "build:probe": "node scripts/build-probe.mjs",
+    "start": "node --no-warnings src/server.ts",
+    "test": "node scripts/test.mjs",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}

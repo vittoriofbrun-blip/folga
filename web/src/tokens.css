@@ -1,0 +1,40 @@
+/* Paleta provisória (P02, docs/referencias-ui/README.md). Não usar a cor de destaque do Mint. */
+:root {
+  --bg: #0a0c10;
+  --cell: #11151b;
+  --line: #262c35;
+  --fg: #eceae4;
+  --muted: #979ca6;
+  --accent: #5eead4;   /* destaque e "Liberados" */
+  --idle: #f5a524;     /* Parados */
+  --in-use: #6aa8ff;   /* Em uso */
+  --system: #6b7280;   /* Sistema e protegidos */
+  --danger: #ff9b8f;
+  --sans: "Geist", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --mono: "Geist Mono", ui-monospace, Consolas, monospace;
+  --radius-pill: 999px;
+  --radius: 12px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root { height: 100%; }
+
+button { font: inherit; color: inherit; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

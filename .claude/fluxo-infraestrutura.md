@@ -47,6 +47,8 @@ web/index.html  web/src/{main,App,Memory,AutoCare,Log}.tsx  web/src/tokens.css
 Dados em `%LOCALAPPDATA%\Folga\`: `settings.json`, `log.jsonl`, `ui-token`, `edge-profile\`.
 
 ## Contrato (`src/types.ts`, F-00)
+Desde o F-00 a fonte é o `src/types.ts`, que também exporta `DEFAULT_SETTINGS`, `SYSTEM_PROCESSES` e
+`ReleaseResponse`. Este bloco é o resumo.
 ```ts
 // sonda → Node (uma linha por leitura)
 export type ProbeProcess = {
