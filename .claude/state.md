@@ -16,12 +16,14 @@
   - a sonda morta voltou sozinha em menos de 4 s;
   - pegada sem janela: média 74 MB, pico 76 MB, 0,13 % da CPU total (R18 ok);
   - com a janela do Edge aberta, a árvore dela soma ~290 MB e entra como `__self`.
-- Não verificado ao vivo, porque fecharia apps do Antônio:
-  - Chrome com várias janelas. Hipótese a testar: `WM_CLOSE` fecha janela por janela, e a restauração de sessão
-    do Chromium pode reabrir só a última fechada, enquanto "Sair" pelo menu guarda todas;
-  - app que vai para a bandeja;
-  - diálogo "Salvar?" (o Bloco de Notas do Win11 restaura abas e não pergunta);
-  - Auto Care disparando de verdade (coberto por teste de unidade).
+- Verificado depois:
+  - `scripts/qa-live.ts`, com janelas WinForms reais e próprias e a sonda real, mirando só os PIDs delas:
+    duas janelas (`fechou`, WM_CLOSE nas 2), diálogo "Salvar?" (`ficou_aberto`), bandeja (`bandeja`),
+    bandeja com `mayForceQuit` (`encerrado`). 5 casos ok, sem sobras;
+  - `src/tests/autocare-server.test.ts`: o Auto Care dispara sozinho no servidor real (sonda falsa), fecha só o
+    parado, grava `origin: auto` e liga o freio.
+- Falta só com apps do Antônio (cartão F-13): Chrome dele com várias janelas (hipótese: a restauração de sessão
+  do Chromium pode reabrir só a última janela fechada) e um app de bandeja dele.
 - Atenção:
   - `%LOCALAPPDATA%\Folga\settings.json` está com `autoCareEnabled: true` em 92 %. Antônio confirmou que ligou
     pela tela e quer manter (2026-10-18).

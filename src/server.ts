@@ -62,7 +62,8 @@ export function mergeSettings(current: Settings, patch: unknown): Settings | str
 let settings = loadSettings();
 
 // ---------- estado vivo ----------
-const startedAt = Date.now();
+// testes: FOLGA_STARTED_AT no passado faz os apps já nascerem parados (sem esperar idleMinutes)
+const startedAt = Number(process.env.FOLGA_STARTED_AT) || Date.now();
 let history: ClassifyHistory = emptyHistory();
 let lastSnap: ProbeSnapshot | null = null;
 let state: MemoryState | null = null;
