@@ -23,6 +23,8 @@ Fora da v1: disco, otimizar, organizar, desinstalar, MCP para agentes, partícul
 - **D03** — A leitura do Windows fica numa **sonda nativa em C#**, um arquivo `probe/probe.cs` compilado
   pelo `csc.exe` que já vem no Windows (.NET Framework 4.x). Ela fala com o Node por linhas JSON em
   stdin/stdout. PowerShell com `Add-Type` é o plano B. ADR 0002.
+  **Emenda (D10, 2026-10-18):** o antivírus apaga o `.exe` sem assinatura, então o padrão é o `probe.cs`
+  carregado pelo `Add-Type` do PowerShell (~33 MB). O `.exe` só roda com `FOLGA_PROBE_EXE=1`.
 - **D04** — Liberar é mandar `WM_CLOSE` para as janelas do app. **Nunca** encerrar à força por padrão.
   ADR 0003.
 - **D05** — Não fazer "limpeza de RAM" com `EmptyWorkingSet` nem esvaziar a lista standby. ADR 0004.

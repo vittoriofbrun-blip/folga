@@ -101,7 +101,12 @@ const probeArgs = (): [string, string[]] => {
   const fake = process.env.FOLGA_FAKE_PROBE;   // testes: script node que imita a sonda
   const interval = String(settings.sampleSeconds);
   if (fake) return [process.execPath, [fake, '--interval', interval]];
-  return [join(ROOT, 'probe', 'bin', 'probe.exe'), ['--interval', interval]];
+  // .exe compilado: só com FOLGA_PROBE_EXE=1, porque o antivírus apaga exe sem assinatura (ADR 0002)
+  if (process.env.FOLGA_PROBE_EXE === '1') return [join(ROOT, 'probe', 'bin', 'probe.exe'), ['--interval', interval]];
+  // Padrão: o mesmo probe.cs compilado em memória pelo Add-Type do PowerShell 5.1 (~32 MB)
+  const ps = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const cs = join(ROOT, 'probe', 'probe.cs').replaceAll("'", "''");
+  return [ps, ['-NoProfile', '-NonInteractive', '-Command', `Add-Type -Path '${cs}'; [Probe]::Main(@('--interval','${interval}'))`]];
 };
 const [probeCmd, probeArgv] = probeArgs();
 const probe = startProbe(probeCmd, probeArgv, onSnapshot);
