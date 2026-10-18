@@ -37,7 +37,7 @@ try {
   }
   assert.equal(pend.length, 1, 'o vigia deveria ter proposto sozinho');
   const s = pend[0]!;
-  assert.equal(s.source, 'folga');
+  assert.equal(s.source, 'vigia');
   assert.equal(s.kind, 'liberar_memoria');
   assert.deepEqual(s.items.map(i => i.id), ['notepad']);
   assert.match(s.title, /Memória em 9\d %/);

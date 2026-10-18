@@ -127,8 +127,10 @@ export function createSuggestions(deps: SuggestionsDeps) {
       const a = state.apps.find(x => x.key === key);
       if (!a) return err('um dos apps não está aberto');
       if (a.state === 'protected') return err(`${a.name} é protegido e não pode ser fechado`);
-      // B2: o assistente só sugere app parado; pela tela, o usuário escolhe qualquer não protegido
-      if (source === 'agente' && a.state !== 'idle') return err(`${a.name} não está parado; o assistente só sugere apps parados`);
+      // B2: proposta de máquina (assistente, vigia) só vale para app parado, e isso é conferido de novo no
+      // clique: um cartão de meia hora atrás não pode fechar o que voltou a ser usado. Na tela, quem escolhe
+      // é o usuário olhando a lista ao vivo, então ali qualquer não protegido vale.
+      if (source !== 'folga' && a.state !== 'idle') return err(`${a.name} não está parado agora`);
       out.push({ id: a.key, label: a.name, detail: REASON[a.reason] ?? a.reason, bytes: a.privateWorkingSet });
     }
     return out;

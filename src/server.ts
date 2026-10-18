@@ -13,6 +13,7 @@ import { createWarnings } from './warnings.ts';
 import { createFiles } from './files.ts';
 import { createSuggestions } from './suggestions.ts';
 import { createWatch } from './watch.ts';
+import { createNotify } from './notify.ts';
 import { createAgent } from './agent.ts';
 import { DEFAULT_SETTINGS, type AgentProvider, type Emit, type MemoryState, type ProbeSnapshot, type Settings, type SuggestionDraft } from './types.ts';
 
@@ -192,10 +193,12 @@ const agent = createAgent({
   addSuggestion: draft => suggestions.add(draft, 'agente'),
 });
 // R30: o vigia propõe sozinho; quem executa continua sendo o clique do usuário em suggestions.approve
+const notify = createNotify({ port: PORT });
 const watch = createWatch({
   getState: () => state, getSettings: () => settings,
   disks: () => warnings.disk(), quickClean: () => files.quickCleanPreview(),
-  listSuggestions: () => suggestions.list(), propose: draft => suggestions.add(draft, 'folga'),
+  listSuggestions: () => suggestions.list(), propose: draft => suggestions.add(draft, 'vigia'),
+  notify: (title, body) => notify.toast(title, body),
   checkMs: Number(process.env.FOLGA_WATCH_MS) || undefined,   // testes encurtam o ciclo
 });
 warnings.start();

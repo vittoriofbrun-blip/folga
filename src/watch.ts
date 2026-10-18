@@ -10,6 +10,7 @@ export type WatchDeps = {
   quickClean: () => Promise<QuickCleanItem[]>;
   listSuggestions: () => Suggestion[];
   propose: (draft: SuggestionDraft) => Promise<unknown>;
+  notify?: (title: string, body: string) => void;   // R31: aviso do Windows, só na proposta nova
   now?: () => number;
   checkMs?: number;   // testes encurtam o ciclo
 };
@@ -99,7 +100,9 @@ export function createWatch(deps: WatchDeps) {
 
   async function propose(draft: SuggestionDraft) {
     proposedAt[draft.kind] = now();   // marca antes: uma recusa não vira repetição a cada minuto
-    await deps.propose(draft);
+    const r = await deps.propose(draft);
+    // só avisa se o cartão existe mesmo: proposta recusada pelo servidor não vira notificação
+    if (r && typeof r === 'object' && 'id' in r) deps.notify?.('Folga', `${draft.title} — toque para decidir.`);
   }
 
   async function memory(): Promise<void> {

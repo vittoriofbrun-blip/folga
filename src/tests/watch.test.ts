@@ -72,9 +72,10 @@ await caso('disco: o do sistema, a porcentagem livre e o mínimo de 1 GB para va
 });
 
 // ---------------- ciclo, com tudo falso ----------------
-type Fake = { watch: ReturnType<typeof createWatch>; drafts: SuggestionDraft[]; feitas: Suggestion[]; agora: { t: number } };
-function fake(o: { state?: MemoryState | null; settings?: Settings; disks?: DiskInfo[]; clean?: QuickCleanItem[] } = {}): Fake {
+type Fake = { watch: ReturnType<typeof createWatch>; drafts: SuggestionDraft[]; avisos: string[][]; feitas: Suggestion[]; agora: { t: number } };
+function fake(o: { state?: MemoryState | null; settings?: Settings; disks?: DiskInfo[]; clean?: QuickCleanItem[]; recusa?: boolean } = {}): Fake {
   const drafts: SuggestionDraft[] = [];
+  const avisos: string[][] = [];
   const feitas: Suggestion[] = [];
   const agora = { t: T0 };
   const watch = createWatch({
@@ -83,10 +84,11 @@ function fake(o: { state?: MemoryState | null; settings?: Settings; disks?: Disk
     disks: async () => o.disks ?? [],
     quickClean: async () => o.clean ?? [],
     listSuggestions: () => feitas,
-    propose: async d => { drafts.push(d); return undefined; },
+    propose: async d => { drafts.push(d); return o.recusa ? { erro: 'não deu', status: 400 } : { id: 'x' }; },
+    notify: (t, b) => { avisos.push([t, b]); },
     now: () => agora.t,
   });
-  return { watch, drafts, feitas, agora };
+  return { watch, drafts, avisos, feitas, agora };
 }
 const posta = (f: Fake, s: Partial<Suggestion>) =>
   f.feitas.unshift({ id: String(f.feitas.length), t: f.agora.t, source: 'folga', kind: 'liberar_memoria', title: 't', reason: 'r', items: [], bytes: 0, status: 'pendente', ...s });
@@ -191,6 +193,23 @@ await caso('disco: só olha a limpeza quando está apertado, e propõe uma vez',
   assert.equal(f.drafts[0]!.kind, 'limpeza_rapida');
   for (let i = 0; i < 5; i++) await apertado.tick();
   assert.equal(olhou, 1, 'medir a limpeza é caro: não repete a cada ciclo');
+});
+
+await caso('R31: avisa uma vez por proposta, com o título do cartão', async () => {
+  const f = fake();
+  await f.watch.tick(); await f.watch.tick();
+  assert.equal(f.avisos.length, 1);
+  assert.equal(f.avisos[0]![0], 'Folga');
+  assert.match(f.avisos[0]![1]!, /^Memória em 95 %: dá para liberar .* — toque para decidir\.$/);
+  for (let i = 0; i < 5; i++) await f.watch.tick();
+  assert.equal(f.avisos.length, 1, 'não avisa de novo enquanto o cartão está lá');
+});
+
+await caso('R31: proposta recusada pelo servidor não vira aviso', async () => {
+  const f = fake({ recusa: true });
+  await f.watch.tick(); await f.watch.tick();
+  assert.equal(f.drafts.length, 1);
+  assert.equal(f.avisos.length, 0);
 });
 
 await caso('uma fonte que falha não derruba o ciclo nem a outra proposta', async () => {

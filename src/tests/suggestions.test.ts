@@ -410,6 +410,15 @@ try {
     assert.equal(rag.status, 'falhou');
     assert.match(rag.result!, /não está parado/);
     assert.equal(released.length, 1, 'release não foi chamado');
+    // R30: card do vigia é proposta de máquina, então vale a mesma regra do assistente
+    state!.apps[0]!.state = 'idle';
+    const vg = asSug(await s.add(draft('liberar_memoria', ['chrome']), 'vigia'));
+    state!.apps[0]!.state = 'in_use';   // o app voltou a ser usado antes do clique
+    const rvg = asSug(await s.approve(vg.id));
+    assert.equal(rvg.status, 'falhou');
+    assert.match(rvg.result!, /não está parado/);
+    assert.equal(released.length, 1, 'cartão velho do vigia não fecha app que voltou a ser usado');
+
     // o mesmo app, em card da tela (folga), ainda pode ser fechado pelo usuário
     const tela = asSug(await s.add(draft('liberar_memoria', ['chrome']), 'folga'));
     releaseAnswer = { availBefore: 100, availAfter: 100, results: [{ key: 'chrome', name: 'Chrome', outcome: 'fechou' }] };

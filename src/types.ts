@@ -118,7 +118,8 @@ export type SuggestionItem = {
   lastUsed?: number;       // só arquivo: último uso visto na sugestão; a aprovação recusa se ficou mais novo (M5)
 };
 export type Suggestion = {
-  id: string; t: number; source: 'agente' | 'folga';
+  // 'folga' = o usuário montou na tela e está vendo; 'agente' e 'vigia' são propostas de máquina (R21: só app parado)
+  id: string; t: number; source: 'agente' | 'folga' | 'vigia';
   kind: SuggestionKind; title: string; reason: string;
   items: SuggestionItem[];   // R23: montados pelo servidor a partir do disco/estado, não do modelo
   bytes: number;             // soma recalculada pelo servidor (R21)

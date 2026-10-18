@@ -116,6 +116,16 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
     ou de uma decisão. Se o usuário **ignorou**, espera 6 h. Cartão que expirou sozinho não conta como "não".
   - **Desligar:** `watchEnabled` em Ajustes. Desligado, nada é proposto.
   - O vigia não usa modelo de linguagem: os números vêm das mesmas leituras das telas.
+  - **Proposta de máquina só fecha app parado.** O cartão do vigia e o do assistente passam pela mesma
+    conferência no clique: um cartão de meia hora atrás não fecha o que voltou a ser usado. O cartão montado
+    na tela continua aceitando qualquer app não protegido, porque ali o usuário escolhe vendo a lista ao vivo.
+- **R31 Aviso do Windows na proposta nova** — Quando o vigia propõe, o Folga toca uma notificação do Windows;
+  o toque nela abre `http://127.0.0.1:<porta>`. Um aviso por cartão, nunca a cada ciclo, e nenhum aviso se o
+  servidor recusou a proposta.
+  - O texto vai por variável de ambiente e é escapado para XML dentro do script: nome de app ou de arquivo
+    nunca vira comando (mesma ideia da R24).
+  - Se o Windows recusar uma vez, o Folga para de tentar até reiniciar. Avisar nunca derruba o que estava
+    acontecendo.
 
 ## Avisos (v2, D15)
 - **R26** — Cada aviso tem um id estável por causa, nível, título, uma frase e o lugar onde se resolve.

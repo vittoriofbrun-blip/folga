@@ -1,5 +1,21 @@
 # Estado (mais recente no topo)
 
+## 2026-10-18 (16:30 a 17:00) — o vigia avisa (R31) e cartão de máquina não fecha app em uso
+- **Furo fechado antes de qualquer coisa:** o vigia nascia com `source: 'folga'`, que é o do cartão montado
+  na tela, e esse aceita fechar app **não parado** porque o usuário está olhando a lista. Um cartão de
+  máquina pode envelhecer, então ele passou a ter `source: 'vigia'` e a mesma conferência do assistente:
+  no clique, só fecha o que ainda está parado. Teste novo em `suggestions.test.ts`.
+- **R31, aviso do Windows** (`src/notify.ts`): quando o vigia propõe, toca uma notificação; o toque abre o
+  Folga. Um aviso por cartão. Se o Windows recusar uma vez, não insiste.
+  - O texto vai por variável de ambiente (`FOLGA_TOAST_*`) e é escapado para XML dentro do script, então
+    nome de app nunca vira comando. Conferido: com título e corpo cheios de `"`, `<tag>`, `&`, `$(...)` e
+    crase, o script saiu com 0.
+  - Usa o AppId do próprio PowerShell, que é o jeito de tocar um toast sem registrar um app no Windows.
+    Efeito colateral: a notificação aparece como "Windows PowerShell". O primeiro texto é "Folga".
+- Verificado ao vivo: num servidor de teste (porta 4791, sonda falsa), o vigia propôs e **o processo do
+  toast foi pego no ar**, com o título do cartão fora da linha de comando. 15 suítes verdes, typecheck, build.
+- Servidor real reiniciado às 16:47 com tudo isto.
+
 ## 2026-10-18 (15:51 a 16:20) — o vigia: o Folga propõe sozinho (D21, R30)
 - Pedido do Antônio: "monitorando o desempenho, traga opções, eu dou o ok e ele já resolve".
 - `src/watch.ts`: de minuto em minuto olha memória e disco e monta um cartão. **Não usa modelo de linguagem**
