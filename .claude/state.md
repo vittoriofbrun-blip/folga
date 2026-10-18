@@ -1,5 +1,25 @@
 # Estado (mais recente no topo)
 
+## 2026-10-18 (17:45 a 18:00) — R29 vista na tela com Chrome real, aviso confirmado, BOM corrigido
+- **R29 provada ao vivo, sem tocar no Chrome do Antônio.** Abri 2 janelas de Chrome com perfil temporário e
+  li por um servidor de teste à parte (porta 4792, sonda real, Auto Care e vigia desligados, `idleMinutes` 5):
+  - a sonda contou `janelas=2` no grupo `chrome`, que inclui o Chrome real;
+  - passados os 5 min sem foco, o estado virou `in_use/multi_window`;
+  - a tela Memória mostrou, em "Em uso": **"2 janelas · fechar faz o navegador reabrir só a última"**, e o
+    app **não** veio marcado. Captura em `docs/telas-v2/10-r29-chrome-2-janelas.jpg`.
+  - Tudo removido depois: janelas de teste, servidor e pastas temporárias.
+  - Falta do F-13 só o app de bandeja do Antônio.
+- **R31 confirmada de verdade:** a Central de Ações do Windows guarda os avisos do Folga, com o texto certo,
+  inclusive o teste com `"`, `<tag>`, `&` e `$(...)` saindo literal. Antes só havia o código de saída 0.
+  - Sobraram na Central os avisos de teste ("Folga (teste)", "(teste 3)"), que o Antônio pode dispensar.
+  - O Folga ainda não marca os avisos com `tag`, então não dá para ele mesmo tirar os seus da Central.
+- **Bug achado e corrigido no meio disso:** `settings.json` com BOM quebrava o `JSON.parse` e **zerava os
+  ajustes em silêncio** (Auto Care desligado, listas vazias). O PowerShell 5.1 grava BOM com `-Encoding utf8`.
+  - `loadSettings` passou a tirar o BOM; o `autocare-server.test.ts` grava o arquivo com BOM de propósito e
+    falha sem a correção.
+  - **Não é a causa do caso do logon:** o `settings.json` real não tem BOM (bytes conferidos).
+- O cartão F-08 do quadro foi anotado (o servidor do kanban precisou ser religado depois do reinício).
+
 ## 2026-10-18 (17:40) — o logon passa a abrir a janela (R33)
 - O Antônio pediu a janela aberta no logon, e não só o servidor. O atalho deixou de passar `--no-window`.
 - O atalho foi refeito pela API (desligar e ligar), e o caminho do logon foi testado de verdade: servidor
