@@ -41,6 +41,14 @@
   - A pasta Inicializar não tem o atalho do Folga. Depois de reiniciar o Windows, o Auto Care só volta com
     `npm run app` ou ligando "Abrir com o Windows" em Ajustes.
 - Cartões F-10, F-12, F-14, F-15, F-17 e F-18 em Revisar, para o Antônio fechar.
+- **Bug achado ao tirar os prints (corrigido):** um app parado, marcado sozinho, continuava marcado ao ficar
+  ocupado, contra a R04.
+  - Agora a seleção da tela Memória é o padrão (os parados) mais as marcas feitas à mão
+    (`web/src/selection.ts`, teste `selection.test.ts`, 12 suítes verdes).
+  - Visto ao vivo: com a primeira versão da correção, a marca caía quando o app ficava ocupado. Com a
+    versão final, o Excel desmarcado à mão continuou desmarcado.
+- **Observado, sem mudança:** Chrome, Excel e PC Optimizer oscilam entre parado e ocupado a cada poucos
+  segundos, perto da linha de 5 % de CPU da R04. Não há histerese, então a lista pula de grupo.
 
 ## 2026-10-18 — v1 construída (F-00 a F-11)
 - Feito e commitado:

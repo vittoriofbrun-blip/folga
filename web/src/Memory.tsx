@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { AppGroup, MemoryState, ReleaseResponse } from '../../src/types';
 import type { Source } from './mock';
 import { NB, OUTCOME, ago, gb, pct, plural, size } from './format';
 import { Particles } from './Particles';
+import { selection } from './selection';
 
 function reasonText(a: AppGroup, s: MemoryState) {
   const since = () => ago(s.t - (a.lastFocusedAt ?? s.startedAt));
@@ -48,29 +49,20 @@ function AppRow({ app, s, on, disabled, toggle }: {
 }
 
 export function Memory({ state, source }: { state: MemoryState | null; source: Source }) {
-  const [sel, setSel] = useState<Set<string>>(new Set());
+  // Marcas feitas à mão; o resto segue o padrão (R04, R06), recalculado a cada leitura.
+  const [hand, setHand] = useState({ on: new Set<string>(), off: new Set<string>() });
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>(null);
   const [showList, setShowList] = useState(true);
-  const prevIdle = useRef<Set<string>>(new Set());
   const barRef = useRef<HTMLDivElement>(null);
-
-  // Mantém a escolha do usuário; só marca por padrão os parados que acabaram de aparecer (R03).
-  useEffect(() => {
-    if (!state) return;
-    const live = new Set(state.apps.filter((a) => a.state !== 'protected').map((a) => a.key));
-    const idleNow = new Set(state.apps.filter((a) => a.state === 'idle').map((a) => a.key));
-    const fresh = [...idleNow].filter((k) => !prevIdle.current.has(k));
-    prevIdle.current = idleNow;
-    setSel((prev) => {
-      const next = new Set([...prev].filter((k) => live.has(k)));
-      fresh.forEach((k) => next.add(k));
-      return next.size === prev.size && [...next].every((k) => prev.has(k)) ? prev : next;
-    });
-  }, [state]);
+  const sel = state ? selection(state.apps, hand.on, hand.off) : new Set<string>();
 
   const toggle = (k: string) =>
-    setSel((prev) => { const n = new Set(prev); if (!n.delete(k)) n.add(k); return n; });
+    setHand((h) => {
+      const on = new Set(h.on), off = new Set(h.off);
+      if (sel.has(k)) { on.delete(k); off.add(k); } else { off.delete(k); on.add(k); }
+      return { on, off };
+    });
 
   async function release() {
     setBusy(true);
