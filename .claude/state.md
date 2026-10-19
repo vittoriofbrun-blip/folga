@@ -14,7 +14,16 @@
 - Limite conhecido: dono que não é protegido (o Chrome em uso) entra na conta mas não tem linha onde
   aparecer. Está escrito na R36 e no código.
 - `ver_memoria` ganhou `servicosMB` por linha, pela mesma função pura. 16 suítes verdes (protegidos com
-  13 casos), typecheck e build.
+  14 casos), typecheck e build.
+- **Armadilha achada na hora:** `npm run build` troca o `dist` **sob o servidor que já está no ar**, então
+  a interface pode ficar mais nova que quem serve o estado. O servidor na 4780 estava em `a884ac2`,
+  mandando `parents` como lista de chaves, e a tela nova lia `p.key`: ia escrever "serviço do undefined"
+  em toda linha sem janela. A `protectedRows` passou a descartar pai sem chave utilizável, com caso de
+  teste; a linha volta a ser só "sem janela aberta" até o servidor reiniciar. Não quebra, não mente.
+- **Pendente de um clique do Antônio:** o servidor na 4780 segue no código antigo. Enquanto não for
+  reiniciado (`taskkill /PID <dono da porta> /T` e `node scripts/launch.mjs --no-window`), ele não manda
+  os bytes por pai, então "serviço do X" e "+ X em serviços" não aparecem na máquina dele. O `settings.json`
+  dele está íntegro (Auto Care ligado em 80 %), e reiniciar não mexe nisso.
 
 ## 2026-10-19 — R36: "Sistema e protegidos" abre e explica
 - Fecha o buraco que a sessão anterior deixou anotado: com memória alta e nada parado, a tela não dava

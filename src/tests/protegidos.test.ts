@@ -146,5 +146,14 @@ caso('um app sem janela também pode ser dono (o da bandeja)', () => {
   assert.equal(rows.find((r) => r.key === 'chatgpt')!.services / MB, 200);
 });
 
+caso('servidor mais velho que a interface: parents só com chaves não vira "serviço do undefined"', () => {
+  // `npm run build` troca o dist sob o servidor que já está no ar (visto em 2026-10-19 na porta 4780)
+  const velho = [{ key: 'node', reason: 'no_window', parents: ['claude', 'cursor'] }] as unknown as AppGroup[];
+  const rows = protectedRows(velho.map((a) => app({ ...a, key: a.key })));
+  assert.equal(rows[0]!.words, 'sem janela aberta');
+  assert.deepEqual(rows[0]!.parents, []);
+  assert.equal(rows[0]!.services, 0);
+});
+
 casos.forEach((c) => console.log('ok  ' + c));
 console.log(`protegidos: ${casos.length} casos ok`);

@@ -60,7 +60,10 @@ export function protectedRows(apps: readonly AppGroup[]): ProtectedRow[] {
   return apps
     .filter((a) => a.state === 'protected')
     .map((a) => {
-      const parents = (a.parents ?? []).map((p) => nameOf.get(p.key) ?? p.key);
+      // `npm run build` troca a interface sob um servidor que já está no ar, então o dist pode ser mais
+      // novo que quem serve o estado. Servidor velho manda `parents` como lista de chaves: sem `p.key`,
+      // a linha volta a ser só "sem janela aberta" em vez de dizer "serviço do undefined".
+      const parents = (a.parents ?? []).map((p) => nameOf.get(p.key) ?? p.key).filter((n) => typeof n === 'string');
       const base = WORDS[a.reason] ?? a.reason;
       return {
         key: a.key, name: a.name, bytes: a.privateWorkingSet, procs: a.pids.length, reason: a.reason,
