@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { appKey, classify, emptyHistory } from '../classify.ts';
 import type { ClassifyContext, ClassifyHistory } from '../classify.ts';
-import type { ProbeProcess, ProbeSnapshot, Settings } from '../types.ts';
+import type { AppGroup, ProbeProcess, ProbeSnapshot, Settings } from '../types.ts';
 import { DEFAULT_SETTINGS } from '../types.ts';
 
 const MIN = 60_000;
@@ -227,6 +227,7 @@ caso('puro: snapshot e history recebidos não são alterados', () => {
 // ===================== R36: de quem é o processo sem janela =====================
 // Cenário real de 2026-10-19: 141 processos node sem janela, uns do Claude Code, outros do ChatGPT.
 const semJanela = { hasVisibleWindow: false };
+const keys = (g: AppGroup) => g.parents?.map((p) => p.key);
 
 caso('R36: sobe pelo ppid pulando o console e para no app com janela', () => {
   // node <- cmd <- claude(com janela). O cmd no meio não é a resposta útil.
@@ -234,8 +235,8 @@ caso('R36: sobe pelo ppid pulando o console e para no app com janela', () => {
   const cmd = proc('cmd.exe', { pid: 11, ppid: 10, ...semJanela });
   const node = proc('node.exe', { pid: 12, ppid: 11, ...semJanela });
   const r = classify(snapOf([claude, cmd, node], T0), emptyHistory(), settings, ctxAt(T0));
-  assert.deepEqual(find(r, 'node').parents, ['claude']);
-  assert.deepEqual(find(r, 'cmd').parents, ['claude']);
+  assert.deepEqual(keys(find(r, 'node')), ['claude']);
+  assert.deepEqual(keys(find(r, 'cmd')), ['claude']);
   // o claude tem janela: está em never_close (R05), e aí não se pergunta de quem ele é
   assert.deepEqual([find(r, 'claude').reason, find(r, 'claude').parents], ['never_close', undefined]);
 });
@@ -246,7 +247,7 @@ caso('R36: sem nenhum ancestral com janela, fica o primeiro app diferente (bande
   const chat = proc('ChatGPT.exe', { pid: 21, ppid: 20, ...semJanela });
   const node = proc('node.exe', { pid: 22, ppid: 21, ...semJanela });
   const r = classify(snapOf([sihost, chat, node], T0), emptyHistory(), settings, ctxAt(T0));
-  assert.deepEqual(find(r, 'node').parents, ['chatgpt']);
+  assert.deepEqual(keys(find(r, 'node')), ['chatgpt']);
 });
 
 caso('R36: a árvore do sistema não vira pai — nada de "serviço do explorer"', () => {
@@ -272,7 +273,7 @@ caso('R36: o próprio Folga também corta a subida', () => {
   assert.equal(find(r, 'powershell').parents, undefined);
 });
 
-caso('R36: vários pais, maior primeiro por memória, no máximo 3', () => {
+caso('R36: vários pais, maior primeiro por memória, todos na conta', () => {
   const MBp = (n: number) => ({ privateWorkingSet: n * MB, ...semJanela });
   const procs = [
     proc('claude.exe', { pid: 50, ppid: 1 }), proc('ChatGPT.exe', { pid: 51, ppid: 1 }),
@@ -280,18 +281,20 @@ caso('R36: vários pais, maior primeiro por memória, no máximo 3', () => {
     proc('node.exe', { pid: 60, ppid: 51, ...MBp(100) }),   // ChatGPT: 100
     proc('node.exe', { pid: 61, ppid: 50, ...MBp(700) }),   // Claude: 700
     proc('node.exe', { pid: 62, ppid: 52, ...MBp(300) }),   // Cursor: 300
-    proc('node.exe', { pid: 63, ppid: 53, ...MBp(10) }),    // Codex: 10, fica fora dos 3
+    proc('node.exe', { pid: 63, ppid: 53, ...MBp(10) }),    // Codex: 10, o menor, mas entra na conta
   ];
   const r = classify(snapOf(procs, T0), emptyHistory(), settings, ctxAt(T0));
-  assert.deepEqual(find(r, 'node').parents, ['claude', 'cursor', 'chatgpt']);
+  assert.deepEqual(keys(find(r, 'node')), ['claude', 'cursor', 'chatgpt', 'codex']);
+  // os bytes vão junto: é deles que sai o "+ X em serviços" da linha do dono
+  assert.deepEqual(find(r, 'node').parents?.map((p) => p.bytes / MB), [700, 300, 100, 10]);
 });
 
 caso('R36: laço de ppid termina em vez de travar', () => {
   const a = proc('a.exe', { pid: 70, ppid: 71, ...semJanela });
   const b = proc('b.exe', { pid: 71, ppid: 70, ...semJanela });
   const r = classify(snapOf([a, b], T0), emptyHistory(), settings, ctxAt(T0));
-  assert.deepEqual(find(r, 'a').parents, ['b']);   // o primeiro diferente, e para
-  assert.deepEqual(find(r, 'b').parents, ['a']);
+  assert.deepEqual(keys(find(r, 'a')), ['b']);   // o primeiro diferente, e para
+  assert.deepEqual(keys(find(r, 'b')), ['a']);
 });
 
 caso('R36: só motivo no_window ganha pai', () => {

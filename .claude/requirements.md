@@ -52,8 +52,17 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
     primeira janela visível descarta esse lixo.
   - **Motivo:** em 2026-10-19, dos 5,9 GB protegidos, 4,2 GB eram o "nunca fechar" do Antônio (Claude Code
     3,7 GB) e 1,4 GB eram processos sem janela, quase todos `node`, `cmd` e `conhost` lançados por ele.
+  - **Cada dono leva a conta dos serviços dele.** A linha do app mostra, ao lado do próprio tamanho,
+    "+ X em serviços": a soma dos processos sem janela que ele lançou, espalhados pelas outras linhas.
+    Assim ninguém soma de cabeça "Claude Code 3,7 GB" numa linha e "Node.js · serviço do Claude Code" em
+    outra. Os dois números ficam separados de propósito: somá-los numa coluna só contaria duas vezes, e o
+    total do grupo continua sendo a soma dos tamanhos próprios.
+    - Abaixo de 10 MB não aparece: é migalha que não muda a decisão de ninguém.
+    - Dono que não está no grupo protegido (o Chrome em uso, por exemplo) entra na conta mas não tem onde
+      aparecer ainda; abrir isso nas outras linhas só quando alguém sentir falta.
   - **O assistente enxerga o mesmo.** `ver_memoria` devolve `protegidos` com motivo, palavras, tamanho,
-    contagem e `destravavel`. Tela e assistente usam a **mesma** função pura (`src/protegidos.ts`).
+    `servicosMB`, contagem e `destravavel`. Tela e assistente usam a **mesma** função pura
+    (`src/protegidos.ts`).
 
 ## Liberar
 - **R07 Fechar do jeito normal** — Liberar manda `WM_CLOSE` para **todas** as janelas de topo visíveis

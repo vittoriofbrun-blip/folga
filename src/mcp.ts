@@ -66,10 +66,12 @@ export const TOOLS: Tool[] = [
         disponivelGB: +(s.availPhys / GB).toFixed(1),
         apps: s.apps.filter(a => a.state !== 'protected').map(a => ({ app: texto(a.key, 64), nome: texto(a.name, 80), estado: a.state, motivo: a.reason, MB: mb(a.privateWorkingSet), cpu: a.cpuPercent })),
         protegidosMB: mb(prot.reduce((t, r) => t + r.bytes, 0)),
-        // R36: maiores primeiro, no máximo 15 linhas; `destravavel` = está na lista "nunca fechar" do usuário
+        // R36: maiores primeiro, no máximo 15 linhas; `destravavel` = está na lista "nunca fechar" do usuário.
+        // `servicosMB` = o que ESTE app segura em processos sem janela que aparecem em outras linhas; não
+        // está dentro de `MB`, e somar os dois diz quanto o app inteiro ocupa.
         protegidos: prot.slice(0, PROT_MAX).map(r => ({
           app: texto(r.key, 64), nome: texto(r.name, 80), motivo: r.reason, porque: texto(r.words, 160),
-          MB: mb(r.bytes), processos: r.procs, destravavel: r.canUnprotect,
+          MB: mb(r.bytes), servicosMB: mb(r.services), processos: r.procs, destravavel: r.canUnprotect,
         })),
         protegidosOcultos: Math.max(0, prot.length - PROT_MAX),
       };

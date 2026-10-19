@@ -60,7 +60,12 @@ function ProtRow({ row, go }: { row: ProtectedRow; go?: (v: View) => void }) {
           )}
         </span>
       </span>
-      <span className="row-size">{size(row.bytes)}</span>
+      <span className="row-size">
+        {size(row.bytes)}
+        {/* R36: o que este app segura em serviços sem janela, ao lado do próprio tamanho, para o
+            usuário não somar de cabeça. Os dois separados: somar na coluna contaria duas vezes. */}
+        {row.services > 0 && <span className="row-plus">+ {size(row.services)} em serviços</span>}
+      </span>
     </div>
   );
 }

@@ -227,6 +227,9 @@
 .row-name { font-size: 14px; }
 .row-reason { color: var(--muted); font-size: 12px; }
 .row-size { color: var(--fg); font-variant-numeric: tabular-nums; text-align: right; }
+/* R36: "+ X em serviços" embaixo do próprio tamanho, na mesma coluna */
+.row-size:has(.row-plus) { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.row-plus { color: var(--tone-text, var(--muted)); font-size: 11px; font-weight: 600; white-space: nowrap; }
 
 .result { background: var(--cell); border: 1px solid var(--line); border-radius: var(--card-r); padding: 10px 6px; margin-bottom: 26px; animation: rise 0.4s var(--ease); }
 .result-head {

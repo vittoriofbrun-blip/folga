@@ -1,5 +1,21 @@
 # Estado (mais recente no topo)
 
+## 2026-10-19 — R36, parte 2: cada dono leva a conta dos serviços dele
+- Faltava o outro lado da R36: o usuário lia "Claude Code 3,7 GB" numa linha e "Node.js · serviço do
+  Claude Code" em outra, e tinha que somar de cabeça. A linha do dono passou a mostrar, embaixo do próprio
+  tamanho, "+ X em serviços".
+- `AppGroup.parents` deixou de ser só as chaves e virou `{ key, bytes }[]`, **sem corte**, porque é dessa
+  conta que sai a soma; quem corta é quem mostra (três nomes nas palavras). O corte velho em 3 fazia um
+  grupo com exatamente 3 pais dizer "e de outros" sem ter outros — agora nomeia os três.
+- Os dois números ficam separados: somar na mesma coluna contaria duas vezes, e o total do grupo continua
+  sendo a soma dos tamanhos próprios. Piso de 10 MB, senão sobrava "mais 1 MB em serviços" no PowerShell.
+- **Visto ao vivo** (instância isolada na 4781, 85 %): Claude 3,7 GB + 282 MB, Antigravity IDE 270 MB +
+  129 MB (quase metade a mais do que a linha dele dizia), Codex 105 MB + 44 MB.
+- Limite conhecido: dono que não é protegido (o Chrome em uso) entra na conta mas não tem linha onde
+  aparecer. Está escrito na R36 e no código.
+- `ver_memoria` ganhou `servicosMB` por linha, pela mesma função pura. 16 suítes verdes (protegidos com
+  13 casos), typecheck e build.
+
 ## 2026-10-19 — R36: "Sistema e protegidos" abre e explica
 - Fecha o buraco que a sessão anterior deixou anotado: com memória alta e nada parado, a tela não dava
   próximo passo nenhum. Agora o grupo protegido é uma lista recolhível (abre sozinha quando nada está

@@ -131,16 +131,18 @@ export function classify(
 
     // apps empacotados (Paint, Bloco de Notas) trazem o próprio "x.exe" como descrição: não serve de nome
     const description = procs.map((p) => p.description.trim()).find((d) => d !== '' && !/\.exe$/i.test(d));
-    // R36: quem lançou os processos sem janela, maiores primeiro. Só aqui: os outros motivos ou são
-    // o topo da árvore (never_close) ou não têm próximo passo (system, self, other_session).
-    let parents: string[] | undefined;
+    // R36: quem lançou os processos sem janela e quanto é de cada um, maiores primeiro. Só aqui: os outros
+    // motivos ou são o topo da árvore (never_close) ou não têm próximo passo (system, self, other_session).
+    // Sem corte na lista: é desta conta que sai o "+ X GB em serviços" da linha do dono, e cortar perderia
+    // bytes. Quem mostra é que corta (três nomes nas palavras).
+    let parents: AppGroup['parents'];
     if (reason === 'no_window') {
       const bytes = new Map<string, number>();
       for (const p of mine) {
         const par = parentOf(p.pid, key, byPid, keyOf, windowed, ctx.userSession);
         if (par) bytes.set(par, (bytes.get(par) ?? 0) + p.privateWorkingSet);
       }
-      if (bytes.size > 0) parents = [...bytes].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
+      if (bytes.size > 0) parents = [...bytes].sort((a, b) => b[1] - a[1]).map(([key, bytes]) => ({ key, bytes }));
     }
 
     const first = procs[0]!; // grupo nunca é vazio
