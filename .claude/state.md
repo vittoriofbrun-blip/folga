@@ -1,5 +1,22 @@
 # Estado (mais recente no topo)
 
+## 2026-10-18 (23:30 a 23:55) — "Resolver" vira ação (R35) e o aviso de ajustes se apaga sozinho
+- **R35, pedido do Antônio:** o botão de cada problema do Início deixou de ser só navegação.
+  - Sem tela que resolva (memória, disco, travamento): vira "Pedir ao assistente", abre o Assistente e
+    **manda o pedido sozinho**, com o número lido na hora.
+  - Com tela que resolva (ajustes, Auto Care, antivírus, sugestões): continua abrindo a tela.
+  - O pedido nasce em `web/src/health.ts`, junto do problema, então quem calcula o problema escreve o pedido.
+  - Visto ao vivo no app real: cliquei em "Memória alta (91 %)", o pedido entrou como mensagem minha e o GPT
+    respondeu com os números dele (94 %, 0,9 GB livres), concluindo que **não havia app parado** para propor.
+- **R34 corrigida** (achado pela revisão do registro): o aviso mandava salvar em Ajustes, mas salvar não o
+  apagava, porque o `settingsProblem` só era calculado no início. O PUT agora limpa e pede um ciclo de avisos.
+  O `http.test.ts` cobre o caminho inteiro e falha sem a correção.
+- 15 suítes verdes (health com 34 casos, http com 15), typecheck e build.
+- **Observado no app real, vale virar trabalho:** o Antônio baixou o Auto Care para 80 % às 23:46. Com a
+  memória em 93 % ele não rodou, e **com razão**: não havia nenhum app parado, só o Chrome em uso. Quem come
+  a memória é o grupo "Sistema e protegidos" (7,9 GB), que a tela mostra só como total. O próprio assistente
+  disse que a ferramenta não detalha quem são. Hoje, nesse cenário, o usuário fica sem próximo passo.
+
 ## 2026-10-18 (18:05) — R34: perder ajuste virou aviso crítico
 - Fecha o buraco que o caso do logon abriu: o Folga voltava aos padrões **em silêncio**, e com isso o Auto
   Care desligava e o "nunca fechar" sumia, sem nada na tela.

@@ -4,7 +4,8 @@ import type { DiskInfo, MemoryState, View, Warning } from '../../src/types';
 export type Health = {
   score: number;
   status: 'bom' | 'regular' | 'critico';
-  problems: { text: string; view: View }[];
+  /** prompt: o que o botão "Resolver" manda ao assistente. Sem prompt, ele só abre a tela que resolve. */
+  problems: { text: string; view: View; prompt?: string }[];
 };
 
 export type HealthInput = { state: MemoryState | null; warnings: Warning[]; disks: DiskInfo[]; pendingSuggestions: number };
@@ -20,20 +21,25 @@ export const systemDisk = (disks: DiskInfo[]): DiskInfo | undefined =>
 export function computeHealth({ state, warnings, disks, pendingSuggestions }: HealthInput): Health {
   let score = 100;
   const problems: Health['problems'] = [];
-  const hit = (points: number, text: string, view: View) => { score -= points; problems.push({ text, view }); };
+  const hit = (points: number, text: string, view: View, prompt?: string) => {
+    score -= points;
+    problems.push(prompt ? { text, view, prompt } : { text, view });
+  };
 
   if (state) {
     const load = Math.round(state.memLoad);
-    if (state.memLoad >= MEM_CRITICAL) hit(40, `Memória quase cheia (${load} %)`, 'memoria');
-    else if (state.memLoad >= state.settings.autoCareThreshold) hit(20, `Memória alta (${load} %)`, 'memoria');
+    const pedido = `A memória está em ${load} %. Veja quais apps estão abertos e me diga, do que mais ocupa para o que menos ocupa, o que dá para fechar para baixar o consumo. Proponha um cartão só com os que estiverem parados.`;
+    if (state.memLoad >= MEM_CRITICAL) hit(40, `Memória quase cheia (${load} %)`, 'assistente', pedido);
+    else if (state.memLoad >= state.settings.autoCareThreshold) hit(20, `Memória alta (${load} %)`, 'assistente', pedido);
   }
 
   const sys = systemDisk(disks);
   if (sys && sys.total > 0) {
     const free = (sys.free / sys.total) * 100;
     const label = `${sys.drive} com ${Math.round(free)} % livre`;
-    if (free < 5) hit(30, `Disco quase cheio: ${label}`, 'arquivos');
-    else if (free < 10) hit(15, `Pouco espaço no disco: ${label}`, 'arquivos');
+    const pedido = `O disco ${sys.drive} está com ${Math.round(free)} % livre. Veja a limpeza rápida e os arquivos que não abro mais e me proponha o que dá para liberar sem perder nada que eu use.`;
+    if (free < 5) hit(30, `Disco quase cheio: ${label}`, 'assistente', pedido);
+    else if (free < 10) hit(15, `Pouco espaço no disco: ${label}`, 'assistente', pedido);
   }
 
   let warnLeft = WARNING_CAP;
@@ -43,7 +49,10 @@ export function computeHealth({ state, warnings, disks, pendingSuggestions }: He
     const points = Math.min(warnLeft, w.severity === 'critico' ? 15 : 5);
     warnLeft -= points;
     score -= points;
-    problems.push({ text: w.title, view: w.view ?? 'avisos' });
+    // aviso com tela própria abre a tela; o que não tem (travamento, por exemplo) vai para o assistente
+    problems.push(w.view
+      ? { text: w.title, view: w.view }
+      : { text: w.title, view: 'assistente', prompt: `${w.title}. ${w.detail} Veja a memória, o disco e os avisos do Folga e me diga o que pode estar por trás e o que eu posso fazer.` });
   }
 
   if (pendingSuggestions > 0) {

@@ -33,6 +33,12 @@ const TOP: [View, string][] = [
 export function App() {
   const [view, setView] = useState<View>('inicio');
   const [state, setState] = useState<MemoryState | null>(null);
+  // "Resolver" em Início pode abrir o Assistente já com o pedido. O número faz o mesmo pedido valer de novo.
+  const [ask, setAsk] = useState<{ text: string; n: number } | null>(null);
+  const go = (v: View, prompt?: string) => {
+    if (prompt) setAsk(a => ({ text: prompt, n: (a?.n ?? 0) + 1 }));
+    setView(v);
+  };
 
   const [warnings, setWarnings] = useState<Warning[]>([]);
 
@@ -71,12 +77,12 @@ export function App() {
         <div className="nav-bottom">{item(['ajustes', 'Ajustes'])}</div>
       </nav>
       <main className="main">
-        {view === 'inicio' && <Inicio state={state} go={setView} />}
+        {view === 'inicio' && <Inicio state={state} go={go} />}
         {/* Memória e Assistente ficam montadas: não perdem seleção, resultado nem a conversa ao trocar de aba. */}
         <div className="view" hidden={view !== 'memoria'}><Memory state={state} source={source} /></div>
         {view === 'arquivos' && <Arquivos state={state} />}
-        <div className="view" hidden={view !== 'assistente'}><Assistente state={state} go={setView} /></div>
-        {view === 'avisos' && <Avisos state={state} go={setView} />}
+        <div className="view" hidden={view !== 'assistente'}><Assistente state={state} go={go} ask={ask} /></div>
+        {view === 'avisos' && <Avisos state={state} go={go} />}
         {view === 'autocare' && <AutoCare state={state} />}
         {view === 'registro' && <Log state={state} />}
         {view === 'ajustes' && <Settings state={state} />}

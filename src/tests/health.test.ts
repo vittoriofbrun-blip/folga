@@ -24,14 +24,17 @@ const ok = (_name: string) => { n++; };
 
 // memória
 assert.equal(run({ state: mem(91.9) }).score, 100); ok('memória abaixo da linha');
-{ const h = run({ state: mem(92) }); assert.equal(h.score, 80); assert.equal(h.problems[0]?.view, 'memoria'); ok('memória na linha do Auto Care'); }
+// o botão leva ao assistente com o pedido pronto, e o pedido carrega o número lido (R35)
+{ const h = run({ state: mem(92) }); assert.equal(h.score, 80); assert.equal(h.problems[0]?.view, 'assistente');
+  assert.match(h.problems[0]!.prompt!, /92 %/); ok('memória na linha do Auto Care'); }
 assert.equal(run({ state: mem(96.9) }).score, 80); ok('memória até 96,9');
 assert.equal(run({ state: mem(97) }).score, 60); ok('memória em 97 %');
 assert.equal(run({ state: mem(100) }).problems.length, 1); ok('memória crítica gera 1 problema');
 
 // disco
 assert.equal(run({ disks: [disk(10)] }).score, 100); ok('disco com 10 % livre');
-{ const h = run({ disks: [disk(9.9)] }); assert.equal(h.score, 85); assert.equal(h.problems[0]?.view, 'arquivos'); ok('disco < 10 %'); }
+{ const h = run({ disks: [disk(9.9)] }); assert.equal(h.score, 85); assert.equal(h.problems[0]?.view, 'assistente');
+  assert.match(h.problems[0]!.prompt!, /C: está com 10 % livre/); ok('disco < 10 %'); }
 assert.equal(run({ disks: [disk(5)] }).score, 85); ok('disco com 5 % livre');
 assert.equal(run({ disks: [disk(4.9)] }).score, 70); ok('disco < 5 %');
 assert.equal(run({ disks: [disk(2, 'D:'), disk(80, 'C:')] }).score, 100); ok('usa o C:, não o D:');
@@ -46,7 +49,10 @@ assert.equal(run({ warnings: [warn('critico', 1, false)] }).score, 100); ok('avi
 assert.equal(run({ warnings: [1, 2, 3, 4].map(i => warn('critico', i)) }).score, 60); ok('teto de -40 nos avisos');
 assert.equal(run({ warnings: [warn('critico', 1), warn('critico', 2), warn('atencao', 3), warn('atencao', 4), warn('atencao', 5)] }).score, 60); ok('teto com mistura');
 { const w = { ...warn('critico'), view: 'ajustes' as const }; assert.equal(run({ warnings: [w] }).problems[0]?.view, 'ajustes'); ok('aviso leva à tela dele'); }
-assert.equal(run({ warnings: [warn('atencao')] }).problems[0]?.view, 'avisos'); ok('aviso sem tela leva a Avisos');
+{ const p = run({ warnings: [warn('atencao')] }).problems[0]!;   // travamento não tem tela que resolva
+  assert.equal(p.view, 'assistente'); assert.match(p.prompt!, /^Aviso 0\./); ok('aviso sem tela leva ao assistente com o pedido'); }
+{ const h = run({ state: mem(50), disks: [disk(50)] });   // sem problema, ninguém ganha pedido
+  assert.deepEqual(h.problems, []); ok('sem problema, nenhum pedido'); }
 
 // sugestões
 assert.equal(run({ pendingSuggestions: 1 }).score, 98); ok('1 sugestão -2');

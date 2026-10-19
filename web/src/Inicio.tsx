@@ -100,7 +100,7 @@ const Chevron = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
 );
 
-export function Inicio({ state, go }: { state: MemoryState | null; go: (v: View) => void }) {
+export function Inicio({ state, go }: { state: MemoryState | null; go: (v: View, prompt?: string) => void }) {
   const warnings = useLive(loadWarnings, subWarnings);
   const suggestions = useLive(loadSuggestions, subSuggestions);
   const disks = useLive(loadDisk, null, 60_000);
@@ -148,9 +148,9 @@ export function Inicio({ state, go }: { state: MemoryState | null; go: (v: View)
               <ul className="home-problems" aria-label="Problemas encontrados">
                 {health.problems.map((p, i) => (
                   <li key={`${p.view}-${i}`}>
-                    <button type="button" className="home-problem" onClick={() => go(p.view)}>
+                    <button type="button" className="home-problem" onClick={() => go(p.view, p.prompt)}>
                       <span className="home-problem-text">{p.text}</span>
-                      <span className="home-problem-go">Resolver<Chevron /></span>
+                      <span className="home-problem-go">{p.prompt ? 'Pedir ao assistente' : 'Resolver'}<Chevron /></span>
                     </button>
                   </li>
                 ))}

@@ -131,6 +131,15 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
   `launch.mjs` **sem** `--no-window`: sobe o servidor e abre a janela. O `--no-window` continua existindo para
   quem quiser só o servidor. O Auto Care vale com a janela aberta ou fechada (R13).
 
+- **R35 "Resolver" resolve** (pedido do Antônio, 2026-10-18) — Cada problema do Início leva a uma ação, não a
+  uma tela genérica.
+  - Problema com tela que resolve (ajustes, Auto Care, antivírus, sugestões): o botão abre essa tela.
+  - Problema sem tela que resolva (memória alta, disco apertado, travamento): o botão diz "Pedir ao
+    assistente", abre o Assistente e **manda o pedido sozinho**, com os números lidos na hora.
+  - O pedido entra como mensagem do usuário, à vista. O que vem depois é o de sempre: o assistente só
+    propõe, e nada acontece sem o clique no cartão (R20).
+  - Com um turno já rodando, o pedido fica escrito na caixa em vez de enfileirar.
+
 - **R34 Perder ajuste não pode ser silencioso** (2026-10-18) — Se existe `settings.json` e ele não vale, o
   Folga roda nos padrões **e levanta um aviso crítico** ("Seus ajustes não foram lidos"), com o motivo e o
   caminho para Ajustes. Ele some sozinho quando o arquivo volta a valer.

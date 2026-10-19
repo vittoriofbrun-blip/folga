@@ -73,7 +73,9 @@ function Markdown({ text }: { text: string }) {
 
 type Live = { tools: string[]; text: string };
 
-export function Assistente({ state }: { state: MemoryState | null; go: (v: View) => void }) {
+export function Assistente({ state, ask }: {
+  state: MemoryState | null; go: (v: View, prompt?: string) => void; ask?: { text: string; n: number } | null;
+}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
   const [convProvider, setConvProvider] = useState<AgentProvider | null>(null);
@@ -117,6 +119,15 @@ export function Assistente({ state }: { state: MemoryState | null; go: (v: View)
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, live]);
+
+  // "Resolver" em Início: manda o pedido sozinho. Se já houver um turno rodando, deixa escrito para o usuário enviar.
+  const asked = useRef(0);
+  useEffect(() => {
+    if (!ask || ask.n === asked.current) return;
+    asked.current = ask.n;
+    if (busy) setInput(ask.text);
+    else void send(ask.text);
+  }, [ask, busy]);
 
   async function send(text: string) {
     const t = text.trim();
