@@ -50,6 +50,36 @@ public static class Probe
 
     delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
+    // Tempo de atividade do disco, o mesmo do Gerenciador de Tarefas: 100 - "% Idle Time".
+    // Nome do contador em ingles de proposito: no Windows em portugues o nome localizado muda.
+    [StructLayout(LayoutKind.Explicit)]
+    struct PDH_FMT_COUNTERVALUE { [FieldOffset(0)] public uint CStatus; [FieldOffset(8)] public double doubleValue; }
+    [DllImport("pdh.dll")] static extern uint PdhOpenQueryW(IntPtr src, IntPtr user, out IntPtr query);
+    [DllImport("pdh.dll", CharSet = CharSet.Unicode)] static extern uint PdhAddEnglishCounterW(IntPtr query, string path, IntPtr user, out IntPtr counter);
+    [DllImport("pdh.dll")] static extern uint PdhCollectQueryData(IntPtr query);
+    [DllImport("pdh.dll")] static extern uint PdhGetFormattedCounterValue(IntPtr counter, uint format, IntPtr type, out PDH_FMT_COUNTERVALUE value);
+    const uint PDH_FMT_DOUBLE = 0x200;
+    static IntPtr diskQuery, diskCounter;
+    static bool diskTried;
+
+    // ponytail: _Total junta todos os discos fisicos; um grafico por disco se houver pedido
+    static string DiskActive()
+    {
+        if (!diskTried)
+        {
+            diskTried = true;
+            if (PdhOpenQueryW(IntPtr.Zero, IntPtr.Zero, out diskQuery) != 0) { diskQuery = IntPtr.Zero; return "null"; }
+            if (PdhAddEnglishCounterW(diskQuery, @"\PhysicalDisk(_Total)\% Idle Time", IntPtr.Zero, out diskCounter) != 0) { diskQuery = IntPtr.Zero; return "null"; }
+            PdhCollectQueryData(diskQuery);   // primeira coleta so serve de base para a proxima
+            return "null";
+        }
+        if (diskQuery == IntPtr.Zero || PdhCollectQueryData(diskQuery) != 0) return "null";
+        PDH_FMT_COUNTERVALUE v;
+        if (PdhGetFormattedCounterValue(diskCounter, PDH_FMT_DOUBLE, IntPtr.Zero, out v) != 0 || v.CStatus > 1) return "null";
+        double active = Math.Max(0, Math.Min(100, 100 - v.doubleValue));
+        return active.ToString("0.#", CultureInfo.InvariantCulture);
+    }
+
     [DllImport("kernel32.dll")] static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX m);
     [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool Process32FirstW(IntPtr h, ref PROCESSENTRY32 e);
@@ -302,6 +332,7 @@ public static class Probe
           .Append(",\"totalPhys\":").Append(ms.ullTotalPhys.ToString(CultureInfo.InvariantCulture))
           .Append(",\"availPhys\":").Append(ms.ullAvailPhys.ToString(CultureInfo.InvariantCulture))
           .Append(",\"foregroundPid\":").Append(fgPid == 0 ? "null" : fgPid.ToString(CultureInfo.InvariantCulture))
+          .Append(",\"diskActive\":").Append(DiskActive())
           .Append(",\"audioPids\":[");
         long audioT0 = Stopwatch.GetTimestamp();
         List<uint> audio = ActiveAudioPids();

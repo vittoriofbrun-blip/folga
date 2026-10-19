@@ -1,9 +1,9 @@
-// Início (D18): painel no estilo do Mint (anéis de memória e disco) com a nota de saúde e os problemas,
+// Início (D18): painel no estilo do Mint (nota em anel, memória e disco em linha) com a nota de saúde e os problemas,
 // como o "Status do dispositivo" do McAfee. Dados vivos: SSE de avisos e sugestões, disco a cada 60 s.
 import { useEffect, useRef, useState } from 'react';
-import type { DiskInfo, MemoryState, Severity, Suggestion, View, Warning } from '../../src/types';
+import type { DiskInfo, MemoryState, Sample, Severity, Suggestion, View, Warning } from '../../src/types';
 import { getDisk, getSuggestions, getWarnings, onEvent } from './api';
-import { GB, NB, gb, nf0, pct, plural, size } from './format';
+import { NB, gb, nf0, pct, plural, size } from './format';
 import { computeHealth, systemDisk } from './health';
 import { SuggestionCard } from './SuggestionCard';
 
@@ -50,6 +50,62 @@ function Ring({ value, px, stroke, tone, label, children }: {
           strokeDasharray={c} style={{ strokeDashoffset: c * (1 - shown / 100) }} transform={`rotate(-90 ${px / 2} ${px / 2})`} />
       </svg>
       <div className="ring-in" aria-hidden="true">{children}</div>
+    </div>
+  );
+}
+
+const WINDOW = 60_000;   // = SAMPLE_WINDOW_MS do servidor
+const CW = 300, CH = 100;  // sistema de coordenadas do SVG; ele estica na largura do cartão
+
+/** Gráfico de linha dos últimos 60 s, eixo fixo de 0 a 100 %, como o Gerenciador de Tarefas. Hover mostra o ponto. */
+function LineChart({ samples, pick, tone, label }: {
+  samples: Sample[] | undefined; pick: (s: Sample) => number | null; tone: string; label: string;
+}) {
+  const [hover, setHover] = useState<{ t: number; v: number } | null>(null);
+  const pts = (samples ?? []).map(s => ({ t: s.t, v: pick(s) }));
+  const end = pts.at(-1)?.t ?? 0;
+  const x = (t: number) => ((t - end + WINDOW) / WINDOW) * CW;
+  const y = (v: number) => CH - (Math.min(100, Math.max(0, v)) / 100) * CH;
+  // leitura sem valor (1ª da sonda) quebra a linha em vez de cair para zero
+  let cur: [number, number][] = [];
+  const segs = [cur];
+  for (const p of pts) {
+    if (p.v !== null) cur.push([x(p.t), y(p.v)]);
+    else if (cur.length) segs.push(cur = []);
+  }
+  const live = segs.filter(g => g.length > 1);
+  const xy = ([a, b]: [number, number]) => `${a.toFixed(1)},${b.toFixed(1)}`;
+  const line = live.map(g => 'M' + g.map(xy).join('L')).join('');
+  const area = live.map(g => `M${xy([g[0]![0], CH])}L${g.map(xy).join('L')}L${xy([g.at(-1)![0], CH])}Z`).join('');
+  const h = hover;
+
+  const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const t = end - WINDOW + ((e.clientX - r.left) / r.width) * WINDOW;
+    let best: { t: number; v: number } | null = null;
+    for (const p of pts) if (p.v !== null && (!best || Math.abs(p.t - t) < Math.abs(best.t - t))) best = { t: p.t, v: p.v };
+    setHover(best);
+  };
+  const at = (t: number) => `${(x(t) / CW) * 100}%`;
+
+  return (
+    <div className="chart" role="img" aria-label={label} onPointerMove={onMove} onPointerLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" aria-hidden="true">
+        {[25, 50, 75].map(g => <line key={g} className="chart-grid" x1={0} x2={CW} y1={y(g)} y2={y(g)} vectorEffect="non-scaling-stroke" />)}
+        {area && <path d={area} fill={tone} fillOpacity={0.14} />}
+        {line && <path d={line} className="chart-line" stroke={tone} vectorEffect="non-scaling-stroke" />}
+      </svg>
+      {!line && <span className="chart-empty">{samples ? 'Juntando leituras…' : 'Reinicie o Folga para ver o gráfico.'}</span>}
+      {h && (
+        <>
+          <i className="chart-cross" style={{ left: at(h.t) }} />
+          <i className="chart-dot" style={{ left: at(h.t), top: `${(y(h.v) / CH) * 100}%`, background: tone }} />
+          <span className={`chart-tip${x(h.t) > CW * 0.6 ? ' chart-tip-l' : ''}`} style={{ left: at(h.t) }}>
+            <b>{nf0.format(h.v)}{NB}%</b> {end - h.t < 1_000 ? 'agora' : `há ${nf0.format((end - h.t) / 1_000)}${NB}s`}
+          </span>
+        </>
+      )}
+      <span className="chart-axis" aria-hidden="true"><span>60{NB}s</span><span>agora</span></span>
     </div>
   );
 }
@@ -120,6 +176,8 @@ export function Inicio({ state, go }: { state: MemoryState | null; go: (v: View,
   const diskUsed = sys ? sys.total - sys.free : 0;
   const diskPct = sys && sys.total > 0 ? (diskUsed / sys.total) * 100 : 0;
   const diskLow = sys && sys.total > 0 && sys.free / sys.total < 0.1;
+  const diskTone = diskLow ? 'var(--danger)' : 'var(--idle)';
+  const diskNow = state?.samples?.at(-1)?.disk ?? null;
 
   return (
     <section className="page home" aria-labelledby="home-title">
@@ -167,9 +225,10 @@ export function Inicio({ state, go }: { state: MemoryState | null; go: (v: View,
           </div>
           {state ? (
             <div className="home-ring-row">
-              <Ring value={state.memLoad} px={116} stroke={10} tone="var(--in-use)" label={`Memória: ${pct(state.memLoad)} em uso`}>
-                <span className="ring-num ring-num-sm"><CountUp value={state.memLoad} />{NB}%</span>
-              </Ring>
+              <div className="home-plot">
+                <p className="home-now"><span className="ring-num ring-num-sm"><CountUp value={state.memLoad} />{NB}%</span><span className="ring-sub">em uso</span></p>
+                <LineChart samples={state.samples} pick={s => s.mem} tone="var(--in-use)" label={`Memória em uso nos últimos 60 segundos; agora ${pct(state.memLoad)}`} />
+              </div>
               <dl className="home-facts">
                 <div><dt><i className="dot" style={{ background: 'var(--in-use)' }} />Em uso</dt><dd>{gb(used)}{NB}GB</dd></div>
                 <div><dt><i className="dot dot-empty" />Livre</dt><dd>{gb(state.availPhys)}{NB}GB</dd></div>
@@ -191,12 +250,16 @@ export function Inicio({ state, go }: { state: MemoryState | null; go: (v: View,
           </div>
           {sys && sys.total > 0 ? (
             <div className="home-ring-row">
-              <Ring value={diskPct} px={116} stroke={10} tone={diskLow ? 'var(--danger)' : 'var(--idle)'} label={`Disco ${sys.drive}: ${pct(diskPct)} ocupado, ${size(sys.free)} livres`}>
-                <span className="ring-num ring-num-sm"><CountUp value={sys.free / GB} />{NB}GB</span>
-                <span className="ring-sub">livres</span>
-              </Ring>
+              <div className="home-plot">
+                <p className="home-now">
+                  <span className="ring-num ring-num-sm">{diskNow === null ? '–' : <><CountUp value={diskNow} />{NB}%</>}</span>
+                  <span className="ring-sub">em atividade</span>
+                </p>
+                <LineChart samples={state?.samples} pick={s => s.disk} tone={diskTone}
+                  label={`Atividade do disco nos últimos 60 segundos${diskNow === null ? '' : `; agora ${pct(diskNow)}`}. ${size(sys.free)} livres em ${sys.drive}`} />
+              </div>
               <dl className="home-facts">
-                <div><dt><i className="dot" style={{ background: diskLow ? 'var(--danger)' : 'var(--idle)' }} />Ocupado</dt><dd>{size(diskUsed)}</dd></div>
+                <div><dt><i className="dot" style={{ background: diskTone }} />Ocupado</dt><dd>{size(diskUsed)}</dd></div>
                 <div><dt><i className="dot dot-empty" />Livre</dt><dd>{size(sys.free)}</dd></div>
                 <div><dt>Total</dt><dd>{size(sys.total)}</dd></div>
               </dl>
@@ -205,7 +268,7 @@ export function Inicio({ state, go }: { state: MemoryState | null; go: (v: View,
             ? <p className="muted" role="status">Não deu para ler o disco agora.</p>
             : <p className="muted" role="status">{disks.data ? 'Nenhum disco encontrado.' : 'Lendo o disco…'}</p>}
           {sys && sys.total > 0 && (
-            <p className="home-foot"><span>Atualiza a cada minuto</span><span>{pct(diskPct)} ocupado</span></p>
+            <p className="home-foot"><span>Espaço lido a cada minuto</span><span>{pct(diskPct)} ocupado</span></p>
           )}
         </article>
 

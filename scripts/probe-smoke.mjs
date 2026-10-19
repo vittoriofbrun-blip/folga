@@ -45,6 +45,7 @@ try {
   await until(() => snaps.length >= 3, 10000, '3 snapshots');
   const s = snaps[2];
   const gb = (n) => (n / GB).toFixed(2);
+  console.log(`diskActive=${snaps.map((x) => x.diskActive).join(",")}`);
   console.log(`memLoad=${s.memLoad}%  total=${gb(s.totalPhys)} GB  disponivel=${gb(s.availPhys)} GB`);
   console.log(`foregroundPid=${s.foregroundPid}  processos=${s.processes.length}  acessiveis=${s.processes.filter((p) => p.accessible).length}  com janela=${s.processes.filter((p) => p.hasVisibleWindow).length}`);
   if (!(s.totalPhys > s.availPhys && s.availPhys > 0 && s.processes.length > 20)) fail('numeros implausiveis');

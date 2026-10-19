@@ -124,6 +124,25 @@
 .home-ring-card { display: flex; flex-direction: column; }
 .home-ring-row { display: flex; align-items: center; gap: 24px; margin-bottom: 16px; }
 .home-facts { flex: 1; min-width: 0; margin: 0; }
+.home-plot { flex: 1.3; min-width: 0; }
+.home-now { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; }
+.home-now .ring-sub { margin: 0; }
+
+/* gráfico de linha (Início): grade e eixo recessivos, linha de 2 px, área clara embaixo */
+.chart { position: relative; height: 96px; border: 1px solid var(--tint-line); border-radius: 6px; margin-bottom: 20px; touch-action: none; }
+.chart svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.chart-grid { stroke: var(--tint-line); stroke-width: 1; }
+.chart-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.chart-axis { position: absolute; left: 0; right: 0; top: calc(100% + 4px); display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+.chart-cross { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); pointer-events: none; }
+.chart-dot { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; box-shadow: 0 0 0 2px var(--cell); pointer-events: none; }
+.chart-tip {
+  position: absolute; top: 4px; margin-left: 8px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--cell); color: var(--muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; pointer-events: none;
+}
+.chart-tip b { color: var(--fg); font-weight: 600; }
+.chart-tip-l { transform: translateX(calc(-100% - 16px)); }
 .home-facts > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--tint-line); }
 .home-facts > div:last-child { border-bottom: 0; }
 .home-facts dt { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }

@@ -13,6 +13,7 @@ export type ProbeSnapshot = {
   type: 'snapshot'; t: number; memLoad: number; totalPhys: number; availPhys: number;
   foregroundPid: number | null;
   audioPids?: number[];        // pids com sessão de áudio ativa no dispositivo padrão (F-11); ausente = sonda antiga
+  diskActive?: number | null;  // tempo de atividade do disco em %, como no Gerenciador de Tarefas; null na 1ª leitura
   processes: ProbeProcess[];
 };
 // Node → sonda
@@ -55,7 +56,10 @@ export type MemoryState = {
   t: number; memLoad: number; totalPhys: number; availPhys: number;
   apps: AppGroup[]; freed: ReleaseResult[]; settings: Settings; startedAt: number;
   autoCare: { nextEligibleAt: number | null; lastRunAt: number | null };   // preenchido no F-06
+  samples?: Sample[];   // últimos 60 s para os gráficos de linha do Início; ausente = servidor antigo
 };
+/** Uma leitura para os gráficos: memória em uso e atividade do disco, em %. */
+export type Sample = { t: number; mem: number; disk: number | null };
 export type ReleaseResponse = { availBefore: number; availAfter: number; results: ReleaseResult[] };
 
 // Padrões de .claude/requirements.md (R03, R04, R05, R10, R12, R19)

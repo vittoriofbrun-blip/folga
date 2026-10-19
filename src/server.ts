@@ -7,6 +7,7 @@ import { extname, join, normalize, sep } from 'node:path';
 import { decide, emptyAutoCare, finishRun } from './autocare.ts';
 import { classify, emptyHistory, type ClassifyHistory } from './classify.ts';
 import { startProbe } from './probe.ts';
+import { pushSample } from './samples.ts';
 import { createReleaser } from './release.ts';
 import { openWindow, setStartup, startupInstalled } from './window.ts';
 import { createWarnings } from './warnings.ts';
@@ -15,7 +16,7 @@ import { createSuggestions } from './suggestions.ts';
 import { createWatch } from './watch.ts';
 import { createNotify } from './notify.ts';
 import { createAgent } from './agent.ts';
-import { DEFAULT_SETTINGS, type AgentProvider, type Emit, type MemoryState, type ProbeSnapshot, type Settings, type SuggestionDraft } from './types.ts';
+import { DEFAULT_SETTINGS, type AgentProvider, type Emit, type MemoryState, type ProbeSnapshot, type Sample, type Settings, type SuggestionDraft } from './types.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const PORT = Number(process.env.FOLGA_PORT ?? 4780);
@@ -104,6 +105,7 @@ let settings = loadSettings();
 const startedAt = Number(process.env.FOLGA_STARTED_AT) || Date.now();
 let history: ClassifyHistory = emptyHistory();
 let lastSnap: ProbeSnapshot | null = null;
+let samples: Sample[] = [];
 let state: MemoryState | null = null;
 const extraSelfPids = new Set<number>();   // janela do Edge (F-08)
 const sse = new Set<ServerResponse>();
@@ -138,10 +140,11 @@ function onSnapshot(snap: ProbeSnapshot, fresh = false) {
   const now = Date.now();
   const r = classify(snap, history, settings, { selfPids: selfPids(snap), userSession, startedAt, now });
   if (fresh) history = r.history;   // releitura do mesmo snapshot não pode gerar amostra de CPU zerada
+  if (fresh) samples = pushSample(samples, { t: snap.t, mem: snap.memLoad, disk: snap.diskActive ?? null });
   state = {
     t: now, memLoad: snap.memLoad, totalPhys: snap.totalPhys, availPhys: snap.availPhys,
     apps: r.apps, freed: releaser.freed(), settings, startedAt,
-    autoCare: { nextEligibleAt: null, lastRunAt: null },
+    autoCare: { nextEligibleAt: null, lastRunAt: null }, samples,
   };
   if (fresh) {
     const d = decide({ ...ac, running: ac.running || releaser.isBusy() }, state, settings, now);
