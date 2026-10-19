@@ -297,6 +297,13 @@ const server = createServer(async (req, res) => {
       if (typeof merged === 'string') return send(res, 400, { erro: merged });
       settings = merged;
       saveSettings(settings);
+      // R34: acabamos de gravar um arquivo válido, então o aviso "seus ajustes não foram lidos" perdeu a
+      // razão de existir. Sem isto, salvar em Ajustes — que é o que o próprio aviso manda fazer — não o tirava.
+      if (settingsProblem !== null) {
+        settingsProblem = null;
+        settingsFrom = 'settings.json';
+        void warnings.run.fast();   // tira o aviso agora, sem esperar o ciclo de 30 s
+      }
       if (lastSnap) onSnapshot(lastSnap);   // reclassifica já com o ajuste novo
       return send(res, 200, settings);
     }

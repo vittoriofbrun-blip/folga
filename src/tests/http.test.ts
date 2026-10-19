@@ -6,7 +6,7 @@ import { rm } from 'node:fs/promises';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_SETTINGS, type LogEntry, type MemoryState, type ReleaseResponse, type Settings } from '../types.ts';
+import { DEFAULT_SETTINGS, type LogEntry, type MemoryState, type ReleaseResponse, type Settings, type Warning } from '../types.ts';
 
 const PORT = 18000 + Math.floor(Math.random() * 1000);
 const dataDir = mkdtempSync(join(tmpdir(), 'folga-http-'));
@@ -67,6 +67,13 @@ try {
   assert.deepEqual((await call('GET', '/api/settings')).body, DEFAULT_SETTINGS);
   ok('B7: settings.json inválido no disco → padrões');
 
+  // R34: voltar aos padrões não pode ser silencioso, e salvar em Ajustes (o que o aviso manda fazer) tem que resolver
+  const avisos = () => call('GET', '/api/warnings').then(r => (r.body as Warning[]).filter(w => w.kind === 'ajustes'));
+  const aviso = await avisos();
+  assert.equal(aviso.length, 1, 'o settings.json inválido tem que virar aviso');
+  assert.equal(aviso[0]!.severity, 'critico');
+  assert.equal(aviso[0]!.view, 'ajustes');
+
   assert.equal((await call('GET', '/api/state', { host: 'evil.example:80' })).status, 403);
   assert.equal((await call('GET', '/api/state', { host: `localhost:${PORT}` })).status, 200);
   ok('R15: Host fora de 127.0.0.1/localhost recusado');
@@ -112,6 +119,10 @@ try {
     assert.ok(!String(r.body.erro).includes('\\'), 'R17: erro sem caminho');
   }
   ok('PUT /api/settings valida faixa, tipo e campo, e grava settings.json');
+
+  // R34: o PUT acima gravou um arquivo válido, então o aviso tem que sair sozinho, sem reiniciar o Folga
+  assert.deepEqual(await avisos(), [], 'salvar em Ajustes tira o aviso "seus ajustes não foram lidos"');
+  ok('R34: aviso de ajustes aparece com arquivo inválido e some ao salvar');
 
   assert.equal((await call('POST', '/api/release', { body: { keys: ['explorer'] }, token })).status, 409);
   ok('R09: pedido com app protegido recusado');
