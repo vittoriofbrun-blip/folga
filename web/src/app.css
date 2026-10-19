@@ -194,6 +194,18 @@
 }
 .g-head::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--tone); align-self: center; }
 .g-total { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* R36: cabeça do grupo protegido abre e fecha a lista */
+.g-toggle {
+  display: flex; align-items: baseline; gap: 10px; border: 0; background: none; padding: 0;
+  font: inherit; color: inherit; cursor: pointer; border-radius: 6px;
+}
+.g-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.g-toggle:hover .g-name { text-decoration: underline; }
+.g-chev {
+  width: 6px; height: 6px; align-self: center; border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor; transform: rotate(-45deg); transition: transform 0.18s var(--ease);
+}
+.g-chev-open { transform: rotate(45deg); }
 .empty { margin: 0; padding: 4px 12px; color: var(--muted); font-size: 13px; }
 
 .row {

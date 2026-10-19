@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
-import type { AppGroup, MemoryState, ReleaseResponse } from '../../src/types';
+import type { AppGroup, MemoryState, ReleaseResponse, View } from '../../src/types';
+import { protectedRows, type ProtectedRow } from '../../src/protegidos';
 import type { Source } from './mock';
 import { NB, OUTCOME, ago, gb, pct, plural, size } from './format';
 import { Particles } from './Particles';
@@ -24,12 +25,43 @@ function Avatar({ name }: { name: string }) {
   return <span className="avatar" aria-hidden="true">{name.charAt(0).toUpperCase()}</span>;
 }
 
-function Group({ cls, name, total, children }: { cls: string; name: string; total: string; children?: React.ReactNode }) {
+function Group({ cls, name, total, open, onToggle, children }: {
+  cls: string; name: string; total: string; children?: React.ReactNode;
+  open?: boolean; onToggle?: () => void;   // com os dois, a cabeça vira botão que abre e fecha
+}) {
+  const head = <><span className="g-name">{name}</span><span className="g-total">{total}</span></>;
   return (
     <section className={`group ${cls}`}>
-      <h2 className="g-head"><span className="g-name">{name}</span><span className="g-total">{total}</span></h2>
+      <h2 className="g-head">
+        {onToggle
+          ? <button type="button" className="g-toggle" aria-expanded={open} onClick={onToggle}>
+              {head}<span className={`g-chev${open ? ' g-chev-open' : ''}`} aria-hidden="true" />
+            </button>
+          : head}
+      </h2>
       {children}
     </section>
+  );
+}
+
+// R36: só leitura. Nenhum protegido vira botão de fechar; o único próximo passo é a lista do usuário.
+function ProtRow({ row, go }: { row: ProtectedRow; go?: (v: View) => void }) {
+  return (
+    <div className="row row-static">
+      <span />
+      <Avatar name={row.name} />
+      <span className="row-text">
+        <span className="row-name">{row.name}</span>
+        <span className="row-reason">
+          {row.words}
+          {row.procs > 1 && ` · ${plural(row.procs, 'processo', 'processos')}`}
+          {row.canUnprotect && go && (
+            <> · <button type="button" className="link" onClick={() => go('ajustes')}>Tirar da lista</button></>
+          )}
+        </span>
+      </span>
+      <span className="row-size">{size(row.bytes)}</span>
+    </div>
   );
 }
 
@@ -49,12 +81,15 @@ function AppRow({ app, s, on, disabled, toggle }: {
   );
 }
 
-export function Memory({ state, source }: { state: MemoryState | null; source: Source }) {
+export function Memory({ state, source, go }: { state: MemoryState | null; source: Source; go?: (v: View) => void }) {
   // Marcas feitas à mão; o resto segue o padrão (R04, R06), recalculado a cada leitura.
   const [hand, setHand] = useState({ on: new Set<string>(), off: new Set<string>() });
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>(null);
   const [showList, setShowList] = useState(true);
+  // R36: o grupo protegido abre e fecha. `null` = ninguém mexeu, então ele abre sozinho quando nada
+  // está parado — é justo o caso em que a tela não tinha próximo passo nenhum para dar.
+  const [showProt, setShowProt] = useState<boolean | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const sel = state ? selection(state.apps, hand.on, hand.off) : new Set<string>();
 
@@ -86,9 +121,11 @@ export function Memory({ state, source }: { state: MemoryState | null; source: S
   const bySize = (a: AppGroup, b: AppGroup) => b.privateWorkingSet - a.privateWorkingSet;
   const idle = state.apps.filter((a) => a.state === 'idle').sort(bySize);
   const inUse = state.apps.filter((a) => a.state === 'in_use').sort(bySize);
-  const prot = state.apps.filter((a) => a.state === 'protected');
-  const protProcs = prot.reduce((n, a) => n + a.pids.length, 0);
-  const protBytes = prot.reduce((n, a) => n + a.privateWorkingSet, 0);
+  const prot = protectedRows(state.apps);
+  const protProcs = prot.reduce((n, r) => n + r.procs, 0);
+  const protBytes = prot.reduce((n, r) => n + r.bytes, 0);
+  const protOpen = showProt ?? idle.length === 0;
+  const biggest = prot[0];
   const sum = (l: AppGroup[]) => l.reduce((n, a) => n + a.privateWorkingSet, 0);
   const used = state.totalPhys - state.availPhys;
   const { settings } = state;
@@ -149,7 +186,10 @@ export function Memory({ state, source }: { state: MemoryState | null; source: S
           <Group cls="g-idle" name="Parados" total={idle.length ? `${plural(idle.length, 'app', 'apps')} · ${size(sum(idle))}` : ''}>
             {idle.length
               ? idle.map((a) => <AppRow key={a.key} app={a} s={state} on={sel.has(a.key)} disabled={busy} toggle={toggle} />)
-              : <p className="empty">Nada parado há mais de {settings.idleMinutes}{NB}min.</p>}
+              : <p className="empty">
+                  Nada parado há mais de {settings.idleMinutes}{NB}min.
+                  {biggest && <> Agora quem mais ocupa é <strong>{biggest.name}</strong> ({size(biggest.bytes)}), em Sistema e protegidos.</>}
+                </p>}
           </Group>
 
           {inUse.length > 0 && (
@@ -158,7 +198,15 @@ export function Memory({ state, source }: { state: MemoryState | null; source: S
             </Group>
           )}
 
-          <Group cls="g-sys" name="Sistema e protegidos" total={`${plural(protProcs, 'processo', 'processos')} · ${size(protBytes)}`} />
+          <Group cls="g-sys" name="Sistema e protegidos" total={`${plural(protProcs, 'processo', 'processos')} · ${size(protBytes)}`}
+            open={protOpen} onToggle={() => setShowProt(!protOpen)}>
+            {protOpen && (prot.length > 0
+              ? <>
+                  {prot.map((r) => <ProtRow key={r.key} row={r} go={go} />)}
+                  <p className="empty">Nada aqui é fechado pelo Folga (R05). Só a sua lista "nunca fechar" sai daqui, em Ajustes.</p>
+                </>
+              : <p className="empty">Nada protegido nesta leitura.</p>)}
+          </Group>
 
           {state.freed.length > 0 && (
             <Group cls="g-freed" name="Liberados" total={plural(state.freed.length, 'app', 'apps')}>

@@ -1,5 +1,22 @@
 # Estado (mais recente no topo)
 
+## 2026-10-19 — R36: "Sistema e protegidos" abre e explica
+- Fecha o buraco que a sessão anterior deixou anotado: com memória alta e nada parado, a tela não dava
+  próximo passo nenhum. Agora o grupo protegido é uma lista recolhível (abre sozinha quando nada está
+  parado), maiores primeiro, com o motivo de cada um em palavras e a contagem de processos.
+- **Só leitura.** Nada ali fecha; o único próximo passo é o `never_close`, com "Tirar da lista" levando a
+  Ajustes. A R05 segue inteira.
+- **De quem é o processo sem janela:** `classify` sobe pelo `ppid` e atribui ao app que lançou
+  (`node` → Claude Code). Para na primeira janela visível, porque o `ppid` do Windows mente: vi ao vivo
+  `node <- cmd <- claude <- powershell <- WindowsTerminal`, com pid reaproveitado no meio.
+- **Medido no servidor real (84 %, 2,5 GB livres, 1 app não protegido):** dos 5,9 GB protegidos, 4,2 GB são
+  o "nunca fechar" (Claude Code 3,7 GB + Antigravity 0,5 GB), 1,4 GB são sem janela (`node` 724 MB em
+  141 processos, `powershell`, `cmd`, `conhost`), e só 155 MB são de sistema. O grosso é dele, não do Windows.
+- `ver_memoria` passou a devolver `protegidos` detalhado, pela mesma função pura da tela
+  (`src/protegidos.ts`), então o assistente diz o mesmo que a tela. O `agent-prompt.md` manda usar isso em
+  vez de dizer que não há o que fazer.
+- 16 suítes verdes (classify com 27 casos, protegidos com 8, mcp com 12), typecheck e build.
+
 ## 2026-10-18 (23:30 a 23:55) — "Resolver" vira ação (R35) e o aviso de ajustes se apaga sozinho
 - **R35, pedido do Antônio:** o botão de cada problema do Início deixou de ser só navegação.
   - Sem tela que resolva (memória, disco, travamento): vira "Pedir ao assistente", abre o Assistente e

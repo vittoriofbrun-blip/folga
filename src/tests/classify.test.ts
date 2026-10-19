@@ -224,5 +224,82 @@ caso('puro: snapshot e history recebidos não são alterados', () => {
   assert.notEqual(r.history, h);
 });
 
+// ===================== R36: de quem é o processo sem janela =====================
+// Cenário real de 2026-10-19: 141 processos node sem janela, uns do Claude Code, outros do ChatGPT.
+const semJanela = { hasVisibleWindow: false };
+
+caso('R36: sobe pelo ppid pulando o console e para no app com janela', () => {
+  // node <- cmd <- claude(com janela). O cmd no meio não é a resposta útil.
+  const claude = proc('claude.exe', { pid: 10, ppid: 1 });
+  const cmd = proc('cmd.exe', { pid: 11, ppid: 10, ...semJanela });
+  const node = proc('node.exe', { pid: 12, ppid: 11, ...semJanela });
+  const r = classify(snapOf([claude, cmd, node], T0), emptyHistory(), settings, ctxAt(T0));
+  assert.deepEqual(find(r, 'node').parents, ['claude']);
+  assert.deepEqual(find(r, 'cmd').parents, ['claude']);
+  // o claude tem janela: está em never_close (R05), e aí não se pergunta de quem ele é
+  assert.deepEqual([find(r, 'claude').reason, find(r, 'claude').parents], ['never_close', undefined]);
+});
+
+caso('R36: sem nenhum ancestral com janela, fica o primeiro app diferente (bandeja)', () => {
+  // node <- ChatGPT(sem janela, na bandeja) <- sihost(sessão 0, corta)
+  const sihost = proc('sihost.exe', { pid: 20, ppid: 1, session: 0, ...semJanela });
+  const chat = proc('ChatGPT.exe', { pid: 21, ppid: 20, ...semJanela });
+  const node = proc('node.exe', { pid: 22, ppid: 21, ...semJanela });
+  const r = classify(snapOf([sihost, chat, node], T0), emptyHistory(), settings, ctxAt(T0));
+  assert.deepEqual(find(r, 'node').parents, ['chatgpt']);
+});
+
+caso('R36: a árvore do sistema não vira pai — nada de "serviço do explorer"', () => {
+  const explorer = proc('explorer.exe', { pid: 30, ppid: 1 });
+  const drive = proc('GoogleDriveFS.exe', { pid: 31, ppid: 30, ...semJanela });
+  const r = classify(snapOf([explorer, drive], T0), emptyHistory(), settings, ctxAt(T0));
+  assert.equal(find(r, 'googledrivefs').reason, 'no_window');
+  assert.equal(find(r, 'googledrivefs').parents, undefined);
+});
+
+caso('R36: quem só lança não é pai (sihost) — nem com app do usuário no meio', () => {
+  // codex <- sihost: "serviço do Shell Infrastructure Host" não diz nada ao usuário
+  const sihost = proc('sihost.exe', { pid: 80, ppid: 1, ...semJanela });
+  const codex = proc('codex.exe', { pid: 81, ppid: 80, ...semJanela });
+  const r = classify(snapOf([sihost, codex], T0), emptyHistory(), settings, ctxAt(T0));
+  assert.equal(find(r, 'codex').parents, undefined);
+});
+
+caso('R36: o próprio Folga também corta a subida', () => {
+  const self = proc('node.exe', { pid: 40, ppid: 1, ...semJanela });
+  const sonda = proc('powershell.exe', { pid: 41, ppid: 40, ...semJanela });
+  const r = classify(snapOf([self, sonda], T0), emptyHistory(), settings, ctxAt(T0, { selfPids: [40] }));
+  assert.equal(find(r, 'powershell').parents, undefined);
+});
+
+caso('R36: vários pais, maior primeiro por memória, no máximo 3', () => {
+  const MBp = (n: number) => ({ privateWorkingSet: n * MB, ...semJanela });
+  const procs = [
+    proc('claude.exe', { pid: 50, ppid: 1 }), proc('ChatGPT.exe', { pid: 51, ppid: 1 }),
+    proc('cursor.exe', { pid: 52, ppid: 1 }), proc('codex.exe', { pid: 53, ppid: 1 }),
+    proc('node.exe', { pid: 60, ppid: 51, ...MBp(100) }),   // ChatGPT: 100
+    proc('node.exe', { pid: 61, ppid: 50, ...MBp(700) }),   // Claude: 700
+    proc('node.exe', { pid: 62, ppid: 52, ...MBp(300) }),   // Cursor: 300
+    proc('node.exe', { pid: 63, ppid: 53, ...MBp(10) }),    // Codex: 10, fica fora dos 3
+  ];
+  const r = classify(snapOf(procs, T0), emptyHistory(), settings, ctxAt(T0));
+  assert.deepEqual(find(r, 'node').parents, ['claude', 'cursor', 'chatgpt']);
+});
+
+caso('R36: laço de ppid termina em vez de travar', () => {
+  const a = proc('a.exe', { pid: 70, ppid: 71, ...semJanela });
+  const b = proc('b.exe', { pid: 71, ppid: 70, ...semJanela });
+  const r = classify(snapOf([a, b], T0), emptyHistory(), settings, ctxAt(T0));
+  assert.deepEqual(find(r, 'a').parents, ['b']);   // o primeiro diferente, e para
+  assert.deepEqual(find(r, 'b').parents, ['a']);
+});
+
+caso('R36: só motivo no_window ganha pai', () => {
+  const t = T0 + 60 * MIN;
+  const r = classify(snapOf([proc('chrome.exe'), proc('explorer.exe')], t), emptyHistory(), settings, ctxAt(t));
+  assert.equal(find(r, 'chrome').parents, undefined);     // idle
+  assert.equal(find(r, 'explorer').parents, undefined);   // system
+});
+
 casos.forEach((c) => console.log('ok  ' + c));
 console.log(`classify: ${casos.length} casos ok`);

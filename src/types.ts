@@ -30,6 +30,8 @@ export type AppGroup = {
   cpuPercent: number; state: AppState; reason: AppReason;
   lastFocusedAt: number | null;   // epoch ms; null = nunca visto em primeiro plano
   windows?: number;               // janelas de topo visíveis do grupo
+  parents?: string[];             // R36: só em 'no_window'. Chaves dos apps que lançaram os processos,
+                                  // maior primeiro por memória, no máximo 3. Vazio = ninguém identificado.
 };
 export type Outcome = 'fechou' | 'ficou_aberto' | 'bandeja' | 'encerrado' | 'recusado';
 export type ReleaseResult = { key: string; name: string; outcome: Outcome };

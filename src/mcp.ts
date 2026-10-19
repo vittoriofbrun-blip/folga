@@ -5,6 +5,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { protectedRows } from './protegidos.ts';
+import type { AppGroup } from './types.ts';
 
 const PORT = Number(process.env.FOLGA_PORT ?? 4780);
 const DATA_DIR = process.env.FOLGA_DATA_DIR ?? join(process.env.LOCALAPPDATA ?? '.', 'Folga');
@@ -45,23 +47,31 @@ const dia = (t: number | null | undefined) => {
 // nome de arquivo é dado do usuário: tira controles e corta o excesso (R24)
 const texto = (s: unknown, max = 260) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, max);
 const nada = { type: 'object', properties: {}, additionalProperties: false };
+const PROT_MAX = 15;   // R36: o resto some no total; 15 linhas já explicam quem come a memória
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
 // Ferramentas: só leitura. O formato das respostas é compacto (poucos tokens) e em português.
 export const TOOLS: Tool[] = [
   {
     name: 'ver_memoria',
-    description: 'Use para saber como está a memória do PC agora: porcentagem em uso e os apps agrupados em parados, em uso e protegidos, com o tamanho de cada um.',
+    description: 'Use para saber como está a memória do PC agora: porcentagem em uso e os apps agrupados em parados, em uso e protegidos. Os protegidos vêm detalhados (R36): os maiores, o motivo de cada um em palavras e, nos processos sem janela, de que app eles são serviço. Nenhum protegido pode ser fechado; só a lista "nunca fechar" do usuário sai de lá, em Ajustes.',
     inputSchema: nada,
     readOnly: true,
     run: async () => {
-      const s = await get('/api/state') as { memLoad: number; totalPhys: number; availPhys: number; apps: { key: string; name: string; state: string; reason: string; privateWorkingSet: number; cpuPercent: number }[] };
+      const s = await get('/api/state') as { memLoad: number; totalPhys: number; availPhys: number; apps: AppGroup[] };
+      const prot = protectedRows(s.apps);
       return {
         emUsoPorcento: s.memLoad,
         totalGB: +(s.totalPhys / GB).toFixed(1),
         disponivelGB: +(s.availPhys / GB).toFixed(1),
         apps: s.apps.filter(a => a.state !== 'protected').map(a => ({ app: texto(a.key, 64), nome: texto(a.name, 80), estado: a.state, motivo: a.reason, MB: mb(a.privateWorkingSet), cpu: a.cpuPercent })),
-        protegidosMB: mb(s.apps.filter(a => a.state === 'protected').reduce((t, a) => t + a.privateWorkingSet, 0)),
+        protegidosMB: mb(prot.reduce((t, r) => t + r.bytes, 0)),
+        // R36: maiores primeiro, no máximo 15 linhas; `destravavel` = está na lista "nunca fechar" do usuário
+        protegidos: prot.slice(0, PROT_MAX).map(r => ({
+          app: texto(r.key, 64), nome: texto(r.name, 80), motivo: r.reason, porque: texto(r.words, 160),
+          MB: mb(r.bytes), processos: r.procs, destravavel: r.canUnprotect,
+        })),
+        protegidosOcultos: Math.max(0, prot.length - PROT_MAX),
       };
     },
   },

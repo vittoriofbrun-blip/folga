@@ -25,6 +25,43 @@ export function appKey(name: string): string {
 
 const ORDER: Record<AppState, number> = { idle: 0, in_use: 1, protected: 2 };
 
+const MAX_HOPS = 8;   // R36: corrente de ppid curta; mais que isso é lixo ou laço
+// R36: quem lança app do usuário mas não é dono de nada. Sem isto o Codex do Antônio vira "serviço do
+// Shell Infrastructure Host" (visto ao vivo em 2026-10-19). Fora da SYSTEM_PROCESSES de propósito: aqui só
+// corta a subida, não muda o que é protegido (R05). Os de sessão 0 (services, svchost) já caem na sessão.
+const NOT_A_PARENT = new Set(['sihost', 'taskhostw', 'runtimebroker', 'dllhost', 'userinit', 'wininit']);
+/**
+ * R36: de quem é este processo sem janela. Sobe pelo `ppid` pulando o mesmo app, para no primeiro
+ * ancestral que é um app do usuário **com janela visível**, e, se não achar nenhum, fica com o primeiro
+ * ancestral de outro app (o ChatGPT minimizado na bandeja que lançou um node, por exemplo). Sistema, outra
+ * sessão e o próprio Folga cortam a subida: sem isso tudo que mora na bandeja viraria "serviço do explorer".
+ * ponytail: o ppid do Windows pode apontar para um pid reaproveitado — visto ao vivo em 2026-10-19,
+ * `node <- cmd <- claude <- powershell <- WindowsTerminal`, onde o pai do claude já era outro processo.
+ * Parar na primeira janela visível descarta esse lixo; sem a hora de início não dá para conferir o pid.
+ */
+function parentOf(
+  pid: number, key: string,
+  byPid: Map<number, ProbeProcess>, keyOf: (p: ProbeProcess) => string,
+  windowed: ReadonlySet<string>, userSession: number,
+): string | null {
+  let cur = byPid.get(pid);
+  let fallback: string | null = null;
+  const seen = new Set<number>([pid]);
+  for (let i = 0; i < MAX_HOPS && cur; i++) {
+    const up = byPid.get(cur.ppid);
+    if (!up || seen.has(up.pid) || up.session !== userSession) break;
+    seen.add(up.pid);
+    const upKey = keyOf(up);
+    if (upKey !== key) {
+      if (upKey === SELF_KEY || NOT_A_PARENT.has(upKey) || SYSTEM_PROCESSES.includes(upKey)) break;
+      if (windowed.has(upKey)) return upKey;
+      fallback ??= upKey;
+    }
+    cur = up;
+  }
+  return fallback;
+}
+
 export function classify(
   snap: ProbeSnapshot, history: ClassifyHistory, settings: Settings, ctx: ClassifyContext,
 ): { apps: AppGroup[]; history: ClassifyHistory } {
@@ -35,11 +72,16 @@ export function classify(
   const busy: Record<string, true> = {};
 
   // 1-2. agrupa (self antes, para a janela do Folga não se misturar ao msedge do usuário)
+  const keyOf = (p: ProbeProcess) => (ctx.selfPids.includes(p.pid) ? SELF_KEY : appKey(p.name));
   const groups = new Map<string, ProbeProcess[]>();
+  const byPid = new Map<number, ProbeProcess>();        // R36: para subir pelo ppid
+  const windowed = new Set<string>();                   // apps do usuário com janela visível em algum processo
   for (const p of snap.processes) {
-    const key = ctx.selfPids.includes(p.pid) ? SELF_KEY : appKey(p.name);
+    const key = keyOf(p);
     const list = groups.get(key);
     if (list) list.push(p); else groups.set(key, [p]);
+    byPid.set(p.pid, p);
+    if (p.session === ctx.userSession && p.hasVisibleWindow) windowed.add(key);
   }
 
   const neverClose = new Set(settings.neverClose.map(appKey));
@@ -89,6 +131,18 @@ export function classify(
 
     // apps empacotados (Paint, Bloco de Notas) trazem o próprio "x.exe" como descrição: não serve de nome
     const description = procs.map((p) => p.description.trim()).find((d) => d !== '' && !/\.exe$/i.test(d));
+    // R36: quem lançou os processos sem janela, maiores primeiro. Só aqui: os outros motivos ou são
+    // o topo da árvore (never_close) ou não têm próximo passo (system, self, other_session).
+    let parents: string[] | undefined;
+    if (reason === 'no_window') {
+      const bytes = new Map<string, number>();
+      for (const p of mine) {
+        const par = parentOf(p.pid, key, byPid, keyOf, windowed, ctx.userSession);
+        if (par) bytes.set(par, (bytes.get(par) ?? 0) + p.privateWorkingSet);
+      }
+      if (bytes.size > 0) parents = [...bytes].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
+    }
+
     const first = procs[0]!; // grupo nunca é vazio
     const fileName = first.name.replace(/\.exe$/i, '');
     apps.push({
@@ -96,7 +150,7 @@ export function classify(
       name: key === SELF_KEY ? 'Folga' : description ?? fileName.charAt(0).toUpperCase() + fileName.slice(1),
       pids: procs.map((p) => p.pid),
       privateWorkingSet: procs.reduce((a, p) => a + p.privateWorkingSet, 0),
-      cpuPercent, state, reason, lastFocusedAt: focused, windows,
+      cpuPercent, state, reason, lastFocusedAt: focused, windows, parents,
     });
   }
 

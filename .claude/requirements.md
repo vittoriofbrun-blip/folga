@@ -28,7 +28,32 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
     um deles mata agentes e servidores rodando dentro: `WindowsTerminal`, `cmd`, `powershell`, `pwsh`, `Code`,
     `Cursor`, `Claude` (Claude Code), `Antigravity IDE`, `Codex`.
 - **R06 Grupos** — Na tela: Parados (marcados), Em uso (primeiro plano agora, ocupado ou usado há menos
-  de `idleMinutes`), Sistema e protegidos (só o total e a contagem), Liberados (fechados nesta sessão).
+  de `idleMinutes`), Sistema e protegidos (total, contagem e a lista que a R36 descreve), Liberados
+  (fechados nesta sessão).
+
+- **R36 Protegido também se explica** (visto ao vivo em 2026-10-18, 23:50) — Com a memória alta e **nenhum
+  app parado**, a tela tem que dizer quem está ocupando e qual é o próximo passo. Antes ela mostrava
+  "Sistema e protegidos" só como "N processos · X GB", e o assistente respondia que "a ferramenta não
+  detalhou quais são".
+  - **A lista abre.** O grupo recolhe e expande; abre sozinho quando não há nada parado, que é justo o caso
+    sem próximo passo. Maiores primeiro, com a contagem de processos de cada um.
+    - A condição é "nada parado", não "memória alta": o que faltava era próximo passo, e ele falta sempre
+      que o grupo Parados está vazio. Pela R03 isso também vale nos primeiros `idleMinutes` depois de cada
+      logon, com a memória baixa; o usuário fecha com um clique e a escolha dele fica.
+  - **O motivo em palavras**, um por motivo da R05: "do sistema", "sem janela aberta", "você marcou como
+    nunca fechar", "é o próprio Folga", "de outra sessão do Windows".
+  - **Só leitura.** Nada ali vira botão de fechar e nada entra em sugestão: a R05 continua inteira. O único
+    próximo passo é o `never_close`, que é lista do usuário: a linha leva a Ajustes ("Tirar da lista").
+  - **Sem janela diz de quem é.** Cada processo sem janela é atribuído ao app que o lançou, subindo pelo
+    `ppid`: pula o mesmo app, para no primeiro ancestral do usuário **com janela visível** e, se não houver,
+    fica no primeiro ancestral de outro app (o que está na bandeja). Sistema, outra sessão e o próprio Folga
+    cortam a subida, senão tudo viraria "serviço do explorer". No máximo 3 pais, maiores primeiro, e no
+    máximo 8 saltos, com guarda de laço. O `ppid` do Windows pode apontar para pid reaproveitado; parar na
+    primeira janela visível descarta esse lixo.
+  - **Motivo:** em 2026-10-19, dos 5,9 GB protegidos, 4,2 GB eram o "nunca fechar" do Antônio (Claude Code
+    3,7 GB) e 1,4 GB eram processos sem janela, quase todos `node`, `cmd` e `conhost` lançados por ele.
+  - **O assistente enxerga o mesmo.** `ver_memoria` devolve `protegidos` com motivo, palavras, tamanho,
+    contagem e `destravavel`. Tela e assistente usam a **mesma** função pura (`src/protegidos.ts`).
 
 ## Liberar
 - **R07 Fechar do jeito normal** — Liberar manda `WM_CLOSE` para **todas** as janelas de topo visíveis

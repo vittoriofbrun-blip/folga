@@ -79,7 +79,7 @@ export function App() {
       <main className="main">
         {view === 'inicio' && <Inicio state={state} go={go} />}
         {/* Memória e Assistente ficam montadas: não perdem seleção, resultado nem a conversa ao trocar de aba. */}
-        <div className="view" hidden={view !== 'memoria'}><Memory state={state} source={source} /></div>
+        <div className="view" hidden={view !== 'memoria'}><Memory state={state} source={source} go={go} /></div>
         {view === 'arquivos' && <Arquivos state={state} />}
         <div className="view" hidden={view !== 'assistente'}><Assistente state={state} go={go} ask={ask} /></div>
         {view === 'avisos' && <Avisos state={state} go={go} />}
