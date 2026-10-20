@@ -318,5 +318,13 @@ caso('Mac: helpers somam no bundle; Dock é sistema; Terminal nunca fecha', () =
   assert.equal(find(r, 'com.apple.terminal').reason, 'never_close');
 });
 
+caso('Mac R29: Chrome pelo bundle id com 3 janelas, parado há 2 h -> in_use/multi_window; 1 janela -> idle', () => {
+  const t = T0 + 2 * 60 * MIN;
+  const mac = (windowCount: number) => find(classify(snapOf([proc('com.google.Chrome', { description: 'Google Chrome', session: 501, windowCount })], t),
+    emptyHistory(), defaultSettings('darwin'), ctxAt(t, { userSession: 501 })), 'com.google.chrome');
+  assert.deepEqual([mac(3).state, mac(3).reason, mac(3).windows], ['in_use', 'multi_window', 3]);
+  assert.deepEqual([mac(1).state, mac(1).reason], ['idle', 'idle']);
+});
+
 casos.forEach((c) => console.log('ok  ' + c));
 console.log(`classify: ${casos.length} casos ok`);
