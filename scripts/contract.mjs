@@ -30,7 +30,7 @@ export function snapshotErrors(s, opts = {}) {
   const seen = new Set();
   for (const p of s.processes) {
     const w = `processes[${p?.pid}]`;
-    if (!int(p.pid) || p.pid <= 0) e.push(`${w}.pid: inteiro > 0`);
+    if (!int(p.pid) || p.pid < 0) e.push(`${w}.pid: inteiro ≥ 0`);   // 0 = System Idle Process do Windows
     else if (seen.has(p.pid)) e.push(`${w}.pid: repetido`);
     seen.add(p.pid);
     if (!int(p.ppid) || p.ppid < 0) e.push(`${w}.ppid: inteiro ≥ 0`);

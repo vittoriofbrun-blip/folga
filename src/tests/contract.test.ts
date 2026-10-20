@@ -44,5 +44,8 @@ assert.match(txt(snapshotErrors({ ...mac2, diskActive: '5' }, { mac: true })), /
 assert.match(txt(snapshotErrors({ ...mac2, availPhys: '5' }, { mac: true })), /availPhys/);
 assert.match(txt(snapshotErrors({ ...win2, processes: [{ ...win2.processes[0], privateWorkingSet: '5' }] })), /privateWorkingSet/);
 assert.match(txt(snapshotErrors({ ...win2, processes: [{ ...win2.processes[0], cpuTimeMs: null }] })), /cpuTimeMs/);
+const p0 = { ...win2.processes[0], pid: 0, name: 'System Idle Process' };
+assert.deepEqual(snapshotErrors({ ...win2, processes: [p0, ...win2.processes.filter((p: any) => p.pid !== 0)] }), []);   // Windows emite o Idle com pid 0
+assert.match(txt(snapshotErrors({ ...win2, processes: [{ ...p0, pid: -1 }, ...win2.processes] })), /pid: inteiro ≥ 0/);
 
 console.log('contract: ok');
