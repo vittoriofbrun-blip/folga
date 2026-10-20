@@ -7,7 +7,7 @@ const casos: string[] = [];
 function caso(nome: string, fn: () => void) { fn(); casos.push(nome); }
 
 caso('dataDir: darwin, win32 e FOLGA_DATA_DIR', () => {
-  assert.equal(dataDir('darwin', {}, '/Users/v'), '/Users/v/Library/Application Support/Folga');
+  assert.equal(dataDir('darwin', {}, '/Users/v'), join('/Users/v', 'Library', 'Application Support', 'Folga'));
   assert.equal(dataDir('win32', { LOCALAPPDATA: 'C:\\Users\\A\\AppData\\Local' }, 'x'), join('C:\\Users\\A\\AppData\\Local', 'Folga'));
   assert.equal(dataDir('darwin', { FOLGA_DATA_DIR: '/tmp/f' }, '/Users/v'), '/tmp/f');
 });
