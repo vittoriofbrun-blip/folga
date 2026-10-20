@@ -1,12 +1,12 @@
 // Arquivos parados, revalidação e limpeza rápida. Só pastas temporárias criadas aqui: nunca toca em arquivo real
 // do usuário e nunca chama a Lixeira de verdade (R21, R22, D16, D17).
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { spawn } from 'node:child_process';
-import { createFiles, isPackageDir, pathKey, pathShapeError, type FileMeta, type FilesDeps, type Inspected } from '../files.ts';
+import { execFileSync, spawn } from 'node:child_process';
+import { createFiles, FDA_NOTE, isPackageDir, pathKey, pathShapeError, type FileMeta, type FilesDeps, type Inspected } from '../files.ts';
 import { DEFAULT_SETTINGS } from '../types.ts';
 
 const WIN = process.platform === 'win32';
@@ -198,7 +198,8 @@ try {
     assert.equal(rr.inTrash, 0);
     ok('recycle: caminho inválido vai para failed sem tocar em nada');
 
-    // M4: Lixeira falsa (antes/depois) — quem diz quantos entraram é a contagem da Lixeira, não o disco
+    // M4 (Windows): Lixeira falsa (antes/depois) — quem diz quantos entraram é a contagem da Lixeira, não o disco
+    if (WIN) {
     let bin = 10, entram = 2, binIlegivel = false;
     const sent: string[][] = [];
     const fr = mk({
@@ -219,6 +220,29 @@ try {
     r2 = await fr.recycle([join(downloads, 'nao-existe-mesmo.bin')]);
     assert.equal(r2.inTrash, 0); assert.equal(sent.length, antes, 'nada válido: a Lixeira nem é chamada');
     ok('recycle: inTrash = itens da Lixeira depois − antes (completo, parcial, ilegível, nada enviado)');
+    }
+
+    // espião da Lixeira: recebe só caminhos reais validados e as raízes; nada válido = nem é chamado
+    const calls: Array<{ ps: string[]; roots: string[] }> = [];
+    let trashCalls = 0;
+    const fs = mk({
+      trash: async () => { trashCalls++; return { bytes: 0, files: 0 }; },
+      sendToTrash: async (ps, roots) => { calls.push({ ps, roots }); for (const p of ps) await rm(p); return MAC ? 1 : undefined; },   // Mac: "1 de 2 entrou"
+    });
+    const sys = WIN ? 'C:\\Windows\\win.ini' : '/etc/hosts';
+    const linkOk = (() => { try { symlinkSync(good, join(downloads, 'link-espiao.iso')); return true; } catch { return false; } })();
+    const um = file(join(downloads, 'espiao-1.bin'), 1000, 400), dois = file(join(downloads, 'espiao-2.bin'), 1000, 400);
+    const reais = [um, dois].map(x => realpathSync.native(x));
+    const rs = await fs.recycle([um, sys, ...(linkOk ? [join(downloads, 'link-espiao.iso')] : []), dois.toUpperCase()]);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0]!.ps, reais);
+    assert.deepEqual(calls[0]!.roots, fs.allowedRoots());
+    assert.equal(rs.ok.length, 2); assert.equal(rs.failed.length, linkOk ? 2 : 1);
+    if (MAC) { assert.equal(rs.inTrash, 1, 'Mac: quem diz quantos entraram é o trashItem'); assert.equal(trashCalls, 0, 'Mac: a Lixeira nem é lida'); }
+    const r0 = await fs.recycle([sys, join(downloads, 'nao-existe.bin')]);
+    assert.equal(calls.length, 1, 'nada válido: o espião nem é chamado'); assert.equal(r0.inTrash, 0);
+    if (linkOk) await rm(join(downloads, 'link-espiao.iso'));
+    ok('recycle: só caminho real validado (e as raízes) chega à Lixeira; sistema e link não; Mac conta pelo retorno');
   }
 
   // ---------- R21 em caminho POSIX (puro: roda nos dois sistemas) ----------
@@ -340,6 +364,7 @@ try {
     assert.equal(by('lixeira').actionable, false);
     assert.equal(by('lixeira').bytes, 123);
     if (WIN) assert.equal(by('lixeira').note, 'Esvazie pela Lixeira do Windows');
+    if (MAC) { assert.equal(by('lixeira').label, 'Lixeira'); assert.equal(by('lixeira').note, 'Esvazie pelo Finder'); assert.equal(by('lixeira').unknown, undefined); }
     assert.ok(items.every(i => /[a-zç]/.test(i.label)));
     ok('quickCleanPreview: temporários > 7 dias, cache só de navegador fechado, Lixeira só informativa');
 
@@ -409,6 +434,19 @@ try {
     await fc.quickCleanPreview({ fresh: true });
     assert.equal(trashCalls, 4, 'fresh (aprovação) ignora o cache');
     ok('quickCleanPreview: single-flight, cache de 30 s, invalidado por quickClean, fresh coleta de novo');
+  }
+
+  // ---------- Lixeira ilegível e o pino do Acesso Total ao Disco (Review Focus 6) ----------
+  {
+    if (MAC) {
+      const items = await mk({ trash: async () => ({ bytes: 0, files: 0, denied: true }) }).quickCleanPreview();
+      const lx = items.find(i => i.category === 'lixeira')!;
+      assert.deepEqual([lx.unknown, lx.bytes, lx.files, lx.note, lx.label], [true, 0, 0, FDA_NOTE, 'Lixeira']);
+    }
+    assert.match(FDA_NOTE, /app Folga/); assert.doesNotMatch(FDA_NOTE, /node|Terminal/i);
+    const fontes = execFileSync('git', ['grep', '-l', '-i', '-E', 'Privacy_AllFiles|Acesso Total ao Disco', '--', 'src', 'web/src', 'scripts', ':!src/tests/files.test.ts'], { encoding: 'utf8', cwd: join(import.meta.dirname, '..', '..') }).trim().split('\n').filter(Boolean);
+    for (const f of fontes) assert.doesNotMatch(readFileSync(f, 'utf8'), /(Privacy_AllFiles|Acesso Total ao Disco)[^\n]{0,160}(\bnode\b|Terminal|execPath)/i, f);
+    ok(`Lixeira ilegível = desconhecida (não 0); nenhum texto manda dar Acesso Total ao Disco ao node (${fontes.length} fontes)`);
   }
 
   // ---------- D20: pasta de projeto de código fica de fora (busca e validação) ----------

@@ -124,6 +124,7 @@ export type QuickCleanItem = {
   category: QuickCleanCategory; label: string; bytes: number; files: number;
   actionable: boolean;     // lixeira: false (só informação)
   note?: string;           // ex.: "Chrome aberto: feche para limpar o cache"
+  unknown?: true;          // não deu para ler (Mac sem Acesso Total ao Disco): bytes 0 aqui quer dizer "desconhecido"
 };
 
 // Sugestões: o agente (ou a tela) propõe, o usuário aprova (R20–R24)

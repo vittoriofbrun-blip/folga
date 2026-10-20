@@ -19,14 +19,18 @@ export type FilesDeps = {
   recentDir?: string;                                // pasta "Recent" do Windows
   accessTracking?: boolean;                          // pula o fsutil
   browsersOpen?: () => Promise<Record<Browser, boolean>>;
-  trash?: () => Promise<{ bytes: number; files: number }>;
-  sendToTrash?: (paths: string[]) => Promise<void>;   // testes: Lixeira falsa no lugar do PowerShell
+  trash?: () => Promise<TrashInfo>;
+  // testes: Lixeira falsa no lugar do PowerShell/trashItem. Número = quantos entraram (aí a contagem antes/depois não roda)
+  sendToTrash?: (paths: string[], roots: string[], appRoot: string | null) => Promise<void | number>;
   meta?: (paths: string[]) => Promise<FileMeta[] | null>;   // testes: Spotlight falso no lugar do `probe-mac --meta`
   appRoot?: string | null;   // pasta onde um .app velho vira item (padrão: ~/Downloads no Mac; null = nenhum .app)
   maxEntries?: number; maxMs?: number; now?: () => number;
 };
 export type Inspected = { path: string; size: number; lastUsed: number; basis: StaleBasis };
 export type InspectError = { erro: string };
+/** denied = não deu para ler (Mac sem Acesso Total ao Disco): desconhecido, nunca 0 */
+export type TrashInfo = { bytes: number; files: number; denied?: boolean };
+const TRASH_BATCH = 200;   // um lote lento só perde as respostas dele (o que já foi para a Lixeira continua lá)
 /** O que o `probe-mac --meta` diz de um caminho (datas em ms). */
 export type FileMeta = { lastUsed: number | null; added: number | null; dataless: boolean; missing: boolean };
 const META_BATCH = 500;
@@ -42,6 +46,8 @@ function macUsage(mtime: number, m: FileMeta | null): { lastUsed: number; basis:
   return { lastUsed, basis };
 }
 
+/** Nota do que o macOS guarda atrás do Acesso Total ao Disco. A permissão é do app, nunca do processo do servidor. */
+export const FDA_NOTE = 'Não deu para ler: o macOS guarda isto atrás do Acesso Total ao Disco, que será pedido pelo app Folga (próxima etapa).';
 const DAY = 86_400_000;
 const MAX_ENTRIES = 100_000;
 const MAX_MS = 20_000;
@@ -415,17 +421,35 @@ export function createFiles(deps: FilesDeps) {
     const ok: string[] = [];
     let inTrash: number | null = 0;
     if (send.length) {
-      const before = await trashCount();
-      if (deps.sendToTrash) await deps.sendToTrash(send);
-      // Mac: o --trash revalida sozinho (inclusive o .app só como filho direto do appRoot); a contagem fina vem na Task 4
-      else if (MAC) { const roots = allowedRoots(); await macHelper(['--trash'], { roots, appRoot: appRootIn(roots), paths: send }, 120_000); }
-      else await runPS(PS_RECYCLE, send, 120_000);
+      // Mac: quem diz quantos entraram é o trashItem (a Lixeira em si fica atrás do Acesso Total ao Disco)
+      const before = MAC ? null : await trashCount();
+      const roots = allowedRoots();
+      const n = deps.sendToTrash ? await deps.sendToTrash(send, roots, appRootIn(roots))
+        : MAC ? await macTrash(send, roots)
+        : void await runPS(PS_RECYCLE, send, 120_000);
       // o disco diz o que saiu da pasta; a contagem da Lixeira (antes × depois) diz quantos de fato entraram (M4)
       for (const real of send) (await exists(real) ? failed : ok).push(sentFor.get(real)!);
-      const after = await trashCount();
-      inTrash = before === null || after === null ? null : Math.max(0, after - before);
+      if (typeof n === 'number') inTrash = n;
+      else if (MAC) inTrash = null;
+      else {
+        const after = await trashCount();
+        inTrash = before === null || after === null ? null : Math.max(0, after - before);
+      }
     }
     return { ok, failed, inTrash };
+  }
+
+  /** `probe-mac --trash` em lotes: ele revalida cada caminho sozinho (inclusive o .app só filho direto do appRoot). */
+  async function macTrash(paths: string[], roots: string[]): Promise<number> {
+    const appRoot = appRootIn(roots);
+    let n = 0;
+    for (let i = 0; i < paths.length; i += TRASH_BATCH) {
+      const part = paths.slice(i, i + TRASH_BATCH);
+      const r = await macHelper(['--trash'], { roots, appRoot, paths: part }, 120_000);
+      // sem resposta = nenhum confirmado; o exists() de quem chama diz o que saiu da pasta
+      if (Array.isArray(r)) n += r.filter(x => !!x && typeof x === 'object' && (x as { ok?: unknown }).ok === true && (x as { inTrash?: unknown }).inTrash === true).length;
+    }
+    return n;
   }
 
   // ---------- limpeza rápida ----------
@@ -509,16 +533,24 @@ export function createFiles(deps: FilesDeps) {
       category: 'cache_navegador', label: 'Cache dos navegadores', bytes: sum(list), files: list.length, actionable: closed.length > 0,
       ...(opened.length ? { note: `${opened.map(name).join(' e ')} ${opened.length > 1 ? 'abertos' : 'aberto'}: feche para limpar o cache` } : {}),
     });
-    items.push({
+    if (!MAC) items.push({
       category: 'lixeira', label: 'Lixeira do Windows', bytes: t.bytes, files: t.files, actionable: false, note: 'Esvazie pela Lixeira do Windows',
     });
+    else if (t.denied) items.push({ category: 'lixeira', label: 'Lixeira', bytes: 0, files: 0, actionable: false, unknown: true, note: FDA_NOTE });
+    else items.push({ category: 'lixeira', label: 'Lixeira', bytes: t.bytes, files: t.files, actionable: false, note: 'Esvazie pelo Finder' });
     return items;
   }
-  async function readTrash(): Promise<{ bytes: number; files: number }> {
+  async function readTrash(): Promise<TrashInfo> {
+    if (MAC) {
+      // sem permissão (ou sem resposta) = desconhecido; nada aqui tenta contornar nem pede a permissão
+      const j = await macHelper(['--size'], join(homedir(), '.Trash'), 20_000) as { bytes?: unknown; files?: unknown; denied?: unknown } | null;
+      if (!j || typeof j !== 'object' || j.denied === true) return { bytes: 0, files: 0, denied: true };
+      return { bytes: Math.max(0, Number(j.bytes) || 0), files: Math.max(0, Number(j.files) || 0) };
+    }
     const j = JSON.parse(await runPS(PS_TRASH, null, 20_000)) as { bytes?: number; files?: number };
     return { bytes: Math.max(0, Number(j.bytes) || 0), files: Math.max(0, Number(j.files) || 0) };
   }
-  const trashInfo = () => readTrash().catch(() => ({ bytes: 0, files: 0 }));
+  const trashInfo = () => readTrash().catch((): TrashInfo => (MAC ? { bytes: 0, files: 0, denied: true } : { bytes: 0, files: 0 }));
 
   /** Apaga de vez só o que o preview marca como acionável. `categories` limita ao que o cartão aprovado mostrava. */
   async function quickClean(opts: { categories?: QuickCleanCategory[] } = {}): Promise<{ bytes: number; files: number; skipped: number }> {
