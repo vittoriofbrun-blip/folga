@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { snapshotErrors, replyErrors } from './contract.mjs';
 
 const isMac = process.platform === 'darwin';
+const textedit = isMac && process.argv.includes('--textedit');   // abre o TextEdit e exige foco + janela dele
 const exe = join(dirname(fileURLToPath(import.meta.url)), '..', 'probe', 'bin', isMac ? 'probe-mac' : 'probe.exe');
 const GB = 1024 ** 3, MB = 1024 ** 2;
 let load;
@@ -63,8 +64,23 @@ try {
   console.log(`diskActive=${snaps.map((x) => x.diskActive).join(",")}`);
   console.log(`memLoad=${s.memLoad}%  total=${gb(s.totalPhys)} GB  disponivel=${gb(s.availPhys)} GB`);
   console.log(`foregroundPid=${s.foregroundPid}  processos=${s.processes.length}  acessiveis=${s.processes.filter((p) => p.accessible).length}  com janela=${s.processes.filter((p) => p.hasVisibleWindow).length}`);
-  if (isMac) console.log(`memPressure=${s.memPressure}  swapUsed=${gb(s.swapUsed)} GB`);
+  if (isMac) {
+    console.log(`memPressure=${s.memPressure}  swapUsed=${gb(s.swapUsed)} GB`);
+    console.log(`audioPids=${(s.audioPids ?? []).map((pid) => `${pid}:${s.processes.find((p) => p.pid === pid)?.name}`).join(' ')}`);
+    const te = s.processes.find((p) => p.name.toLowerCase() === 'com.apple.textedit' && p.hasVisibleWindow);
+    if (te) console.log(`textedit: pid=${te.pid} hasVisibleWindow=${te.hasVisibleWindow} windowCount=${te.windowCount}`);
+    if (!textedit && !(snaps[0].diskActive === null && typeof s.diskActive === 'number')) fail(`diskActive: esperado null na 1ª leitura e número depois, veio ${snaps.map((x) => x.diskActive)}`);
+  }
   if (!(s.totalPhys > s.availPhys && s.availPhys > 0 && s.processes.length > 20)) fail('numeros implausiveis');
+
+  if (textedit) {
+    spawn('/usr/bin/open', ['-a', 'TextEdit'], { stdio: 'ignore' });
+    const ok = (x) => x.processes.some((p) => p.pid === x.foregroundPid && p.name.toLowerCase() === 'com.apple.textedit' && p.hasVisibleWindow === true && p.windowCount >= 1);
+    try { await until(() => ok(snaps.at(-1)), 10000, 'TextEdit'); }
+    catch { fail('primeiro plano ou janela do TextEdit não apareceu'); }
+    const te = snaps.at(-1).processes.find((p) => p.pid === snaps.at(-1).foregroundPid);
+    console.log(`TextEdit em primeiro plano: pid=${te.pid} windowCount=${te.windowCount}`);
+  }
 
   const groups = new Map();
   for (const p of s.processes) {

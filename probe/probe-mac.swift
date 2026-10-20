@@ -1,9 +1,11 @@
 // Sonda do Mac: mesmo protocolo da probe.cs (uma linha JSON por leitura em stdout, comandos em stdin).
 // Compilar: node scripts/build-probe.mjs  ->  probe/bin/probe-mac --interval N [--debug]
-// Nesta versão: memória, pressão, swap e processos agrupados por bundle. Janelas, foco, áudio e disco
-// ficam false/0/null/[] (Task 5); close/kill respondem ok sem agir.
+// Memória, pressão, swap, processos agrupados por bundle, janelas, primeiro plano, áudio e disco.
+// close/kill ainda respondem ok sem agir (Task 7).
 import AppKit
+import CoreAudio
 import Darwin
+import IOKit
 
 signal(SIGPIPE, SIG_IGN)
 
@@ -51,7 +53,7 @@ func memory() -> [String: Any] {
         let pages = UInt64(vm.internal_page_count) - UInt64(min(vm.purgeable_count, vm.internal_page_count))
             + UInt64(vm.wire_count) + UInt64(vm.compressor_page_count)
         used = min(pages * pageSize, totalPhys - 1)
-    }
+    } else { fputs("host_statistics64 falhou: \(kr)\n", stderr) }
     let avail = totalPhys - used
     let level = sysctlValue("kern.memorystatus_vm_pressure_level", Int32(0)) ?? 1
     let pressure = level >= 4 ? "critical" : level >= 2 ? "warn" : "normal"
@@ -92,7 +94,72 @@ func appOwner(_ path: String) -> (name: String, description: String)? {
     return o
 }
 
-func process(_ pid: pid_t) -> [String: Any]? {
+// ---------- janelas ----------
+// Por pid: janelas normais (camada 0), opacas e de pelo menos 50×50. .optionAll mantém minimizada e de outro
+// Espaço, como o Windows conta; o tamanho tira janela-fantasma. Sem título: não pede Gravação de Tela.
+func windowCounts() -> [pid_t: Int] {
+    var c: [pid_t: Int] = [:]
+    guard let list = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else { return c }
+    for w in list {
+        guard (w[kCGWindowLayer as String] as? Int) == 0, ((w[kCGWindowAlpha as String] as? Double) ?? 0) > 0,
+              let pid = w[kCGWindowOwnerPID as String] as? Int,
+              let b = w[kCGWindowBounds as String] as? NSDictionary,
+              let r = CGRect(dictionaryRepresentation: b), r.width >= 50, r.height >= 50 else { continue }
+        c[pid_t(pid), default: 0] += 1
+    }
+    return c
+}
+
+// ---------- áudio ----------
+func audioProp<T: BitwiseCopyable>(_ obj: AudioObjectID, _ sel: AudioObjectPropertySelector, _ v: inout T) -> Bool {
+    var a = AudioObjectPropertyAddress(mSelector: sel, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var size = UInt32(MemoryLayout<T>.size)
+    return AudioObjectGetPropertyData(obj, &a, 0, nil, &size, &v) == noErr
+}
+
+// pids tocando som agora (macOS 14.4+; antes disso, lista vazia)
+func audioPids() -> [Int] {
+    guard #available(macOS 14.4, *) else { return [] }
+    let sys = AudioObjectID(kAudioObjectSystemObject)
+    var a = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(sys, &a, 0, nil, &size) == noErr, size > 0 else { return [] }
+    var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+    guard AudioObjectGetPropertyData(sys, &a, 0, nil, &size, &ids) == noErr else { return [] }
+    var out: [Int] = []
+    for id in ids {
+        var pid: pid_t = 0, running: UInt32 = 0
+        if audioProp(id, kAudioProcessPropertyPID, &pid), audioProp(id, kAudioProcessPropertyIsRunningOutput, &running), running != 0, pid > 0 {
+            out.append(Int(pid))
+        }
+    }
+    return out
+}
+
+// ---------- disco ----------
+// Tempo ocupado (leitura + escrita, ns) por driver de disco; diskActive = o mais ocupado no intervalo, 0-100.
+var lastDisk: (t: UInt64, busy: [UInt64: UInt64])?
+func diskActive() -> Any {
+    var it: io_iterator_t = 0
+    guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOBlockStorageDriver"), &it) == KERN_SUCCESS else { return NSNull() }
+    defer { IOObjectRelease(it) }
+    var busy: [UInt64: UInt64] = [:]
+    while case let svc = IOIteratorNext(it), svc != 0 {
+        defer { IOObjectRelease(svc) }
+        var id: UInt64 = 0
+        IORegistryEntryGetRegistryEntryID(svc, &id)
+        guard let st = IORegistryEntryCreateCFProperty(svc, "Statistics" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? [String: Any] else { continue }
+        busy[id] = ((st["Total Time (Read)"] as? NSNumber)?.uint64Value ?? 0) + ((st["Total Time (Write)"] as? NSNumber)?.uint64Value ?? 0)
+    }
+    let now = DispatchTime.now().uptimeNanoseconds
+    defer { lastDisk = (now, busy) }
+    guard let last = lastDisk, now > last.t else { return NSNull() }   // 1ª leitura
+    var top = 0.0
+    for (id, v) in busy { if let p = last.busy[id], v >= p { top = max(top, Double(v - p) / Double(now - last.t) * 100) } }
+    return (min(100, top) * 10).rounded() / 10
+}
+
+func process(_ pid: pid_t, _ wins: [pid_t: Int], _ regular: Set<pid_t>) -> [String: Any]? {
     // sysctl e não proc_pidinfo(PROC_PIDTBSDINFO): este falha nos processos de outro usuário (root, daemons)
     // e eles sumiriam da lista; o sysctl é o que o ps usa e enxerga todos.
     var kp = kinfo_proc()
@@ -117,7 +184,7 @@ func process(_ pid: pid_t) -> [String: Any]? {
     return [
         "pid": Int(pid), "ppid": Int(kp.kp_eproc.e_ppid), "name": name, "description": desc, "session": Int(kp.kp_eproc.e_ucred.cr_uid),
         "privateWorkingSet": ok ? Int64(ru.ri_phys_footprint) : 0, "cpuTimeMs": Int64(cpuMs),
-        "hasVisibleWindow": false, "windowCount": 0, "accessible": ok,
+        "hasVisibleWindow": regular.contains(pid), "windowCount": wins[pid] ?? 0, "accessible": ok,
     ]
 }
 
@@ -126,7 +193,11 @@ func processes() -> [[String: Any]] {
     guard n > 0 else { return [] }
     var pids = [pid_t](repeating: 0, count: Int(n) + 64)
     let got = Int(proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size)))
-    return pids.prefix(max(0, got)).filter { $0 > 0 }.compactMap(process)
+    let wins = windowCounts()
+    // Decisão 2026-10-20: no Mac "tem janela" = app do Dock (.regular), no processo principal do bundle;
+    // app do Dock sem janela e parado pode sair com Cmd+Q. Barra de menus/agente segue "sem janela" (P03).
+    let regular = Set(NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map(\.processIdentifier))
+    return pids.prefix(max(0, got)).filter { $0 > 0 }.compactMap { process($0, wins, regular) }
 }
 
 func snapshot() {
@@ -134,9 +205,9 @@ func snapshot() {
     var s = memory()
     s["type"] = "snapshot"
     s["t"] = Int64(Date().timeIntervalSince1970 * 1000)
-    s["foregroundPid"] = NSNull()
-    s["diskActive"] = NSNull()
-    s["audioPids"] = [Int]()
+    s["foregroundPid"] = NSWorkspace.shared.frontmostApplication.map { Int($0.processIdentifier) } ?? NSNull()
+    s["diskActive"] = diskActive()
+    s["audioPids"] = audioPids()
     s["processes"] = processes()
     emit(s)
     var ri = rusage_info_v4()
@@ -158,7 +229,7 @@ func handle(_ line: String) {
     let type = cmd["type"] as? String
     let pids = cmd["pids"] as? [Any]
     let valid = (type == "close" || type == "kill") && pids?.allSatisfy(isPid) == true
-    // ponytail: close/kill ainda não agem (Task 5); respondem ok com 0 janelas.
+    // ponytail: close/kill ainda não agem (Task 7); respondem ok com 0 janelas.
     emit(["type": "reply", "id": id, "ok": valid, "windowsClosed": 0])
 }
 
