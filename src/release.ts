@@ -1,4 +1,4 @@
-// Liberar memória: WM_CLOSE, conferir, medir e registrar (R07–R09, R14, ADR 0003).
+// Liberar memória: WM_CLOSE (no Mac, Cmd+Q), conferir, medir e registrar (R07–R09, R14, ADR 0003).
 import { appendFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Probe } from './probe.ts';
@@ -12,6 +12,7 @@ export type ReleaseDeps = {
   waitForSnapshot: () => Promise<MemoryState>;
   closeWaitMs?: number;     // R07: conferir depois de 8 s
   measureWaitMs?: number;   // R08: medir 5 s depois do último fechamento
+  platform?: NodeJS.Platform;   // padrão process.platform
 };
 export type ReleaseError = { erro: string; status: number };
 
@@ -19,6 +20,7 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 export function createReleaser(deps: ReleaseDeps) {
   const logFile = join(deps.dataDir, 'log.jsonl');
+  const mac = (deps.platform ?? process.platform) === 'darwin';
   const freed: ReleaseResult[] = [];
   let busy = false;
 
@@ -63,10 +65,11 @@ export function createReleaser(deps: ReleaseDeps) {
         else {
           const now = after.apps.find(a => a.key === g.key);
           const hasWindow = now ? now.reason !== 'no_window' : false;
-          outcome = hasWindow ? 'ficou_aberto' : 'bandeja';
-          // ADR 0003: encerrar à força só app de bandeja que o usuário liberou (P03)
-          if (outcome === 'bandeja' && settings.mayForceQuit.includes(g.key)) {
-            try { await deps.probe.send({ type: 'kill', pids: living }); outcome = 'encerrado'; } catch { /* fica bandeja */ }
+          // Mac: Cmd+Q que não saiu (pergunta de salvar, recusa) fica aberto, com ou sem janela; não existe "bandeja"
+          outcome = hasWindow || mac ? 'ficou_aberto' : 'bandeja';
+          // ADR 0003: encerrar à força só app sem janela que o usuário liberou (P03)
+          if (!hasWindow && settings.mayForceQuit.includes(g.key)) {
+            try { await deps.probe.send({ type: 'kill', pids: living }); outcome = 'encerrado'; } catch { /* fica o desfecho anterior */ }
           }
         }
         results.push({ key: g.key, name: g.name, outcome });

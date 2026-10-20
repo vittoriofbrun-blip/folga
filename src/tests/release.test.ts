@@ -15,7 +15,7 @@ const mem = (apps: AppGroup[], availPhys: number): MemoryState => ({
   autoCare: { nextEligibleAt: null, lastRunAt: null },
 });
 
-function setup(before: MemoryState, after: MemoryState, measured: MemoryState, settings: Settings = DEFAULT_SETTINGS) {
+function setup(before: MemoryState, after: MemoryState, measured: MemoryState, settings: Settings = DEFAULT_SETTINGS, platform?: NodeJS.Platform) {
   const dir = mkdtempSync(join(tmpdir(), 'folga-rel-'));
   const sent: Omit<ProbeCommand, 'id'>[] = [];
   const queue = [after, measured];
@@ -25,7 +25,7 @@ function setup(before: MemoryState, after: MemoryState, measured: MemoryState, s
     getState: () => before,
     getSettings: () => settings,
     waitForSnapshot: async () => queue.shift() ?? measured,
-    closeWaitMs: 1, measureWaitMs: 1,
+    closeWaitMs: 1, measureWaitMs: 1, platform,
   });
   return { dir, sent, releaser };
 }
@@ -38,7 +38,7 @@ const ok = (name: string) => { passed++; console.log(`ok  ${name}`); };
   const before = mem([app('calc', [1]), app('notepad', [2]), app('teams', [3, 4]), app('explorer', [9], { state: 'protected', reason: 'system' })], 200);
   const after = mem([app('notepad', [2], { reason: 'idle' }), app('teams', [4], { state: 'protected', reason: 'no_window' }), app('explorer', [9])], 250);
   const measured = mem(after.apps, 330);
-  const { dir, sent, releaser } = setup(before, after, measured);
+  const { dir, sent, releaser } = setup(before, after, measured, DEFAULT_SETTINGS, 'win32');
   const r = await releaser.release(['calc', 'notepad', 'teams'], 'manual');
   assert.ok(!('erro' in r));
   assert.deepEqual(r.results.map(x => [x.key, x.outcome]), [['calc', 'fechou'], ['notepad', 'ficou_aberto'], ['teams', 'bandeja']]);
@@ -65,7 +65,7 @@ const ok = (name: string) => { passed++; console.log(`ok  ${name}`); };
   const before = mem([app('teams', [3, 4])], 200);
   const after = mem([app('teams', [4], { state: 'protected', reason: 'no_window' })], 200);
   const settings = { ...DEFAULT_SETTINGS, mayForceQuit: ['teams'] };
-  const { dir, sent, releaser } = setup(before, after, mem([], 400), settings);
+  const { dir, sent, releaser } = setup(before, after, mem([], 400), settings, 'win32');
   const r = await releaser.release(['teams'], 'auto');
   assert.ok(!('erro' in r));
   assert.equal(r.results[0]!.outcome, 'encerrado');
@@ -98,6 +98,21 @@ const ok = (name: string) => { passed++; console.log(`ok  ${name}`); };
   assert.ok('erro' in second && second.status === 409);
   await first;
   ok('uma liberação por vez (409 na segunda)');
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
+}
+
+{
+  // Mac: Cmd+Q; quem não saiu fica aberto (com ou sem janela), forçar só sem janela e em mayForceQuit
+  const before = mem([app('com.apple.textedit', [1]), app('com.apple.preview', [2]), app('com.spotify.client', [3, 4]), app('com.tinyapp', [5])], 200);
+  const after = mem([app('com.apple.preview', [2]), app('com.spotify.client', [3], { state: 'protected', reason: 'no_window' }),
+    app('com.tinyapp', [5], { state: 'protected', reason: 'no_window' })], 250);
+  const { dir, sent, releaser } = setup(before, after, mem(after.apps, 300), { ...DEFAULT_SETTINGS, mayForceQuit: ['com.tinyapp', 'com.apple.preview'] }, 'darwin');
+  const r = await releaser.release(['com.apple.textedit', 'com.apple.preview', 'com.spotify.client', 'com.tinyapp'], 'manual');
+  assert.ok(!('erro' in r));
+  assert.deepEqual(r.results.map(x => [x.key, x.outcome]), [['com.apple.textedit', 'fechou'], ['com.apple.preview', 'ficou_aberto'],
+    ['com.spotify.client', 'ficou_aberto'], ['com.tinyapp', 'encerrado']]);
+  assert.deepEqual(sent.filter(c => c.type === 'kill'), [{ type: 'kill', pids: [5] }]);   // Preview tem janela: nunca forçado
+  ok('Mac: quem não saiu fica aberto; forçar só sem janela e em mayForceQuit');
   await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 }
 

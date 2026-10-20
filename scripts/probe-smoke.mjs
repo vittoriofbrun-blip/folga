@@ -4,7 +4,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { snapshotErrors, replyErrors } from './contract.mjs';
 
 const isMac = process.platform === 'darwin';
@@ -49,6 +50,7 @@ const until = (cond, ms, what) => new Promise((res, rej) => {
   wake();
 });
 
+let te;   // processo principal do TextEdit (--textedit)
 try {
   await until(() => snaps.length >= 3, 10000, '3 snapshots');
   const s = snaps[2];
@@ -78,11 +80,14 @@ try {
     // só fecha no fim se não estava aberto antes (não mexer em app real do usuário)
     const wasRunning = spawnSync('/usr/bin/pgrep', ['-x', 'TextEdit']).status === 0;
     if (!wasRunning) process.on('exit', () => spawnSync('/usr/bin/osascript', ['-e', 'quit app "TextEdit" saving no']));
-    spawn('/usr/bin/open', ['-a', 'TextEdit'], { stdio: 'ignore' });
+    // abre um arquivo: sem documento o TextEdit mostra só o painel Abrir, que é de outro processo (sem janela no app)
+    const doc = join(mkdtempSync(join(tmpdir(), 'folga-smoke-')), 'teste.txt');
+    writeFileSync(doc, 'teste folga\n');
+    spawn('/usr/bin/open', ['-a', 'TextEdit', doc], { stdio: 'ignore' });
     const ok = (x) => x.processes.some((p) => p.pid === x.foregroundPid && p.name.toLowerCase() === 'com.apple.textedit' && p.hasVisibleWindow === true && p.windowCount >= 1);
     try { await until(() => ok(snaps.at(-1)), 10000, 'TextEdit'); }
     catch { fail('primeiro plano ou janela do TextEdit não apareceu'); }
-    const te = snaps.at(-1).processes.find((p) => p.pid === snaps.at(-1).foregroundPid);
+    te = snaps.at(-1).processes.find((p) => p.pid === snaps.at(-1).foregroundPid);
     console.log(`TextEdit em primeiro plano: pid=${te.pid} windowCount=${te.windowCount}`);
   }
 
@@ -104,6 +109,18 @@ try {
   const re = replyErrors(reply, 't1');
   if (re.length || reply.ok !== true || reply.windowsClosed !== 0) fail(`reply inesperado: ${JSON.stringify(reply)} ${re.join('; ')}`);
   console.log('reply:', JSON.stringify(reply));
+
+  if (textedit) {
+    // Cmd+Q pela sonda: terminate() só no app .regular (o helper do painel Abrir fica de fora)
+    const pids = snaps.at(-1).processes.filter((p) => p.name.toLowerCase() === 'com.apple.textedit').map((p) => p.pid);
+    reply = null;
+    child.stdin.write(JSON.stringify({ type: 'close', id: 't2', pids }) + '\n');
+    await until(() => reply, 5000, 'reply do close do TextEdit');
+    if (replyErrors(reply, 't2').length || reply.windowsClosed !== 1) fail(`close do TextEdit: ${JSON.stringify(reply)} (esperado windowsClosed 1)`);
+    try { await until(() => !snaps.at(-1).processes.some((p) => p.pid === te.pid), 8000, 'TextEdit sair'); }
+    catch { fail(`o TextEdit (pid ${te.pid}) nao saiu em 8 s depois do close`); }
+    console.log(`TextEdit saiu pelo close (pids ${pids.join(',')}; reply ${JSON.stringify(reply)})`);
+  }
 
   child.stdin.end();
   const code = await Promise.race([exited, new Promise((r) => setTimeout(() => r('timeout'), 3000))]);

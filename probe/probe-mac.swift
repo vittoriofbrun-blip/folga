@@ -1,7 +1,7 @@
 // Sonda do Mac: mesmo protocolo da probe.cs (uma linha JSON por leitura em stdout, comandos em stdin).
 // Compilar: node scripts/build-probe.mjs  ->  probe/bin/probe-mac --interval N [--debug]
 // Memória, pressão, swap, processos agrupados por bundle, janelas, primeiro plano, áudio e disco.
-// close/kill ainda respondem ok sem agir (Task 7).
+// close = Cmd+Q (terminate) em app do Dock; kill = forceTerminate/SIGKILL (só pelo caminho mayForceQuit).
 import AppKit
 import CoreAudio
 import Darwin
@@ -114,13 +114,16 @@ func windowCounts() -> [pid_t: Int] {
 }
 
 // Navegadores Chromium: o AppleScript do app conta minimizada e de outro Espaço, que é o que a R29 precisa.
-// osascript em processo separado (pode esperar a permissão de Automação): nunca trava o laço principal;
-// cache de 30 s por pid; erro ou permissão negada = fica a conta da tela, com um aviso só no stderr.
+// osascript em processo separado: nunca trava o laço principal; cache de 30 s por pid; erro ou permissão negada =
+// fica a conta da tela, com um aviso só no stderr. A 1ª tentativa por bundle id dura até 60 s: é ela que mostra o
+// pedido de permissão de Automação, e matar o osascript cedo some com o pedido antes de o usuário responder.
+// Enquanto ela espera, vale a conta da tela. As seguintes têm 2 s (+1 s até o SIGKILL).
 let chromium: Set<String> = ["com.google.chrome", "com.microsoft.edgemac", "com.brave.browser",
                              "com.vivaldi.vivaldi", "com.operasoftware.opera", "org.chromium.chromium"]
 var scriptCount: [pid_t: (t: Date, n: Int?)] = [:]
 var scriptBusy: Set<pid_t> = []
-var scriptWarned = false
+var scriptWarned = false, scriptRunWarned = false
+var scriptTried: Set<String> = []   // bundle ids que já tiveram a 1ª tentativa (a de 60 s)
 func chromiumWindows(_ app: NSRunningApplication) -> Int? {
     let pid = app.processIdentifier
     guard let id = app.bundleIdentifier, chromium.contains(id.lowercased()) else { return nil }
@@ -130,6 +133,7 @@ func chromiumWindows(_ app: NSRunningApplication) -> Int? {
         let p = Process(), out = Pipe()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         p.arguments = ["-e", "tell application id \"\(id)\" to count windows"]
+        p.standardInput = FileHandle.nullDevice
         p.standardOutput = out
         p.standardError = FileHandle.nullDevice
         p.terminationHandler = { p in
@@ -141,8 +145,19 @@ func chromiumWindows(_ app: NSRunningApplication) -> Int? {
                 if n == nil && !scriptWarned { scriptWarned = true; fputs("janelas de \(id) pelo AppleScript falhou (permissão de Automação?); usando a conta da tela\n", stderr) }
             }
         }
-        if (try? p.run()) == nil { scriptBusy.remove(pid); scriptCount[pid] = (Date(), nil) }
-        else { DispatchQueue.main.asyncAfter(deadline: .now() + 2) { if p.isRunning { p.terminate() } } }
+        let limit: Double = scriptTried.insert(id).inserted ? 60 : 2
+        do {
+            try p.run()
+            DispatchQueue.main.asyncAfter(deadline: .now() + limit) {
+                guard p.isRunning else { return }
+                p.terminate()
+                let child = p.processIdentifier
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { if p.isRunning { kill(child, SIGKILL) } }
+            }
+        } catch {
+            scriptBusy.remove(pid); scriptCount[pid] = (Date(), nil)
+            if !scriptRunWarned { scriptRunWarned = true; fputs("osascript não abriu: \(error.localizedDescription); usando a conta da tela\n", stderr) }
+        }
     }
     scriptCount = scriptCount.filter { k, _ in NSRunningApplication(processIdentifier: k) != nil }
     return cached?.n
@@ -269,10 +284,28 @@ func handle(_ line: String) {
           let cmd = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
           let id = cmd["id"] as? String else { return }   // sem id não há como responder
     let type = cmd["type"] as? String
-    let pids = cmd["pids"] as? [Any]
-    let valid = (type == "close" || type == "kill") && pids?.allSatisfy(isPid) == true
-    // ponytail: close/kill ainda não agem (Task 7); respondem ok com 0 janelas.
-    emit(["type": "reply", "id": id, "ok": valid, "windowsClosed": 0])
+    guard type == "close" || type == "kill", let raw = cmd["pids"] as? [Any], raw.allSatisfy(isPid) else {
+        emit(["type": "reply", "id": id, "ok": false, "windowsClosed": 0]); return
+    }
+    let pids = raw.map { pid_t(($0 as! NSNumber).int32Value) }
+    if type == "close" {
+        // ADR 0003 no Mac = Cmd+Q: terminate() só em app do Dock (.regular). Helper e app de barra de menus nunca.
+        // O app pode perguntar se salva e não sair; quem confere é o servidor, 8 s depois.
+        var closed = 0
+        for pid in pids {
+            if let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy == .regular, app.terminate() { closed += 1 }
+        }
+        emit(["type": "reply", "id": id, "ok": true, "windowsClosed": closed])
+    } else {
+        // só chega aqui pelo caminho mayForceQuit (P03)
+        var all = true
+        for pid in pids {
+            if pid <= 0 { all = false; continue }   // kill(0) mataria o grupo inteiro, a sonda junto
+            if let app = NSRunningApplication(processIdentifier: pid) { if !app.forceTerminate() { all = false } }
+            else if kill(pid, SIGKILL) != 0 { all = false }
+        }
+        emit(["type": "reply", "id": id, "ok": all, "windowsClosed": 0])
+    }
 }
 
 Thread {
