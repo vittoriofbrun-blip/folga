@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DiskInfo, MemoryState, Sample, Severity, Suggestion, View, Warning } from '../../src/types';
 import { getDisk, getSuggestions, getWarnings, onEvent } from './api';
-import { NB, gb, nf0, pct, plural, size } from './format';
+import { NB, autoCareAt, gb, nf0, pct, plural, size } from './format';
 import { computeHealth, systemDisk } from './health';
 import { SuggestionCard } from './SuggestionCard';
 
@@ -238,7 +238,7 @@ export function Inicio({ state, go }: { state: MemoryState | null; go: (v: View,
           ) : <p className="muted" role="status">Lendo a memória…</p>}
           {state && (
             <p className="home-foot"><span>Auto Care</span>
-              <span>{state.settings.autoCareEnabled ? `Em ${pct(state.settings.autoCareThreshold)}` : 'desligado'}</span></p>
+              <span>{state.settings.autoCareEnabled ? autoCareAt(state.settings).replace(/^./, (c) => c.toUpperCase()) : 'desligado'}</span></p>
           )}
         </article>
 

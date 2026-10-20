@@ -12,6 +12,7 @@ const GB = 1024 ** 3;
 const MIN = 60_000;
 const TOTAL = 16 * GB;
 const startedAt = Date.now() - 5 * 60 * MIN;
+const MAC = /Mac/.test(navigator.platform);   // no Mac a sonda manda pressão e swap, e o Auto Care é por pressão
 
 type Seed = Pick<AppGroup, 'key' | 'name' | 'state' | 'reason'> & {
   n: number; mb: number; cpu?: number; focusedMinAgo?: number | null;
@@ -66,8 +67,9 @@ function snapshot(): MemoryState {
   return {
     t, memLoad: Math.round((used / TOTAL) * 100), totalPhys: TOTAL, availPhys: TOTAL - used,
     apps: apps.map((a) => (a.reason === 'foreground' ? { ...a, lastFocusedAt: t } : a)),
-    freed, settings: { ...DEFAULT_SETTINGS, autoCareEnabled: true },
+    freed, settings: { ...DEFAULT_SETTINGS, autoCareEnabled: true, ...(MAC && { autoCareTrigger: 'pressure' as const }) },
     startedAt, autoCare: { nextEligibleAt: null, lastRunAt: null },
+    ...(MAC && { memPressure: 'warn' as const, swapUsed: 4.5 * GB }),
   };
 }
 
