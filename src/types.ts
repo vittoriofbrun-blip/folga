@@ -127,6 +127,11 @@ export type QuickCleanItem = {
   unknown?: true;          // não deu para ler (Mac sem Acesso Total ao Disco): bytes 0 aqui quer dizer "desconhecido"
 };
 
+// Dados dos apps: mede tudo; limpável só o que a allowlist de cache produz, de app fechado
+export type AppDataItem = { id: string; label: string; path: string; bytes: number; files: number; actionable: boolean; note?: string };
+export type AppDataEntry = { id: string; name: string; where: string; bytes: number; items: AppDataItem[]; notes: { text: string; bytes: number }[] };
+export type AppDataScan = { t: number; durationMs: number; truncated: boolean; totalBytes: number; entries: AppDataEntry[] };
+
 // Sugestões: o agente (ou a tela) propõe, o usuário aprova (R20–R24)
 export type SuggestionKind = 'lixeira' | 'limpeza_rapida' | 'liberar_memoria';
 export type SuggestionStatus = 'pendente' | 'feita' | 'ignorada' | 'falhou';

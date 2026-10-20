@@ -133,8 +133,8 @@ function inside(root: string, child: string) {
 async function realOrNull(p: string) { try { return await realpath(p); } catch { return null; } }
 
 /** Passeio com teto de entradas e de tempo. Não segue link nem junção; lê metadados com lstat, em lotes. */
-type Budget = { entries: number; maxEntries: number; deadline: number; now: () => number; stopped: boolean };
-async function walk(
+export type Budget = { entries: number; maxEntries: number; deadline: number; now: () => number; stopped: boolean };
+export async function walk(
   root: string, maxDepth: number, skipDir: ((name: string) => boolean) | null, b: Budget,
   onFile: (path: string, st: Stats) => void | Promise<void>,
   projectMarkers: ReadonlySet<string> | null = null,
@@ -179,7 +179,7 @@ async function walk(
   }
   await Promise.all(Array.from({ length: 6 }, worker));
 }
-const newBudget = (maxEntries: number, maxMs: number, now: () => number): Budget =>
+export const newBudget = (maxEntries: number, maxMs: number, now: () => number): Budget =>
   ({ entries: 0, maxEntries, deadline: now() + maxMs, now, stopped: false });
 
 export function createFiles(deps: FilesDeps) {
