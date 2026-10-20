@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_SETTINGS, type Settings } from './types.ts';
@@ -33,4 +34,28 @@ export function userFolders(
   }
   const bases = [home, env.OneDrive, env.OneDriveConsumer, env.OneDriveCommercial].filter((x): x is string => !!x);
   return bases.flatMap(b => ['Downloads', 'Desktop', 'Documents', 'Pictures', 'Videos', 'Music'].map(n => join(b, n)));
+}
+
+/**
+ * Modo de uma vez só da sonda do Mac (`probe-mac --meta|--trash|--size|--volume`): JSON no stdin, JSON no stdout.
+ * Falha, tempo esgotado, saída ≠ 0 ou JSON quebrado → null. Fora do Mac, null sem spawn.
+ */
+export function macHelper(args: string[], input: unknown, timeoutMs: number): Promise<unknown | null> {
+  if (process.platform !== 'darwin') return Promise.resolve(null);
+  return new Promise(res => {
+    // shell:false e caminho absoluto, como o run() de files.ts
+    const c = spawn(join(import.meta.dirname, '..', 'probe', 'bin', 'probe-mac'), args, { shell: false, stdio: ['pipe', 'pipe', 'ignore'] });
+    let out = '';
+    const timer = setTimeout(() => c.kill(), timeoutMs);
+    c.stdout.setEncoding('utf8');
+    c.stdout.on('data', d => { out += d; });
+    c.on('error', () => { clearTimeout(timer); res(null); });
+    c.on('close', code => {
+      clearTimeout(timer);
+      if (code !== 0) return res(null);
+      try { res(JSON.parse(out)); } catch { res(null); }
+    });
+    c.stdin.on('error', () => {});
+    c.stdin.end(input === null || input === undefined ? undefined : JSON.stringify(input), 'utf8');
+  });
 }

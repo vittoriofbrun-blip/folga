@@ -3,6 +3,7 @@
 // Memória, pressão, swap, processos agrupados por bundle, janelas, primeiro plano, áudio e disco.
 // close = Cmd+Q (terminate) em app do Dock; kill = forceTerminate/SIGKILL (só pelo caminho mayForceQuit).
 import AppKit
+import CoreServices
 import CoreAudio
 import Darwin
 import IOKit
@@ -328,6 +329,102 @@ func handle(_ line: String) {
         emit(["type": "reply", "id": id, "ok": all, "windowsClosed": 0])
     }
 }
+
+// ---------- modos de uma vez só (--meta, --trash, --size, --volume) ----------
+// JSON no stdin, JSON no stdout, sai com 0; entrada inválida → null e sai com 1. Não tocam o laço da sonda
+// contínua (um comando longo de Lixeira no RunLoop.main atrasaria as leituras de memória).
+func oneShotOut(_ obj: Any) -> Never {
+    if let d = try? JSONSerialization.data(withJSONObject: obj, options: [.fragmentsAllowed]), let s = String(data: d, encoding: .utf8) {
+        fputs(s + "\n", stdout); fflush(stdout); exit(0)
+    }
+    fputs("null\n", stdout); exit(1)
+}
+func oneShotInvalid() -> Never { fputs("null\n", stdout); fflush(stdout); exit(1) }
+func readInput() -> Any? {
+    let d = FileHandle.standardInput.readDataToEndOfFile()
+    return d.isEmpty ? nil : try? JSONSerialization.jsonObject(with: d, options: [.fragmentsAllowed])
+}
+func canonical(_ path: String) -> String? {
+    guard let r = realpath(path, nil) else { return nil }
+    defer { free(r) }
+    return String(cString: r)
+}
+let datalessFlag = UInt32(SF_DATALESS)
+let ms = { (d: Date?) -> Any in d.map { Int64(($0.timeIntervalSince1970 * 1000).rounded()) } ?? NSNull() }
+
+func oneShot(_ mode: String) -> Never {
+    switch mode {
+    case "--meta":
+        // Spotlight: último uso e data em que chegou. lstat só para "sumiu" e "só na nuvem"; nunca abre o conteúdo.
+        guard let paths = readInput() as? [String], paths.count <= 5000 else { oneShotInvalid() }
+        oneShotOut(paths.map { path -> [String: Any] in
+            var st = stat()
+            guard lstat(path, &st) == 0 else { return ["lastUsed": NSNull(), "added": NSNull(), "dataless": false, "missing": true] }
+            let item = MDItemCreate(nil, path as CFString)
+            let attr = { (k: CFString) -> Date? in item.flatMap { MDItemCopyAttribute($0, k) as? Date } }
+            return ["lastUsed": ms(attr(kMDItemLastUsedDate)), "added": ms(attr(kMDItemDateAdded)),
+                    "dataless": st.st_flags & datalessFlag != 0, "missing": false]
+        })
+
+    case "--trash":
+        // O Node já validou (R21); aqui revalida no último instante, porque entre a validação e agora uma pasta
+        // do caminho pode ter virado link para fora (TOCTOU).
+        guard let req = readInput() as? [String: Any], let rawRoots = req["roots"] as? [String], let paths = req["paths"] as? [String] else { oneShotInvalid() }
+        let roots = rawRoots.compactMap(canonical)
+        let appRoot = (req["appRoot"] as? String).flatMap(canonical)
+        func refuse(_ erro: String) -> [String: Any] { ["ok": false, "inTrash": false, "trashed": NSNull(), "erro": erro] }
+        oneShotOut(paths.map { path -> [String: Any] in
+            // string idêntica: link em qualquer ponto do caminho (ou "..", "//") muda o resultado do realpath
+            guard canonical(path) == path else { return refuse("caminho com link, relativo ou inexistente") }
+            var st = stat()
+            guard lstat(path, &st) == 0 else { return refuse("sumiu") }
+            let kind = st.st_mode & S_IFMT
+            let isApp = kind == S_IFDIR && path.hasSuffix(".app") && appRoot != nil
+                && (path as NSString).deletingLastPathComponent == appRoot
+            guard kind == S_IFREG || isApp else { return refuse("não é arquivo comum nem .app direto da pasta de apps") }
+            guard st.st_flags & datalessFlag == 0 else { return refuse("só na nuvem (não baixado)") }
+            guard roots.contains(where: { path.hasPrefix($0 + "/") }) else { return refuse("fora das pastas permitidas") }
+            // ponytail: a janela entre esta checagem e o trashItem é de microssegundos, não fecha 100 %; fecharia com openat/O_NOFOLLOW por componente, que a API de Lixeira não aceita.
+            var out: NSURL?
+            do { try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: &out) }
+            catch { return refuse("Lixeira recusou: \(error.localizedDescription)") }
+            return ["ok": true, "inTrash": out != nil, "trashed": out?.path ?? NSNull()]
+        })
+
+    case "--size":
+        // Soma alocada, sem seguir link. É por aqui que a Lixeira e o cache do Safari são medidos: quando o
+        // Folga.app (plano 3) tiver o Acesso Total ao Disco, o macOS atribui a leitura a ele, e o node nunca
+        // precisa da permissão.
+        guard let root = readInput() as? String, !root.isEmpty else { oneShotInvalid() }
+        guard let dir = opendir(root) else {
+            if errno == EPERM || errno == EACCES { oneShotOut(["bytes": 0, "files": 0, "denied": true]) }
+            oneShotInvalid()
+        }
+        closedir(dir)
+        let keys: [URLResourceKey] = [.totalFileAllocatedSizeKey, .isRegularFileKey]
+        var bytes: Int64 = 0, files = 0
+        let e = FileManager.default.enumerator(at: URL(fileURLWithPath: root), includingPropertiesForKeys: keys, options: [], errorHandler: { _, _ in true })
+        while let u = e?.nextObject() as? URL {
+            guard let v = try? u.resourceValues(forKeys: Set(keys)) else { continue }
+            bytes += Int64(v.totalFileAllocatedSize ?? 0)
+            if v.isRegularFile == true { files += 1 }
+        }
+        oneShotOut(["bytes": bytes, "files": files, "denied": false])
+
+    case "--volume":
+        let args = CommandLine.arguments
+        guard args.count >= 3, let v = try? URL(fileURLWithPath: args[2]).resourceValues(forKeys:
+            [.volumeLocalizedNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey, .volumeAvailableCapacityForImportantUsageKey]),
+              let total = v.volumeTotalCapacity else { oneShotInvalid() }
+        oneShotOut(["name": v.volumeLocalizedName ?? "", "total": Int64(total), "available": Int64(v.volumeAvailableCapacity ?? 0),
+                    "important": v.volumeAvailableCapacityForImportantUsage ?? 0])
+
+    default:
+        oneShotInvalid()
+    }
+}
+
+if let mode = CommandLine.arguments.dropFirst().first, mode.hasPrefix("--") && mode != "--interval" && mode != "--debug" { oneShot(mode) }
 
 Thread {
     while let line = readLine() { DispatchQueue.main.async { handle(line) } }

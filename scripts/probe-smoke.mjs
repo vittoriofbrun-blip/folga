@@ -4,9 +4,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { snapshotErrors, replyErrors } from './contract.mjs';
+import { macHelper } from '../src/platform.ts';
 
 const isMac = process.platform === 'darwin';
 const textedit = isMac && process.argv.includes('--textedit');   // abre o TextEdit e exige foco + janela dele
@@ -143,8 +144,67 @@ try {
   if (code === 'timeout') { child.kill(); fail('a sonda nao saiu em 3 s depois de fechar o stdin'); }
   console.log(`sonda saiu sozinha (exitCode ${code})`);
   load.kill();
+  if (isMac) await storage();
   console.log('OK');
 } catch (e) {
   child.kill();
   fail(e.message);
+}
+
+// Armazenamento (Mac): modos de uma vez só da sonda. Tudo em pastas de teste nossas; nada do usuário.
+async function storage() {
+  const helper = (args, input) => macHelper(args, input, 15000);
+  const T = realpathSync(mkdtempSync(join(tmpdir(), 'folga-smoke-'))), F = realpathSync(mkdtempSync(join(tmpdir(), 'folga-fora-')));
+  const leftovers = [];
+  // o item na Lixeira é nosso; sem Acesso Total ao Disco o macOS pode negar o rm: aí só avisa o que sobrou
+  const untrash = (p) => {
+    if (!p) return;
+    try { rmSync(p, { recursive: true, force: true }); } catch (e) { leftovers.push(`${p} (${e.code})`); return; }
+    if (existsSync(p)) leftovers.push(p);
+  };
+  // limpa no exit: fail() sai do processo sem passar por finally
+  process.on('exit', () => {
+    rmSync(T, { recursive: true, force: true }); rmSync(F, { recursive: true, force: true });
+    if (leftovers.length) console.log(`sobrou na Lixeira (apague à mão): ${leftovers.join(', ')}`);
+  });
+  const inCI = !!process.env.CI;
+  const short = (x) => JSON.stringify(x)?.slice(0, 200);
+  {
+    writeFileSync(join(T, 'a.bin'), 'x'); writeFileSync(join(F, 'segredo.txt'), 's'); mkdirSync(join(T, 'sub'));
+    writeFileSync(join(T, 'sub', 'b.bin'), 'y'); symlinkSync(join(F, 'segredo.txt'), join(T, 'link.bin'));
+    // TOCTOU: o Node validou T/sub/b.bin; antes do Swift, "sub" vira link para fora
+    renameSync(join(T, 'sub'), join(T, 'sub-velha')); symlinkSync(F, join(T, 'sub')); writeFileSync(join(F, 'b.bin'), 'z');
+    mkdirSync(join(T, 'Velho.app', 'Contents'), { recursive: true }); writeFileSync(join(T, 'Velho.app', 'Contents', 'x'), 'a');
+    mkdirSync(join(T, 'sub-velha', 'Fundo.app'));
+
+    const apps = await helper(['--trash'], { roots: [T], appRoot: null, paths: [join(T, 'Velho.app')] });
+    if (!Array.isArray(apps) || apps.length !== 1) fail(`--trash fora do formato: ${short(apps)}`);
+    if (apps[0].ok) fail('--trash aceitou .app sem appRoot');
+    const ra = await helper(['--trash'], { roots: [T], appRoot: T, paths: [join(T, 'Velho.app'), join(T, 'sub-velha', 'Fundo.app'), '/Applications/Safari.app'] });
+    if (!Array.isArray(ra) || ra.length !== 3) fail(`--trash fora do formato: ${short(ra)}`);
+    if (ra.slice(1).some((x) => x.ok)) fail('--trash: .app só como filho direto do appRoot');
+    if (!ra[0].ok) {
+      if (inCI) console.log(`--trash do .app pulado na CI: ${ra[0].erro}`); else fail(`--trash: .app filho direto do appRoot recusado (${ra[0].erro})`);
+    }
+    untrash(ra[0].trashed);
+
+    const sz = await helper(['--size'], join(T, 'sub-velha'));
+    if (!(sz?.bytes > 0 && sz.files >= 1 && sz.denied === false)) fail(`--size fora do formato: ${short(sz)}`);
+
+    const r = await helper(['--trash'], { roots: [T], appRoot: T, paths: [join(T, 'a.bin'), join(T, 'link.bin'), join(T, 'sub', 'b.bin'), join(F, 'segredo.txt'), join(T, 'nao-existe')] });
+    if (!Array.isArray(r) || r.length !== 5) fail(`--trash fora do formato: ${short(r)}`);
+    if (r.slice(1).some((x) => x.ok)) fail('--trash aceitou link, pasta trocada, fora da raiz ou inexistente');
+    if (!existsSync(join(F, 'segredo.txt')) || !existsSync(join(F, 'b.bin')) || !existsSync(join(T, 'link.bin'))) fail('alvo fora da raiz foi tocado');
+    if (!r[0].ok || !r[0].inTrash) {
+      if (inCI) console.log(`--trash do arquivo pulado na CI: ${r[0].erro}`); else fail('--trash não mandou o arquivo de teste para a Lixeira');
+    }
+    untrash(r[0].trashed);   // o item é nosso: tira da Lixeira
+    console.log(`--trash: recusas ${r.slice(1).map((x) => x.erro).join(' | ')}`);
+
+    const m = await helper(['--meta'], [join(T, 'sub-velha', 'b.bin'), join(T, 'nao-existe')]);
+    if (m?.[0]?.dataless !== false || m[1]?.missing !== true || !('lastUsed' in m[0])) fail(`--meta fora do formato: ${short(m)}`);
+    const v = await helper(['--volume', homedir()], null);
+    if (!(v?.total > 0 && v.available >= 0 && v.important >= 0 && typeof v.name === 'string')) fail(`--volume fora do formato: ${short(v)}`);
+    console.log(`armazenamento: volume "${v.name}" total=${(v.total / GB).toFixed(1)} GB livre=${(v.available / GB).toFixed(1)} GB importante=${(v.important / GB).toFixed(1)} GB; size=${sz.bytes} B/${sz.files} arq`);
+  }
 }
