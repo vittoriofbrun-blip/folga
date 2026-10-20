@@ -39,5 +39,10 @@ assert.match(txt(snapshotErrors(mac2, { mac: true, prev: { ...mac1, processes: m
 assert.match(txt(snapshotErrors(win2, { mac: true })), /memPressure/);
 assert.deepEqual(replyErrors({ type: 'reply', id: 'a', ok: true, windowsClosed: 0 }, 'a'), []);
 assert.match(txt(replyErrors({ type: 'reply', id: 'b', ok: true }, 'a')), /id|windowsClosed/);
+assert.match(txt(snapshotErrors({ ...mac2, swapUsed: null }, { mac: true })), /swapUsed/);
+assert.match(txt(snapshotErrors({ ...mac2, diskActive: '5' }, { mac: true })), /diskActive/);
+assert.match(txt(snapshotErrors({ ...mac2, availPhys: '5' }, { mac: true })), /availPhys/);
+assert.match(txt(snapshotErrors({ ...win2, processes: [{ ...win2.processes[0], privateWorkingSet: '5' }] })), /privateWorkingSet/);
+assert.match(txt(snapshotErrors({ ...win2, processes: [{ ...win2.processes[0], cpuTimeMs: null }] })), /cpuTimeMs/);
 
 console.log('contract: ok');

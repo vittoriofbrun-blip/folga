@@ -3,6 +3,7 @@
 import { cpus } from 'node:os';
 
 const int = v => Number.isInteger(v);
+const num = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 const PRESSURES = ['normal', 'warn', 'critical'];
 
 export function snapshotErrors(s, opts = {}) {
@@ -12,18 +13,18 @@ export function snapshotErrors(s, opts = {}) {
   if (s.type !== 'snapshot') e.push('type: deveria ser "snapshot"');
   if (!int(s.t) || Math.abs(Date.now() - s.t) >= 60_000) e.push('t: inteiro a menos de 60 s de agora');
   if (!int(s.totalPhys) || s.totalPhys <= 0) e.push('totalPhys: inteiro > 0');
-  if (!(s.availPhys > 0 && s.availPhys < s.totalPhys)) e.push('availPhys: precisa estar entre 0 e totalPhys');
+  if (!(num(s.availPhys) && s.availPhys > 0 && s.availPhys < s.totalPhys)) e.push('availPhys: precisa estar entre 0 e totalPhys');
   if (!int(s.memLoad) || s.memLoad < 0 || s.memLoad > 100) e.push('memLoad: inteiro 0-100');
   else if (s.totalPhys > 0 && Math.abs(s.memLoad - (100 * (s.totalPhys - s.availPhys)) / s.totalPhys) > 2) e.push('memLoad: fora de ±2 de 100×(total−avail)/total');
   if (!('foregroundPid' in s)) e.push('foregroundPid: chave ausente');
   else if (s.foregroundPid !== null && !int(s.foregroundPid)) e.push('foregroundPid: null ou inteiro');
-  if ('diskActive' in s && s.diskActive !== null && !(s.diskActive >= 0 && s.diskActive <= 100)) e.push('diskActive: null ou 0-100');
+  if ('diskActive' in s && s.diskActive !== null && !(num(s.diskActive) && s.diskActive <= 100)) e.push('diskActive: null ou 0-100');
   if ('audioPids' in s && !(Array.isArray(s.audioPids) && s.audioPids.every(int))) e.push('audioPids: array de inteiros');
   if (mac) {
     if (!('diskActive' in s)) e.push('diskActive: chave ausente (Mac)');
     if (!('audioPids' in s)) e.push('audioPids: chave ausente (Mac)');
     if (!PRESSURES.includes(s.memPressure)) e.push('memPressure: normal|warn|critical');
-    if (!(s.swapUsed >= 0)) e.push('swapUsed: número ≥ 0');
+    if (!num(s.swapUsed)) e.push('swapUsed: número ≥ 0');
   }
   if (!Array.isArray(s.processes) || !s.processes.length) { e.push('processes: array não vazio'); return e; }
   const seen = new Set();
@@ -36,8 +37,8 @@ export function snapshotErrors(s, opts = {}) {
     if (typeof p.name !== 'string' || !p.name) e.push(`${w}.name: string não vazia`);
     if (typeof p.description !== 'string') e.push(`${w}.description: string`);
     if (!int(p.session)) e.push(`${w}.session: inteiro`);
-    if (!(p.privateWorkingSet >= 0)) e.push(`${w}.privateWorkingSet: ≥ 0`);
-    if (!(p.cpuTimeMs >= 0)) e.push(`${w}.cpuTimeMs: ≥ 0`);
+    if (!num(p.privateWorkingSet)) e.push(`${w}.privateWorkingSet: ≥ 0`);
+    if (!num(p.cpuTimeMs)) e.push(`${w}.cpuTimeMs: ≥ 0`);
     if (typeof p.hasVisibleWindow !== 'boolean') e.push(`${w}.hasVisibleWindow: booleano`);
     if (typeof p.accessible !== 'boolean') e.push(`${w}.accessible: booleano`);
     if ('windowCount' in p) {
