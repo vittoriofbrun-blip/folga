@@ -201,7 +201,10 @@ const warnings = createWarnings({
   getState: () => state, getSettings: () => settings, probeAlive: () => probeUp,
   lastAutoCareRun: () => ac.lastRunAt, emit, settingsProblem: () => settingsProblem,
 });
-const files = createFiles({ getSettings: () => settings, roots: process.env.FOLGA_FILES_ROOTS?.split(';') });   // testes: pastas no lugar das do usuário
+const files = createFiles({
+  getSettings: () => settings, roots: process.env.FOLGA_FILES_ROOTS?.split(';'),   // testes: pastas no lugar das do usuário
+  runningKeys: () => (state ? new Set(state.apps.map(a => a.key)) : null),        // Mac: navegador aberto pela sonda
+});
 const suggestions = createSuggestions({
   dataDir: DATA_DIR, files, getState: () => state, emit,
   release: async keys => { const r = await releaser.release(keys, 'manual'); if (lastSnap) onSnapshot(lastSnap); return r; },

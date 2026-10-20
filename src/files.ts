@@ -9,7 +9,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { macHelper, userFolders } from './platform.ts';
 import type { QuickCleanCategory, QuickCleanItem, Settings, StaleBasis, StaleFile, StaleScan } from './types.ts';
 
-export type Browser = 'chrome' | 'edge';
+export type Browser = 'chrome' | 'edge' | 'safari';
 export type FilesDeps = {
   getSettings: () => Settings;
   roots?: string[];          // testes: pastas permitidas no lugar das do usuário
@@ -18,7 +18,8 @@ export type FilesDeps = {
   // opcionais, só para testes
   recentDir?: string;                                // pasta "Recent" do Windows
   accessTracking?: boolean;                          // pula o fsutil
-  browsersOpen?: () => Promise<Record<Browser, boolean>>;
+  browsersOpen?: () => Promise<Partial<Record<Browser, boolean>>>;
+  runningKeys?: () => ReadonlySet<string> | null;    // Mac: chaves dos apps abertos (sonda); null = sem leitura = tudo aberto
   trash?: () => Promise<TrashInfo>;
   // testes: Lixeira falsa no lugar do PowerShell/trashItem. Número = quantos entraram (aí a contagem antes/depois não roda)
   sendToTrash?: (paths: string[], roots: string[], appRoot: string | null) => Promise<void | number>;
@@ -115,6 +116,12 @@ const runPS = (script: string, input: unknown, timeoutMs: number) =>
 const lc = (s: string) => s.toLowerCase();
 // M3: arquivo extraído de zip ou copiado mantém o mtime antigo; criação e mudança de metadados contam como "chegou agora"
 const ageOf = (st: Stats) => Math.max(st.mtimeMs, st.birthtimeMs, st.ctimeMs);
+// ponytail: atime em vez de lsof por arquivo; teto: app que segura um temporário aberto sem ler há 7 dias perde o arquivo
+/** Idade de um temporário. No Mac o unlink não respeita arquivo aberto, então leitura recente também segura. */
+const tempAge = (st: Stats) => (MAC ? Math.max(ageOf(st), st.atimeMs) : ageOf(st));
+const BROWSERS = ['chrome', 'edge', 'safari'] as const;
+const BROWSER_NAME: Record<Browser, string> = { chrome: 'Chrome', edge: 'Edge', safari: 'Safari' };
+const BROWSER_KEY: Record<Browser, string> = { chrome: 'com.google.chrome', edge: 'com.microsoft.edgemac', safari: 'com.apple.safari' };
 const exists = (p: string) => lstat(p).then(() => true, () => false);
 
 /** `child` está estritamente dentro de `root`? (relative do win32 ignora maiúsculas; outra unidade vira caminho absoluto) */
@@ -455,9 +462,14 @@ export function createFiles(deps: FilesDeps) {
   // ---------- limpeza rápida ----------
   const tempDirs = () => deps.tempDirs ?? [tmpdir()];
   function cacheDirs(): Record<Browser, string[]> {
-    if (deps.cacheDirs) return { chrome: deps.cacheDirs.chrome ?? [], edge: deps.cacheDirs.edge ?? [] };
+    if (deps.cacheDirs) return { chrome: deps.cacheDirs.chrome ?? [], edge: deps.cacheDirs.edge ?? [], safari: deps.cacheDirs.safari ?? [] };
+    if (MAC) {
+      const caches = join(homedir(), 'Library', 'Caches');
+      // Chrome/Edge: perfis → Cache/Cache_Data e Code Cache, como no Windows; Safari: a pasta inteira (protegida pelo macOS)
+      return { chrome: [join(caches, 'Google', 'Chrome')], edge: [join(caches, 'Microsoft Edge')], safari: [join(caches, 'com.apple.Safari')] };
+    }
     const local = process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local');
-    return { chrome: [join(local, 'Google', 'Chrome', 'User Data')], edge: [join(local, 'Microsoft', 'Edge', 'User Data')] };
+    return { chrome: [join(local, 'Google', 'Chrome', 'User Data')], edge: [join(local, 'Microsoft', 'Edge', 'User Data')], safari: [] };
   }
   async function profileCaches(userData: string): Promise<string[]> {
     const out: string[] = [];
@@ -473,11 +485,16 @@ export function createFiles(deps: FilesDeps) {
     return out;
   }
   async function browsersOpen(): Promise<Record<Browser, boolean>> {
-    if (deps.browsersOpen) return deps.browsersOpen();
+    if (MAC && (deps.runningKeys || !deps.browsersOpen)) {
+      const keys = deps.runningKeys?.() ?? null;
+      // sem leitura da sonda = tratar como aberto (nunca apagar o cache de um navegador que pode estar em uso)
+      return { chrome: !keys || keys.has(BROWSER_KEY.chrome), edge: !keys || keys.has(BROWSER_KEY.edge), safari: !keys || keys.has(BROWSER_KEY.safari) };
+    }
+    if (deps.browsersOpen) { const o = await deps.browsersOpen(); return { chrome: !!o.chrome, edge: !!o.edge, safari: !!o.safari }; }
     const out = await run(join(SYSROOT(), 'System32', 'tasklist.exe'), ['/FO', 'CSV', '/NH'], null, 15_000);
     // sem resposta da tasklist = tratar como aberto (nunca apagar o cache de um navegador que pode estar em uso)
-    if (!out) return { chrome: true, edge: true };
-    return { chrome: /"chrome\.exe"/i.test(out), edge: /"msedge\.exe"/i.test(out) };
+    if (!out) return { chrome: true, edge: true, safari: true };
+    return { chrome: /"chrome\.exe"/i.test(out), edge: /"msedge\.exe"/i.test(out), safari: false };
   }
 
   /** Arquivos que a limpeza apagaria: temporários com mais de 7 dias e caches de navegador fechado. */
@@ -485,23 +502,36 @@ export function createFiles(deps: FilesDeps) {
     temp: Array<[string, Stats]>;
     cache: Record<Browser, Array<[string, Stats]>>;
     open: Record<Browser, boolean>;
+    locked: { bytes: number; denied: boolean } | null;   // Safari: pasta que o node não abre; nada dela entra na lista nem é apagado
   }> {
     const limit = now() - TEMP_DAYS * DAY;
     const budget = () => newBudget(MAX_ENTRIES * 5, 60_000, now);
     const temp: Array<[string, Stats]> = [];
-    const cache: Record<Browser, Array<[string, Stats]>> = { chrome: [], edge: [] };
+    const cache: Record<Browser, Array<[string, Stats]>> = { chrome: [], edge: [], safari: [] };
     const dirs = cacheDirs();
+    let locked: { bytes: number; denied: boolean } | null = null;
     // temporários, caches e a consulta de processos andam juntos: o preview aparece quando o mais lento termina
     const [open] = await Promise.all([
       browsersOpen(),
-      (async () => { const b = budget(); for (const d of tempDirs()) await walk(d, 32, null, b, (p, st) => { if (ageOf(st) < limit) temp.push([p, st]); }); })(),
-      ...(['chrome', 'edge'] as const).map(async br => {
-        const targets = deps.cacheDirs ? dirs[br] : (await Promise.all(dirs[br].map(profileCaches))).flat();
+      (async () => { const b = budget(); for (const d of tempDirs()) await walk(d, 32, null, b, (p, st) => { if (tempAge(st) < limit) temp.push([p, st]); }); })(),
+      ...BROWSERS.map(async br => {
+        const targets = deps.cacheDirs || br === 'safari' ? dirs[br] : (await Promise.all(dirs[br].map(profileCaches))).flat();
+        if (br === 'safari') {
+          // o que o node não consegue abrir fica de fora (não conta nem apaga); a tela avisa pela nota
+          const ok = await Promise.all(targets.map(d => opendir(d).then(h => h.close().then(() => true), (e: NodeJS.ErrnoException) => e.code !== 'EPERM' && e.code !== 'EACCES' ? false : null)));
+          for (const [i, d] of targets.entries()) {
+            if (ok[i] !== null) continue;
+            // só o tamanho, pelo Swift (quem recebe a permissão é o app Folga, nunca o node)
+            const r = await macHelper(['--size'], d, 20_000) as { bytes?: unknown; denied?: unknown } | null;
+            const denied = !r || typeof r !== 'object' || r.denied === true;
+            locked = { bytes: (locked?.bytes ?? 0) + (denied ? 0 : Math.max(0, Number(r.bytes) || 0)), denied: (locked?.denied ?? false) || denied };
+          }
+        }
         const b = budget();
         for (const d of targets) await walk(d, 32, null, b, (p, st) => { cache[br].push([p, st]); });
       }),
     ]);
-    return { temp, cache, open };
+    return { temp, cache, open, locked };
   }
   const sum = (l: Array<[string, Stats]>) => l.reduce((a, [, st]) => a + st.size, 0);
 
@@ -519,19 +549,24 @@ export function createFiles(deps: FilesDeps) {
     return p;
   }
   async function collectPreview(): Promise<QuickCleanItem[]> {
-    const [{ temp, cache, open }, t] = await Promise.all([collect(), deps.trash ? deps.trash() : trashInfo()]);
+    const [{ temp, cache, open, locked }, t] = await Promise.all([collect(), deps.trash ? deps.trash() : trashInfo()]);
     const items: QuickCleanItem[] = [{
       category: 'temp_usuario', label: 'Arquivos temporários com mais de 7 dias', bytes: sum(temp), files: temp.length, actionable: true,
     }];
     // cache: só o de navegador fechado conta como "a apagar"; se todos estiverem abertos, mostra o tamanho só como informação
-    const closed = (['chrome', 'edge'] as const).filter(b => !open[b] && cache[b].length);
-    const opened = (['chrome', 'edge'] as const).filter(b => open[b] && cache[b].length);
+    const closed = BROWSERS.filter(b => !open[b] && cache[b].length);
+    const opened = BROWSERS.filter(b => open[b] && cache[b].length);
     const pick = closed.length ? closed : opened;
     const list = pick.flatMap(b => cache[b]);
-    const name = (b: Browser) => (b === 'chrome' ? 'Chrome' : 'Edge');
+    const and = (l: string[]) => (l.length > 1 ? `${l.slice(0, -1).join(', ')} e ${l.at(-1)}` : l[0]!);
+    const notes = [
+      ...(opened.length ? [`${and(opened.map(b => BROWSER_NAME[b]))} ${opened.length > 1 ? 'abertos' : 'aberto'}: feche para limpar o cache`] : []),
+      // Safari protegido: nunca acionável; sem permissão = desconhecido (FDA_NOTE), com o tamanho só informativo
+      ...(locked ? [locked.denied ? `Safari: ${FDA_NOTE}` : `Safari: ${Math.round(locked.bytes / 1048576)} MB que o Folga não apaga (pasta protegida pelo macOS)`] : []),
+    ];
     items.push({
       category: 'cache_navegador', label: 'Cache dos navegadores', bytes: sum(list), files: list.length, actionable: closed.length > 0,
-      ...(opened.length ? { note: `${opened.map(name).join(' e ')} ${opened.length > 1 ? 'abertos' : 'aberto'}: feche para limpar o cache` } : {}),
+      ...(notes.length ? { note: notes.join(' · ') } : {}),
     });
     if (!MAC) items.push({
       category: 'lixeira', label: 'Lixeira do Windows', bytes: t.bytes, files: t.files, actionable: false, note: 'Esvazie pela Lixeira do Windows',
@@ -560,13 +595,13 @@ export function createFiles(deps: FilesDeps) {
     const limit = now() - TEMP_DAYS * DAY;
     const todo: Array<[string, Stats, boolean]> = [];   // [caminho, stat, exige mtime antigo]
     if (want.has('temp_usuario')) for (const [p, st] of temp) todo.push([p, st, true]);
-    if (want.has('cache_navegador')) for (const b of ['chrome', 'edge'] as const) if (!open[b]) for (const [p, st] of cache[b]) todo.push([p, st, false]);
+    if (want.has('cache_navegador')) for (const b of BROWSERS) if (!open[b]) for (const [p, st] of cache[b]) todo.push([p, st, false]);
     let bytes = 0, files = 0, skipped = 0;
     for (let i = 0; i < todo.length; i += 32) {
       await Promise.all(todo.slice(i, i + 32).map(async ([p, , old]) => {
         try {
           const st = await lstat(p);   // reconfere logo antes: ainda arquivo comum e (se temporário) ainda antigo
-          if (!st.isFile() || (old && ageOf(st) >= limit)) { skipped++; return; }
+          if (!st.isFile() || (old && tempAge(st) >= limit)) { skipped++; return; }
           await unlink(p);
           bytes += st.size; files++;
         } catch { skipped++; }   // travado, em uso ou sem permissão: fica

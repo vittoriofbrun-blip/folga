@@ -391,6 +391,34 @@ try {
     assert.ok(existsSync(join(chromeC, 'data_0')) && existsSync(join(chromeC, 'data_1')), 'cache de navegador aberto nunca é apagado');
     ok('quickClean: cache de navegador aberto não é apagado');
 
+    if (MAC) {
+      const tempFiles = async () => (await mkc().quickCleanPreview()).find(i => i.category === 'temp_usuario')!.files;
+      const antes = await tempFiles();
+      const emUso = tfile(join(tmp, 'em-uso.db'), 1000, 30);
+      utimesSync(emUso, new Date(Date.now() + SKEW), new Date(Date.now() - 30 * DAY));   // lido "agora", modificado há 30 d
+      assert.equal(await tempFiles(), antes, 'o preview também conta o acesso recente');
+      await mkc().quickClean({ categories: ['temp_usuario'] });
+      assert.ok(existsSync(emUso), 'no Mac o unlink não respeita arquivo aberto: acesso recente segura');
+      const safari = dir('Cache', 'safari'); file(join(safari, 'fsCachedData'), 4000, 0);
+      const keys = new Set(['com.apple.safari']);
+      const f2 = mk({ cacheDirs: { safari: [safari] }, runningKeys: () => keys });
+      const c2 = (await f2.quickCleanPreview()).find(i => i.category === 'cache_navegador')!;
+      assert.equal(c2.actionable, false);
+      assert.equal(c2.note, 'Safari aberto: feche para limpar o cache');   // nome exibido do Safari na nota
+      assert.equal((await mk({ cacheDirs: { safari: [safari] }, runningKeys: () => null }).quickCleanPreview()).find(i => i.category === 'cache_navegador')!.actionable, false);
+      // Safari fechado e pasta legível: aí sim acionável; Chrome aberto pela sonda conta como aberto
+      const c3 = (await mk({ cacheDirs: { safari: [safari] }, runningKeys: () => new Set(['com.google.chrome']) }).quickCleanPreview()).find(i => i.category === 'cache_navegador')!;
+      assert.deepEqual([c3.actionable, c3.bytes, c3.files], [true, 4000, 1]);
+      // pasta que o node não abre (no Mac de verdade: Acesso Total ao Disco): nada contado nem acionável, nota FDA_NOTE
+      const trancado = dir('Cache', 'safari-trancado'); file(join(trancado, 'fsCachedData'), 4000, 0); chmodSync(trancado, 0o000);
+      try {
+        const c4 = (await mk({ cacheDirs: { safari: [trancado] }, runningKeys: () => new Set() }).quickCleanPreview()).find(i => i.category === 'cache_navegador')!;
+        assert.deepEqual([c4.actionable, c4.bytes, c4.files, c4.note], [false, 0, 0, `Safari: ${FDA_NOTE}`]);
+        assert.equal((await mk({ cacheDirs: { safari: [trancado] }, runningKeys: () => new Set() }).quickClean({ categories: ['cache_navegador'] })).files, 0);
+      } finally { chmodSync(trancado, 0o755); }
+      ok('Mac: temporário com acesso recente fica; cache do Safari só com o Safari fechado (sonda sem leitura = aberto)');
+    }
+
     if (holder) { holder.kill(); await new Promise(r => holder.once('exit', r)); }   // solta o arquivo antes da limpeza
     else chmodSync(join(tmp, 'trava'), 0o755);
 
