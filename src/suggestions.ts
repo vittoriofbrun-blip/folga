@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { Files } from './files.ts';
+import { pathKey, type Files } from './files.ts';
 import type { ReleaseError } from './release.ts';
 import type {
   AppReason, Emit, MemoryState, QuickCleanCategory, ReleaseResponse, Suggestion, SuggestionDraft, SuggestionItem, SuggestionKind,
@@ -98,7 +98,7 @@ export function createSuggestions(deps: SuggestionsDeps) {
     if (paths.length > MAX_FILES) return err(`são arquivos demais (o máximo é ${MAX_FILES})`);
     const scan = deps.files.last();   // M5: só vale o que a última busca de arquivos parados achou
     if (!scan) return err('faça uma busca de arquivos parados antes');
-    const found = new Set(scan.files.map(f => f.path.toLowerCase()));
+    const found = new Set(scan.files.map(f => pathKey(f.path)));
     const checked = await deps.files.inspect(paths);
     const out: SuggestionItem[] = [];
     const seen = new Set<string>();
@@ -106,12 +106,12 @@ export function createSuggestions(deps: SuggestionsDeps) {
       const c = checked[i]!;
       // um item inválido recusa a sugestão inteira (R21); a mensagem não repete o caminho (R17)
       if ('erro' in c) return err(`o item ${i + 1} foi recusado: ${c.erro}`);
-      const key = c.path.toLowerCase();
+      const key = pathKey(c.path);
       if (!found.has(key)) return err(`o item ${i + 1} foi recusado: não está na última busca de arquivos parados`);
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({
-        id: c.path, label: c.path.slice(c.path.lastIndexOf('\\') + 1),
+        id: c.path, label: c.path.split(/[\\/]/).pop()!,
         detail: `${folderOf(c.path)} · último uso há ${since(now() - c.lastUsed)}`, bytes: c.size, lastUsed: c.lastUsed,
       });
     }
@@ -208,8 +208,8 @@ export function createSuggestions(deps: SuggestionsDeps) {
     const changed = s.items.findIndex((it, i) => good[i]!.size !== it.bytes || good[i]!.lastUsed > (it.lastUsed ?? -Infinity));
     if (changed !== -1) return { status: 'falhou', result: `Nada foi enviado: o arquivo ${s.items[changed]!.label} foi usado ou mudou depois da sugestão.` };
     const r = await deps.files.recycle(good.map(g => g.path));
-    const okSet = new Set(r.ok.map(p => p.toLowerCase()));
-    const moved = good.filter(g => okSet.has(g.path.toLowerCase()));
+    const okSet = new Set(r.ok.map(pathKey));
+    const moved = good.filter(g => okSet.has(pathKey(g.path)));
     const bytes = moved.reduce((a, g) => a + g.size, 0);
     const parts: string[] = [];
     if (moved.length) {

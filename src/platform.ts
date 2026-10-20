@@ -22,3 +22,15 @@ export function defaultSettings(platform: NodeJS.Platform = process.platform): S
   if (platform === 'darwin') { s.neverClose = [...MAC_NEVER_CLOSE]; s.autoCareTrigger = 'pressure'; }
   return s;
 }
+
+/** Pastas do usuário onde a busca de arquivos parados olha (as que não existem caem fora no allowedRoots). */
+export function userFolders(
+  platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env, home: string = homedir(),
+): string[] {
+  if (platform === 'darwin') {
+    return ['Downloads', 'Desktop', 'Documents', 'Pictures', 'Movies', 'Music', join('Library', 'Mobile Documents', 'com~apple~CloudDocs')]
+      .map(n => join(home, n));
+  }
+  const bases = [home, env.OneDrive, env.OneDriveConsumer, env.OneDriveCommercial].filter((x): x is string => !!x);
+  return bases.flatMap(b => ['Downloads', 'Desktop', 'Documents', 'Pictures', 'Videos', 'Music'].map(n => join(b, n)));
+}

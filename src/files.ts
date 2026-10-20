@@ -6,6 +6,7 @@ import { realpathSync, type Dirent, type Stats } from 'node:fs';
 import { lstat, opendir, readdir, realpath, unlink } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { userFolders } from './platform.ts';
 import type { QuickCleanCategory, QuickCleanItem, Settings, StaleBasis, StaleFile, StaleScan } from './types.ts';
 
 export type Browser = 'chrome' | 'edge';
@@ -35,6 +36,25 @@ const PREVIEW_MS = 30_000;   // B6: o preview é caro (varre %TEMP% e caches, ro
 const SKIP_DIRS = new Set(['node_modules', '.git', 'appdata', '$recycle.bin', '__pycache__', 'site-packages']);
 // D20: marcadores de projeto de código; a pasta que tem um deles não entra na busca de arquivos parados
 const PROJECT_MARKERS: ReadonlySet<string> = new Set(['.git', 'package.json', 'pyvenv.cfg', 'pyproject.toml', 'cargo.toml', 'go.mod']);
+
+const MAC = process.platform === 'darwin';
+
+/** Forma do caminho pedido (R21), antes de tocar no disco. null = forma aceitável; o resto do fluxo ainda confere raiz e arquivo. */
+export function pathShapeError(raw: unknown, platform: NodeJS.Platform): string | null {
+  if (typeof raw !== 'string' || !raw || raw.length > 1024 || /[\u0000-\u001f]/.test(raw)) return 'caminho inválido';
+  if (platform === 'win32') {
+    // só letra de unidade (nada de \\servidor, \\?\, \\.\ nem caminho relativo) e nenhum ':' depois dela (fluxos NTFS)
+    return !/^[A-Za-z]:[\\/]/.test(raw) || raw.indexOf(':', 2) !== -1 ? 'caminho inválido ou fora das pastas permitidas' : null;
+  }
+  // absoluto e sem '.'/'..': quem pede não navega, aponta
+  return !raw.startsWith('/') || raw.split('/').some(seg => seg === '.' || seg === '..') ? 'caminho inválido ou fora das pastas permitidas' : null;
+}
+/** Chave de comparação de caminho: o APFS não distingue caixa nem NFC/NFD, o NTFS não distingue caixa. */
+export const pathKey = (p: string) => p.normalize('NFC').toLowerCase();
+// ponytail: toda pasta com extensão é opaca; pasta comum com ponto no nome fica de fora da busca — falso negativo seguro.
+// LaunchServices diria "é pacote" com certeza, mas é outro processo por pasta.
+/** Pasta-pacote do Mac (.app, .photoslibrary, .bundle…): por dentro é do app, não do usuário. */
+export const isPackageDir = (name: string) => /\.[a-z][a-z0-9-]*$/i.test(name);
 
 const SYSROOT = () => process.env.SystemRoot ?? 'C:\\Windows';
 const PS = () => join(SYSROOT(), 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
@@ -139,13 +159,7 @@ export function createFiles(deps: FilesDeps) {
 
   // ---------- pastas permitidas ----------
   function allowedRoots(): string[] {
-    const candidates = deps.roots ?? (() => {
-      const bases = [homedir(), process.env.OneDrive, process.env.OneDriveConsumer, process.env.OneDriveCommercial]
-        .filter((x): x is string => !!x);
-      const out: string[] = [];
-      for (const base of bases) for (const n of ['Downloads', 'Desktop', 'Documents', 'Pictures', 'Videos', 'Music']) out.push(join(base, n));
-      return out;
-    })();
+    const candidates = deps.roots ?? userFolders();
     const seen = new Set<string>();
     const real: string[] = [];
     for (const c of candidates) {
@@ -160,6 +174,7 @@ export function createFiles(deps: FilesDeps) {
   // ---------- sinal de uso ----------
   async function accessTracking(): Promise<boolean> {
     if (deps.accessTracking !== undefined) return deps.accessTracking;
+    if (process.platform !== 'win32') return false;   // o fsutil é do Windows
     if (trackingCache === null) {
       const out = await run(join(SYSROOT(), 'System32', 'fsutil.exe'), ['behavior', 'query', 'disablelastaccess'], null, 8_000);
       const v = /=\s*(\d)/.exec(out)?.[1];
@@ -208,7 +223,7 @@ export function createFiles(deps: FilesDeps) {
     const found: StaleFile[] = [];
     let total = 0;
     for (const root of roots) {
-      await walk(root, MAX_DEPTH, n => n.startsWith('.') || SKIP_DIRS.has(lc(n)), b, (path, st) => {
+      await walk(root, MAX_DEPTH, n => n.startsWith('.') || SKIP_DIRS.has(lc(n)) || (MAC && isPackageDir(n)), b, (path, st) => {
         if (st.size < minBytes) return;
         const name = basename(path);
         const u = usage(name, st, tracking, recent);
@@ -234,24 +249,25 @@ export function createFiles(deps: FilesDeps) {
     return p;
   }
 
-  // ---------- pasta de projeto de código (D20) ----------
+  // ---------- pasta de projeto de código (D20) e pacote do Mac ----------
   const projectCache = new Map<string, boolean>();
-  /** Alguma pasta entre a raiz permitida e o arquivo tem um marcador de projeto? (a raiz em si não conta, como na busca) */
-  async function inProject(file: string, roots: string[]): Promise<boolean> {
+  /** Alguma pasta entre a raiz permitida e o arquivo é projeto (marcador) ou, no Mac, pacote? (a raiz em si não conta, como na busca) */
+  async function inProject(file: string, roots: string[]): Promise<string | null> {
     const root = roots.find(r => inside(r, file));
-    if (!root) return false;
+    if (!root) return null;
     let dir = dirname(file);
     while (inside(root, dir)) {
+      if (MAC && isPackageDir(basename(dir))) return 'está dentro de um pacote (app ou biblioteca)';
       const key = lc(dir);
       let hit = projectCache.get(key);
       if (hit === undefined) {
         hit = (await Promise.all([...PROJECT_MARKERS].map(m => exists(join(dir, m))))).some(Boolean);
         projectCache.set(key, hit);
       }
-      if (hit) return true;
+      if (hit) return 'está dentro de uma pasta de projeto de código';   // D20
       dir = dirname(dir);
     }
-    return false;
+    return null;
   }
 
   // ---------- revalidação de caminhos (R21) ----------
@@ -262,10 +278,9 @@ export function createFiles(deps: FilesDeps) {
     const tracking = await accessTracking();
     const recent = await recentMap();
     const one = async (raw: unknown): Promise<Inspected | InspectError> => {
-      if (typeof raw !== 'string' || !raw || raw.length > 1024 || /[\u0000-\u001f]/.test(raw)) return { erro: 'caminho inválido' };
-      // só letra de unidade (nada de \\servidor, \\?\, \\.\ nem caminho relativo) e nenhum ':' depois dela (fluxos NTFS)
-      if (!/^[A-Za-z]:[\\/]/.test(raw) || raw.indexOf(':', 2) !== -1) return { erro: 'caminho inválido ou fora das pastas permitidas' };
-      const full = resolve(raw);   // normaliza '..' e '/'
+      const shape = pathShapeError(raw, process.platform);
+      if (shape) return { erro: shape };
+      const full = resolve(raw as string);   // normaliza '..' e '/'
       // o que vale é o caminho real (resolve 8.3, caixa e junções): ele tem que estar dentro de uma pasta permitida
       const real = await realOrNull(full);
       if (!real) return { erro: roots.some(r => inside(r, full)) ? 'o arquivo não existe mais' : 'fora das pastas permitidas' };
@@ -274,7 +289,8 @@ export function createFiles(deps: FilesDeps) {
       if (!st || !st2) return { erro: 'o arquivo não existe mais' };
       if (st.isSymbolicLink() || st2.isSymbolicLink()) return { erro: 'é um atalho ou link, não um arquivo' };
       if (!st2.isFile()) return { erro: 'não é um arquivo comum' };
-      if (await inProject(real, roots)) return { erro: 'está dentro de uma pasta de projeto de código' };   // D20
+      const blocked = await inProject(real, roots);
+      if (blocked) return { erro: blocked };
       return { path: real, size: st2.size, ...usage(basename(real), st2, tracking, recent) };
     };
     const out: Array<Inspected | InspectError> = [];

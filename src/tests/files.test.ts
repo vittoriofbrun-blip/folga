@@ -1,15 +1,16 @@
 // Arquivos parados, revalidação e limpeza rápida. Só pastas temporárias criadas aqui: nunca toca em arquivo real
 // do usuário e nunca chama a Lixeira de verdade (R21, R22, D16, D17).
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { createFiles, type FilesDeps } from '../files.ts';
+import { createFiles, isPackageDir, pathKey, pathShapeError, type FilesDeps, type Inspected } from '../files.ts';
 import { DEFAULT_SETTINGS } from '../types.ts';
 
-if (process.platform !== 'win32') { console.log('files: pulado fora do Windows — o validador R21 só aceita caminho com letra de unidade; a versão POSIX vem no plano do armazenamento'); process.exit(0); }
+const WIN = process.platform === 'win32';
+const MAC = process.platform === 'darwin';
 const DAY = 86_400_000;
 const MB = 1024 * 1024;
 // nome com acento de propósito (o caminho real do usuário tem: C:\Users\Antônio)
@@ -100,7 +101,7 @@ try {
     ok("scan: rastreio de acesso desligado → basis 'modificacao'");
   }
 
-  {
+  if (WIN) {
     // atalho em Recent mais novo que o acesso → o arquivo "foi usado"; atalho mais velho → vale o acesso
     const used = file(join(downloads, 'usado-pelo-atalho.iso'), 4 * MB, 400);
     const lnk = join(recent, 'usado-pelo-atalho.iso.lnk');
@@ -218,6 +219,37 @@ try {
     ok('recycle: inTrash = itens da Lixeira depois − antes (completo, parcial, ilegível, nada enviado)');
   }
 
+  // ---------- R21 em caminho POSIX (puro: roda nos dois sistemas) ----------
+  {
+    for (const bad of ['', 'rel/a.txt', '/a/../b', '/a/./b', '/a/\u0000b', 'x'.repeat(1025), 42, 'C:\\a.txt'])
+      assert.ok(pathShapeError(bad, 'darwin'), `POSIX deveria recusar ${String(bad)}`);
+    assert.equal(pathShapeError('/Users/Antônio/Downloads/a.iso', 'darwin'), null);
+    assert.ok(pathShapeError('/Users/v/a.txt', 'win32'));                       // Windows segue só com letra de unidade
+    assert.equal(pathShapeError('C:\\Users\\v\\a.txt', 'win32'), null);
+    assert.equal(isPackageDir('Fotos.photoslibrary'), true); assert.equal(isPackageDir('Projeto 2025'), false);
+    assert.equal(pathKey('/A/Anto\u0302nio'), pathKey('/a/antônio'));
+    ok('pathShapeError/isPackageDir/pathKey: forma do caminho por sistema, pacote pelo nome, chave NFC sem caixa');
+  }
+  if (MAC) {
+    // base criada em /var/folders: o real é /private/var/folders (firmlink); nome em NFD de propósito
+    const nfd = file(join(downloads, 'Anto\u0302nio.iso'), 5 * MB, 400);
+    const r = await mk({ roots: [downloads.replace(/^\/private/, '')] }).inspect([
+      nfd.normalize('NFC'), nfd, '/private' + nfd.replace(/^\/private/, ''), nfd.replace(/^\/private/, ''),
+    ]);
+    r.forEach(x => assert.ok(!('erro' in x), JSON.stringify(x)));
+    assert.equal(new Set(r.map(x => pathKey((x as Inspected).path))).size, 1);
+    if (existsSync(nfd.toUpperCase())) assert.ok(!('erro' in (await mk().inspect([nfd.toUpperCase()]))[0]!));   // APFS sem caixa
+    symlinkSync(outside, join(docs, 'link-fora'));                          // pasta-link para fora
+    symlinkSync(join(outside, 'fora.bin'), join(downloads, 'link.bin'));    // arquivo-link
+    const fora = await mk().inspect([join(docs, 'link-fora', 'fora.bin'), join(downloads, 'link.bin'),
+      `${downloads}/../Fora/fora.bin`, '/etc/hosts', '/private/etc/hosts', '/tmp', downloads,
+      file(join(dir('Downloads', 'Fotos.photoslibrary', 'originals'), 'img.heic'), 2 * MB, 400)]);
+    fora.forEach(x => assert.ok('erro' in x, JSON.stringify(x)));
+    assert.match((fora.at(-1) as { erro: string }).erro, /pacote/);
+    assert.ok(!(await mk().scan({ olderThanDays: 30, minMB: 1 })).files.some(f => /photoslibrary/.test(f.path)));
+    ok('Mac: firmlink /private, NFC/NFD, sem caixa, link para fora, /etc e pacote opaco');
+  }
+
   // ---------- limpeza rápida ----------
   {
     const tmp = dir('Temp');
@@ -228,12 +260,14 @@ try {
     tfile(join(tmp, 'velho.tmp'), 3000, 10);
     tfile(join(dir('Temp', 'sub', 'sub2'), 'velho2.tmp'), 2000, 30);
     tfile(join(tmp, 'novo.tmp'), 4000, 1);
-    const travado = tfile(join(tmp, 'travado.tmp'), 1000, 20);
+    // fora do Windows não há trava de arquivo: a pasta sem escrita faz o unlink falhar do mesmo jeito
+    const travado = tfile(join(WIN ? tmp : dir('Temp', 'trava'), 'travado.tmp'), 1000, 20);
+    if (!WIN) chmodSync(join(tmp, 'trava'), 0o555);
     // arquivo travado de verdade: um PowerShell o abre sem compartilhar (o unlink do Windows falha)
-    const holder = spawn(join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    const holder = WIN ? spawn(join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
       ['-NoProfile', '-NonInteractive', '-Command', "$f=[IO.File]::Open($env:FOLGA_LOCK,'Open','Read','None');'ready';Start-Sleep 60"],
-      { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, FOLGA_LOCK: travado } });
-    await new Promise<void>((res, rej) => { holder.stdout.once('data', () => res()); holder.once('error', rej); setTimeout(() => rej(new Error('PowerShell não travou o arquivo')), 15_000); });
+      { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, FOLGA_LOCK: travado } }) : null;
+    if (holder) await new Promise<void>((res, rej) => { holder.stdout.once('data', () => res()); holder.once('error', rej); setTimeout(() => rej(new Error('PowerShell não travou o arquivo')), 15_000); });
     const chromeC = dir('Cache', 'chrome', 'Default', 'Cache', 'Cache_Data');
     const edgeC = dir('Cache', 'edge', 'Default', 'Code Cache');
     file(join(chromeC, 'data_0'), 5000, 0);
@@ -255,7 +289,7 @@ try {
     assert.equal(by('cache_navegador').note, 'Chrome aberto: feche para limpar o cache');
     assert.equal(by('lixeira').actionable, false);
     assert.equal(by('lixeira').bytes, 123);
-    assert.equal(by('lixeira').note, 'Esvazie pela Lixeira do Windows');
+    if (WIN) assert.equal(by('lixeira').note, 'Esvazie pela Lixeira do Windows');
     assert.ok(items.every(i => /[a-zç]/.test(i.label)));
     ok('quickCleanPreview: temporários > 7 dias, cache só de navegador fechado, Lixeira só informativa');
 
@@ -282,14 +316,15 @@ try {
     assert.ok(existsSync(join(chromeC, 'data_0')) && existsSync(join(chromeC, 'data_1')), 'cache de navegador aberto nunca é apagado');
     ok('quickClean: cache de navegador aberto não é apagado');
 
-    holder.kill();
-    await new Promise(r => holder.once('exit', r));   // solta o arquivo antes da limpeza
+    if (holder) { holder.kill(); await new Promise(r => holder.once('exit', r)); }   // solta o arquivo antes da limpeza
+    else chmodSync(join(tmp, 'trava'), 0o755);
 
     // M3: arquivo extraído de zip/copiado: mtime de 30 dias, mas criado agora → NÃO é apagado
     const chegou = dir('Temp-chegou');
     const extraido = file(join(chegou, 'extraido.tmp'), 3000, 30);
     assert.ok(statSync(extraido).mtimeMs < Date.now() - 29 * DAY, 'mtime antigo de verdade');
-    assert.ok(statSync(extraido).birthtimeMs > Date.now() - 60_000, 'criado agora');
+    // no Mac, pôr o mtime antes da criação puxa a criação junto (semântica BSD); quem marca "chegou agora" ali é o ctime
+    assert.ok((WIN ? statSync(extraido).birthtimeMs : statSync(extraido).ctimeMs) > Date.now() - 60_000, 'criado agora');
     const real = () => mk({ tempDirs: [chegou] });   // relógio real
     assert.equal((await real().quickCleanPreview()).find(i => i.category === 'temp_usuario')!.files, 0);
     const rr3 = await real().quickClean({ categories: ['temp_usuario'] });
@@ -347,5 +382,6 @@ try {
 
   console.log(`files: ${passed} casos ok`);
 } finally {
+  try { chmodSync(join(base, 'Temp', 'trava'), 0o755); } catch { /* não criada ou já liberada */ }
   await rm(base, { recursive: true, force: true });
 }

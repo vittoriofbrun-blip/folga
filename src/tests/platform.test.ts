@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { dataDir, defaultSettings, MAC_NEVER_CLOSE } from '../platform.ts';
+import { dataDir, defaultSettings, MAC_NEVER_CLOSE, userFolders } from '../platform.ts';
 import { DEFAULT_SETTINGS } from '../types.ts';
 
 const casos: string[] = [];
@@ -23,6 +23,13 @@ caso('defaultSettings: win32 intacto; darwin muda neverClose e o gatilho', () =>
   assert.equal(defaultSettings('win32').autoCareTrigger, 'percent');
   assert.equal(mac.autoCarePressure, 'warn');
   assert.equal(defaultSettings('win32').autoCarePressure, 'warn');
+});
+
+caso('userFolders: as 7 do Mac (com iCloud Drive) e a lista de hoje do Windows', () => {
+  assert.deepEqual(userFolders('darwin', {}, '/Users/v'), ['Downloads', 'Desktop', 'Documents', 'Pictures', 'Movies', 'Music', join('Library', 'Mobile Documents', 'com~apple~CloudDocs')]
+    .map(n => join('/Users/v', n)));
+  const nomes = ['Downloads', 'Desktop', 'Documents', 'Pictures', 'Videos', 'Music'];
+  assert.deepEqual(userFolders('win32', { OneDrive: 'D:\\OD' }, 'C:\\Users\\A'), ['C:\\Users\\A', 'D:\\OD'].flatMap(b => nomes.map(n => join(b, n))));
 });
 
 casos.forEach((c) => console.log('ok  ' + c));
