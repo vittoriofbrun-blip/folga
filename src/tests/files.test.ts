@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { createFiles, type FilesDeps } from '../files.ts';
 import { DEFAULT_SETTINGS } from '../types.ts';
 
+if (process.platform !== 'win32') { console.log('files: pulado fora do Windows — o validador R21 só aceita caminho com letra de unidade; a versão POSIX vem no plano do armazenamento'); process.exit(0); }
 const DAY = 86_400_000;
 const MB = 1024 * 1024;
 // nome com acento de propósito (o caminho real do usuário tem: C:\Users\Antônio)

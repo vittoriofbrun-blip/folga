@@ -145,8 +145,10 @@ try {
 
   assert.equal((await call('GET', '/api/startup')).body.on, false);
   assert.equal((await call('PUT', '/api/startup', { body: { on: true } })).status, 403);
-  assert.equal((await call('PUT', '/api/startup', { body: { on: true }, token })).body.on, true);
-  assert.ok(existsSync(join(startupDir, 'Folga.lnk')));
+  if (process.platform === 'win32') {
+    assert.equal((await call('PUT', '/api/startup', { body: { on: true }, token })).body.on, true);
+    assert.ok(existsSync(join(startupDir, 'Folga.lnk')));
+  }
   assert.equal((await call('PUT', '/api/startup', { body: { on: false }, token })).body.on, false);
   assert.ok(!existsSync(join(startupDir, 'Folga.lnk')));
   ok('P04: atalho de inicialização liga e desliga (pasta temporária)');

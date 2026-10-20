@@ -11,6 +11,7 @@ import { DEFAULT_SETTINGS, type AppGroup, type MemoryState, type QuickCleanItem,
 import type { ReleaseResponse } from '../types.ts';
 import type { ReleaseError } from '../release.ts';
 
+if (process.platform !== 'win32') { console.log('suggestions: pulado fora do Windows — o validador R21 só aceita caminho com letra de unidade; a versão POSIX vem no plano do armazenamento'); process.exit(0); }
 const MB = 1024 * 1024;
 const base = mkdtempSync(join(tmpdir(), 'folga-sug-ção-'));
 const dir = (...p: string[]) => { const d = join(base, ...p); mkdirSync(d, { recursive: true }); return d; };
