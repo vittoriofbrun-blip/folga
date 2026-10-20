@@ -164,6 +164,7 @@ const probeArgs = (): [string, string[]] => {
   const fake = process.env.FOLGA_FAKE_PROBE;   // testes: script node que imita a sonda
   const interval = String(Math.round(Number(settings.sampleSeconds)) || 2);   // vai no -Command do PowerShell: só número
   if (fake) return [process.execPath, [fake, '--interval', interval]];
+  if (process.platform === 'darwin') return [join(ROOT, 'probe', 'bin', 'probe-mac'), ['--interval', interval]];
   // .exe compilado: só com FOLGA_PROBE_EXE=1, porque o antivírus apaga exe sem assinatura (ADR 0002)
   if (process.env.FOLGA_PROBE_EXE === '1') return [join(ROOT, 'probe', 'bin', 'probe.exe'), ['--interval', interval]];
   // Padrão: o mesmo probe.cs compilado em memória pelo Add-Type do PowerShell 5.1 (~32 MB)

@@ -16,3 +16,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - if: runner.os == 'macOS'
+        run: node scripts/build-probe.mjs && node scripts/probe-smoke.mjs
+      - if: runner.os == 'Windows'
+        run: node scripts/probe-smoke.mjs
