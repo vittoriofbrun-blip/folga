@@ -50,6 +50,9 @@ const ok = (name: string) => { passed++; console.log(`ok  ${name}`); };
   assert.ok(sent.every(c => c.type === 'close'));
   ok('ADR 0003: sem mayForceQuit nunca manda kill');
 
+  assert.deepEqual(sent, [{ type: 'close', pids: [1], key: 'calc' }, { type: 'close', pids: [2], key: 'notepad' }, { type: 'close', pids: [3, 4], key: 'teams' }]);
+  ok('close leva a chave do grupo (a sonda do Mac só fecha pid cujo bundle id é a chave)');
+
   const log = readFileSync(join(dir, 'log.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
   assert.equal(log.length, 1);
   assert.equal(log[0].origin, 'manual');

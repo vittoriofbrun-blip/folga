@@ -123,8 +123,14 @@ try {
   if (textedit) {
     // Cmd+Q pela sonda: terminate() só no app .regular (o helper do painel Abrir fica de fora)
     const pids = snaps.at(-1).processes.filter((p) => p.name.toLowerCase() === 'com.apple.textedit').map((p) => p.pid);
+    // key de outro app: pid que não é daquele bundle id nunca é fechado (pid reaproveitado)
     reply = null;
-    child.stdin.write(JSON.stringify({ type: 'close', id: 't2', pids }) + '\n');
+    child.stdin.write(JSON.stringify({ type: 'close', id: 't2k', pids, key: 'com.example.outro' }) + '\n');
+    await until(() => reply, 5000, 'reply do close com key errada');
+    if (replyErrors(reply, 't2k').length || reply.windowsClosed !== 0) fail(`close com key errada fechou: ${JSON.stringify(reply)}`);
+    console.log(`key errada nao fecha (reply ${JSON.stringify(reply)})`);
+    reply = null;
+    child.stdin.write(JSON.stringify({ type: 'close', id: 't2', pids, key: 'com.apple.textedit' }) + '\n');
     await until(() => reply, 5000, 'reply do close do TextEdit');
     if (replyErrors(reply, 't2').length || reply.windowsClosed !== 1) fail(`close do TextEdit: ${JSON.stringify(reply)} (esperado windowsClosed 1)`);
     try { await until(() => !snaps.at(-1).processes.some((p) => p.pid === te.pid), 8000, 'TextEdit sair'); }

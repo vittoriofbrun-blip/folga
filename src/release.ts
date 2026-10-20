@@ -50,7 +50,7 @@ export function createReleaser(deps: ReleaseDeps) {
     try {
       const availBefore = state.availPhys;
       for (const g of groups) {
-        try { await deps.probe.send({ type: 'close', pids: g.pids }); } catch { /* conferido abaixo */ }
+        try { await deps.probe.send({ type: 'close', pids: g.pids, key: g.key }); } catch { /* conferido abaixo */ }
       }
       await sleep(deps.closeWaitMs ?? 8_000);
 

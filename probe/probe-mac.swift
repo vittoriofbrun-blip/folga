@@ -307,9 +307,14 @@ func handle(_ line: String) {
     if type == "close" {
         // ADR 0003 no Mac = Cmd+Q: terminate() só em app do Dock (.regular). Helper e app de barra de menus nunca.
         // O app pode perguntar se salva e não sair; quem confere é o servidor, 8 s depois.
+        // key = chave do grupo (bundle id minúsculo): pid reaproveitado por outro app nos segundos entre a leitura e o
+        // clique não é fechado. Sem key (comando antigo, smoke) vale só o .regular.
+        let key = cmd["key"] as? String
         var closed = 0
         for pid in pids {
-            if let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy == .regular, app.terminate() { closed += 1 }
+            guard let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy == .regular else { continue }
+            if let key = key, app.bundleIdentifier?.lowercased() != key { continue }
+            if app.terminate() { closed += 1 }
         }
         emit(["type": "reply", "id": id, "ok": true, "windowsClosed": closed])
     } else {

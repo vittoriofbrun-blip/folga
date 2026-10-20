@@ -21,7 +21,7 @@ export type ProbeSnapshot = {
 };
 // Node → sonda
 export type ProbeCommand =
-  | { type: 'close'; id: string; pids: number[] }   // WM_CLOSE em todas as janelas visíveis
+  | { type: 'close'; id: string; pids: number[]; key?: string }   // WM_CLOSE em todas as janelas visíveis; key: Mac só fecha pid desse bundle id
   | { type: 'kill'; id: string; pids: number[] };   // só para apps em mayForceQuit (P03)
 export type ProbeReply = { type: 'reply'; id: string; ok: boolean; windowsClosed: number };
 

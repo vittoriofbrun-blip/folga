@@ -42,6 +42,7 @@ createInterface({ input: process.stdin })
     for (const pid of cmd.pids) {
       const p = procs.get(pid);
       if (!p) continue;
+      if (cmd.type === 'close' && MAC && cmd.key && p.name.toLowerCase() !== cmd.key) continue;   // como a sonda do Mac
       if (cmd.type === 'close' && p.hasVisibleWindow) {
         windowsClosed++; procs.delete(pid); avail += p.privateWorkingSet;
         if (MAC) for (const o of [...procs.values()]) if (o.name === p.name) { procs.delete(o.pid); avail += o.privateWorkingSet; }   // Cmd+Q leva os helpers
