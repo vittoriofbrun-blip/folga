@@ -16,11 +16,13 @@ import { createSuggestions } from './suggestions.ts';
 import { createWatch } from './watch.ts';
 import { createNotify } from './notify.ts';
 import { createAgent } from './agent.ts';
+import { dataDir, defaultSettings } from './platform.ts';
 import { DEFAULT_SETTINGS, type AgentProvider, type Emit, type MemoryState, type ProbeSnapshot, type Sample, type Settings, type SuggestionDraft } from './types.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const PORT = Number(process.env.FOLGA_PORT ?? 4780);
-const DATA_DIR = process.env.FOLGA_DATA_DIR ?? join(process.env.LOCALAPPDATA ?? ROOT, 'Folga');
+const DATA_DIR = dataDir();
+const DEFAULTS = defaultSettings();
 const DIST = join(ROOT, 'dist');
 const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 
@@ -51,7 +53,7 @@ function loadSettings(): Settings {
   try {
     // tira o BOM: editor ou PowerShell 5.1 gravando o arquivo o coloca, e aí o JSON.parse falha e os
     // ajustes do usuário somem em silêncio (visto num teste nosso em 2026-10-18)
-    const r = mergeSettings(DEFAULT_SETTINGS, JSON.parse(readFileSync(settingsFile, 'utf8').replace(/^﻿/, '')));
+    const r = mergeSettings(DEFAULTS, JSON.parse(readFileSync(settingsFile, 'utf8').replace(/^﻿/, '')));
     if (typeof r === 'string') throw new Error(r);
     settingsFrom = 'settings.json';
     settingsProblem = null;
@@ -61,7 +63,7 @@ function loadSettings(): Settings {
       settingsProblem = e instanceof Error ? e.message : 'o arquivo não pôde ser lido';
       settingsFrom = `padrões (settings.json recusado: ${settingsProblem})`;
     }
-    return { ...DEFAULT_SETTINGS };
+    return { ...DEFAULTS };
   }
 }
 function saveSettings(s: Settings) { writeAtomic(settingsFile, JSON.stringify(s, null, 2)); }

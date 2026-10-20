@@ -5,11 +5,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { dataDir } from './platform.ts';
 import { protectedRows } from './protegidos.ts';
 import type { AppGroup } from './types.ts';
 
 const PORT = Number(process.env.FOLGA_PORT ?? 4780);
-const DATA_DIR = process.env.FOLGA_DATA_DIR ?? join(process.env.LOCALAPPDATA ?? '.', 'Folga');
+const DATA_DIR = dataDir();
 const BASE = `http://127.0.0.1:${PORT}`;
 const token = () => readFileSync(join(DATA_DIR, 'agent-token'), 'utf8').trim();
 

@@ -4,10 +4,11 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, statSync, truncateSync } from 'node:fs';
 import { request } from 'node:http';
 import { join } from 'node:path';
+import { dataDir as platformDataDir } from '../src/platform.ts';
 
 const root = join(import.meta.dirname, '..');
 const port = Number(process.env.FOLGA_PORT ?? 4780);
-const dataDir = process.env.FOLGA_DATA_DIR ?? join(process.env.LOCALAPPDATA ?? root, 'Folga');
+const dataDir = platformDataDir();
 const noWindow = process.argv.includes('--no-window');
 
 function call(method, path, body) {

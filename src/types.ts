@@ -155,4 +155,8 @@ export type Emit = (event: 'warnings' | 'suggestions' | 'agent', data: unknown) 
 export const SYSTEM_PROCESSES: readonly string[] = [
   'explorer', 'dwm', 'csrss', 'winlogon', 'shellexperiencehost', 'startmenuexperiencehost',
   'searchhost', 'textinputhost', 'applicationframehost', 'lockapp',
+  // Mac: bundle id ou nome do executável, minúsculos
+  // ponytail: nomes do Windows e do Mac não colidem; uma lista evita process.platform num arquivo que a interface importa
+  'launchd', 'windowserver', 'com.apple.loginwindow', 'com.apple.dock', 'com.apple.finder', 'com.apple.systemuiserver',
+  'com.apple.controlcenter', 'com.apple.notificationcenterui', 'com.apple.spotlight', 'com.apple.windowmanager',
 ];

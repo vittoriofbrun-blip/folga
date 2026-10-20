@@ -6,7 +6,8 @@ import { rm } from 'node:fs/promises';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_SETTINGS, type LogEntry, type MemoryState, type ReleaseResponse, type Settings, type Warning } from '../types.ts';
+import { defaultSettings } from '../platform.ts';
+import { type LogEntry, type MemoryState, type ReleaseResponse, type Settings, type Warning } from '../types.ts';
 
 const PORT = 18000 + Math.floor(Math.random() * 1000);
 const dataDir = mkdtempSync(join(tmpdir(), 'folga-http-'));
@@ -64,7 +65,7 @@ try {
   ok('estado: notepad candidato, explorer e svchost protegidos');
 
   // B7: o settings.json do disco passa pela mesma validação do PUT; inválido volta aos padrões (e o valor nunca chega à sonda)
-  assert.deepEqual((await call('GET', '/api/settings')).body, DEFAULT_SETTINGS);
+  assert.deepEqual((await call('GET', '/api/settings')).body, defaultSettings());
   ok('B7: settings.json inválido no disco → padrões');
 
   // R34: voltar aos padrões não pode ser silencioso, e salvar em Ajustes (o que o aviso manda fazer) tem que resolver
