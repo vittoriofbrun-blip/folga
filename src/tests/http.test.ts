@@ -121,6 +121,18 @@ try {
   }
   ok('PUT /api/settings valida faixa, tipo e campo, e grava settings.json');
 
+  // a sonda do Windows não lê pressão de memória: gatilho por pressão lá seria um Auto Care que nunca dispara
+  const pressao = await call('PUT', '/api/settings', { body: { autoCareTrigger: 'pressure' }, token });
+  if (process.platform === 'win32') {
+    assert.equal(pressao.status, 400);
+    assert.match(String(pressao.body.erro), /Windows/);
+    assert.equal((await call('GET', '/api/settings')).body.autoCareTrigger, 'percent');
+  } else {
+    assert.equal(pressao.status, 200);
+    assert.equal((await call('PUT', '/api/settings', { body: { autoCareTrigger: 'percent' }, token })).status, 200);
+  }
+  ok(`PUT autoCareTrigger pressure: 400 no Windows, aceito fora dele (aqui: ${process.platform})`);
+
   // R34: o PUT acima gravou um arquivo válido, então o aviso tem que sair sozinho, sem reiniciar o Folga
   assert.deepEqual(await avisos(), [], 'salvar em Ajustes tira o aviso "seus ajustes não foram lidos"');
   ok('R34: aviso de ajustes aparece com arquivo inválido e some ao salvar');

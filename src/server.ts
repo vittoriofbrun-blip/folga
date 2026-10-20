@@ -304,6 +304,10 @@ const server = createServer(async (req, res) => {
     if (method === 'PUT' && path === '/api/settings') {
       const merged = mergeSettings(settings, await readJson(req));
       if (typeof merged === 'string') return send(res, 400, { erro: merged });
+      // a sonda do Windows não lê pressão de memória: o Auto Care por pressão nunca dispararia
+      if (process.platform === 'win32' && merged.autoCareTrigger === 'pressure') {
+        return send(res, 400, { erro: 'Auto Care por pressão de memória só existe no Mac; no Windows use o percentual' });
+      }
       settings = merged;
       saveSettings(settings);
       // R34: acabamos de gravar um arquivo válido, então o aviso "seus ajustes não foram lidos" perdeu a
