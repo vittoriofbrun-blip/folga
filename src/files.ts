@@ -498,40 +498,40 @@ export function createFiles(deps: FilesDeps) {
   }
 
   /** Arquivos que a limpeza apagaria: temporários com mais de 7 dias e caches de navegador fechado. */
-  async function collect(): Promise<{
+  async function collect(opts: { size?: boolean } = {}): Promise<{
     temp: Array<[string, Stats]>;
     cache: Record<Browser, Array<[string, Stats]>>;
     open: Record<Browser, boolean>;
-    locked: { bytes: number; denied: boolean } | null;   // Safari: pasta que o node não abre; nada dela entra na lista nem é apagado
+    safari: { bytes: number; denied: boolean } | null;   // Safari: só tamanho (Swift) e nota; nunca entra na lista nem é apagado
   }> {
     const limit = now() - TEMP_DAYS * DAY;
     const budget = () => newBudget(MAX_ENTRIES * 5, 60_000, now);
     const temp: Array<[string, Stats]> = [];
     const cache: Record<Browser, Array<[string, Stats]>> = { chrome: [], edge: [], safari: [] };
     const dirs = cacheDirs();
-    let locked: { bytes: number; denied: boolean } | null = null;
+    let safari: { bytes: number; denied: boolean } | null = null;
     // temporários, caches e a consulta de processos andam juntos: o preview aparece quando o mais lento termina
     const [open] = await Promise.all([
       browsersOpen(),
       (async () => { const b = budget(); for (const d of tempDirs()) await walk(d, 32, null, b, (p, st) => { if (tempAge(st) < limit) temp.push([p, st]); }); })(),
       ...BROWSERS.map(async br => {
-        const targets = deps.cacheDirs || br === 'safari' ? dirs[br] : (await Promise.all(dirs[br].map(profileCaches))).flat();
+        // Safari: pasta protegida; nunca acionável, legível ou não (o Folga não apaga esse cache). Só o preview mede, pelo Swift.
         if (br === 'safari') {
-          // o que o node não consegue abrir fica de fora (não conta nem apaga); a tela avisa pela nota
-          const ok = await Promise.all(targets.map(d => opendir(d).then(h => h.close().then(() => true), (e: NodeJS.ErrnoException) => e.code !== 'EPERM' && e.code !== 'EACCES' ? false : null)));
-          for (const [i, d] of targets.entries()) {
-            if (ok[i] !== null) continue;
-            // só o tamanho, pelo Swift (quem recebe a permissão é o app Folga, nunca o node)
+          if (opts.size === false) return;
+          for (const d of dirs.safari) {
+            if (!await exists(d)) continue;
             const r = await macHelper(['--size'], d, 20_000) as { bytes?: unknown; denied?: unknown } | null;
             const denied = !r || typeof r !== 'object' || r.denied === true;
-            locked = { bytes: (locked?.bytes ?? 0) + (denied ? 0 : Math.max(0, Number(r.bytes) || 0)), denied: (locked?.denied ?? false) || denied };
+            safari = { bytes: (safari?.bytes ?? 0) + (denied ? 0 : Math.max(0, Number(r.bytes) || 0)), denied: (safari?.denied ?? false) || denied };
           }
+          return;
         }
+        const targets = deps.cacheDirs ? dirs[br] : (await Promise.all(dirs[br].map(profileCaches))).flat();
         const b = budget();
         for (const d of targets) await walk(d, 32, null, b, (p, st) => { cache[br].push([p, st]); });
       }),
     ]);
-    return { temp, cache, open, locked };
+    return { temp, cache, open, safari };
   }
   const sum = (l: Array<[string, Stats]>) => l.reduce((a, [, st]) => a + st.size, 0);
 
@@ -549,7 +549,7 @@ export function createFiles(deps: FilesDeps) {
     return p;
   }
   async function collectPreview(): Promise<QuickCleanItem[]> {
-    const [{ temp, cache, open, locked }, t] = await Promise.all([collect(), deps.trash ? deps.trash() : trashInfo()]);
+    const [{ temp, cache, open, safari }, t] = await Promise.all([collect(), deps.trash ? deps.trash() : trashInfo()]);
     const items: QuickCleanItem[] = [{
       category: 'temp_usuario', label: 'Arquivos temporários com mais de 7 dias', bytes: sum(temp), files: temp.length, actionable: true,
     }];
@@ -562,7 +562,7 @@ export function createFiles(deps: FilesDeps) {
     const notes = [
       ...(opened.length ? [`${and(opened.map(b => BROWSER_NAME[b]))} ${opened.length > 1 ? 'abertos' : 'aberto'}: feche para limpar o cache`] : []),
       // Safari protegido: nunca acionável; sem permissão = desconhecido (FDA_NOTE), com o tamanho só informativo
-      ...(locked ? [locked.denied ? `Safari: ${FDA_NOTE}` : `Safari: ${Math.round(locked.bytes / 1048576)} MB que o Folga não apaga (pasta protegida pelo macOS)`] : []),
+      ...(safari ? [safari.denied ? `Safari: ${FDA_NOTE}` : `Safari: ${Math.round(safari.bytes / 1048576)} MB que o Folga não apaga (pasta protegida pelo macOS)`] : []),
     ];
     items.push({
       category: 'cache_navegador', label: 'Cache dos navegadores', bytes: sum(list), files: list.length, actionable: closed.length > 0,
@@ -591,7 +591,7 @@ export function createFiles(deps: FilesDeps) {
   async function quickClean(opts: { categories?: QuickCleanCategory[] } = {}): Promise<{ bytes: number; files: number; skipped: number }> {
     previewGen++; previewP = null;   // o que o preview guardou deixou de valer
     const want = new Set<QuickCleanCategory>(opts.categories ?? ['temp_usuario', 'cache_navegador']);
-    const { temp, cache, open } = await collect();
+    const { temp, cache, open } = await collect({ size: false });   // só o preview mede o Safari
     const limit = now() - TEMP_DAYS * DAY;
     const todo: Array<[string, Stats, boolean]> = [];   // [caminho, stat, exige mtime antigo]
     if (want.has('temp_usuario')) for (const [p, st] of temp) todo.push([p, st, true]);

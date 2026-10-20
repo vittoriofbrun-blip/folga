@@ -404,11 +404,14 @@ try {
       const f2 = mk({ cacheDirs: { safari: [safari] }, runningKeys: () => keys });
       const c2 = (await f2.quickCleanPreview()).find(i => i.category === 'cache_navegador')!;
       assert.equal(c2.actionable, false);
-      assert.equal(c2.note, 'Safari aberto: feche para limpar o cache');   // nome exibido do Safari na nota
+      assert.match(c2.note!, /^Safari: /);   // nome exibido do Safari na nota
       assert.equal((await mk({ cacheDirs: { safari: [safari] }, runningKeys: () => null }).quickCleanPreview()).find(i => i.category === 'cache_navegador')!.actionable, false);
-      // Safari fechado e pasta legível: aí sim acionável; Chrome aberto pela sonda conta como aberto
-      const c3 = (await mk({ cacheDirs: { safari: [safari] }, runningKeys: () => new Set(['com.google.chrome']) }).quickCleanPreview()).find(i => i.category === 'cache_navegador')!;
-      assert.deepEqual([c3.actionable, c3.bytes, c3.files], [true, 4000, 1]);
+      // Safari fechado e pasta legível: continua só informativo; a limpeza nunca toca no cache do Safari
+      const f3 = mk({ cacheDirs: { safari: [safari] }, runningKeys: () => new Set() });
+      const c3 = (await f3.quickCleanPreview()).find(i => i.category === 'cache_navegador')!;
+      assert.deepEqual([c3.actionable, c3.bytes, c3.files], [false, 0, 0]);
+      assert.equal((await f3.quickClean({ categories: ['cache_navegador'] })).files, 0);
+      assert.ok(existsSync(join(safari, 'fsCachedData')), 'cache do Safari fica, mesmo legível e com o Safari fechado');
       // pasta que o node não abre (no Mac de verdade: Acesso Total ao Disco): nada contado nem acionável, nota FDA_NOTE
       const trancado = dir('Cache', 'safari-trancado'); file(join(trancado, 'fsCachedData'), 4000, 0); chmodSync(trancado, 0o000);
       try {
