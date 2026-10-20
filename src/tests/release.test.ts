@@ -133,6 +133,21 @@ const ok = (name: string) => { passed++; console.log(`ok  ${name}`); };
 }
 
 {
+  // probe.cs devolve ok:false se algum pid já tinha saído; o grupo sumido na leitura seguinte é encerrado igual
+  const before = mem([app('teams', [3])], 200);
+  const after = mem([app('teams', [3], { state: 'protected', reason: 'no_window' })], 200);
+  const settings = { ...DEFAULT_SETTINGS, mayForceQuit: ['teams'] };
+  for (const platform of ['win32', 'darwin'] as const) {
+    const { dir, releaser } = setup(before, after, mem([], 400), settings, platform, false);
+    const r = await releaser.release(['teams'], 'manual');
+    assert.ok(!('erro' in r));
+    assert.equal(r.results[0]!.outcome, 'encerrado');
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  }
+  ok('kill com ok:false e grupo sumido na leitura seguinte vira encerrado (Windows e Mac)');
+}
+
+{
   // pid reaproveitado por outro app durante a espera nunca é forçado
   const settings = { ...DEFAULT_SETTINGS, mayForceQuit: ['teams'] };
   const before = mem([app('teams', [3, 4])], 200);

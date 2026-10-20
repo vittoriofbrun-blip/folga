@@ -71,7 +71,15 @@ export function createReleaser(deps: ReleaseDeps) {
           // só os pids que seguem neste mesmo grupo: pid reaproveitado por outro app na espera nunca é forçado
           const target = now ? living.filter(p => now.pids.includes(p)) : [];
           if (!hasWindow && target.length && settings.mayForceQuit.includes(g.key)) {
-            try { if ((await deps.probe.send({ type: 'kill', pids: target })).ok) outcome = 'encerrado'; } catch { /* fica o desfecho anterior */ }
+            try {
+              // probe.cs responde ok:false quando algum pid já tinha saído: confere na leitura seguinte
+              const reply = await deps.probe.send({ type: 'kill', pids: target });
+              if (reply.ok) outcome = 'encerrado';
+              else {
+                const still = new Set((await nextState()).apps.flatMap(a => a.pids));
+                if (!target.some(p => still.has(p))) outcome = 'encerrado';
+              }
+            } catch { /* fica o desfecho anterior */ }
           }
         }
         results.push({ key: g.key, name: g.name, outcome });
