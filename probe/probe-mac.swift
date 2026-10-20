@@ -95,11 +95,14 @@ func appOwner(_ path: String) -> (name: String, description: String)? {
 }
 
 // ---------- janelas ----------
-// Por pid: janelas normais (camada 0), opacas e de pelo menos 50×50. .optionAll mantém minimizada e de outro
-// Espaço, como o Windows conta; o tamanho tira janela-fantasma. Sem título: não pede Gravação de Tela.
+// windowCount só serve, no Mac, à proteção de navegador com várias janelas (R29, classify.ts multi_window);
+// "tem janela" vem da bandeira .regular. Por pid: janelas na tela, camada 0, opacas e de pelo menos 50×50
+// (o tamanho tira janela-fantasma). Não .optionAll: o AppKit guarda janela fechada escondida e ela entraria
+// na conta. Preço: minimizada e de outro Espaço não contam — por isso o Chromium pergunta ao próprio app.
+// Sem título: não pede Gravação de Tela.
 func windowCounts() -> [pid_t: Int] {
     var c: [pid_t: Int] = [:]
-    guard let list = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else { return c }
+    guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return c }
     for w in list {
         guard (w[kCGWindowLayer as String] as? Int) == 0, ((w[kCGWindowAlpha as String] as? Double) ?? 0) > 0,
               let pid = w[kCGWindowOwnerPID as String] as? Int,
@@ -108,6 +111,41 @@ func windowCounts() -> [pid_t: Int] {
         c[pid_t(pid), default: 0] += 1
     }
     return c
+}
+
+// Navegadores Chromium: o AppleScript do app conta minimizada e de outro Espaço, que é o que a R29 precisa.
+// osascript em processo separado (pode esperar a permissão de Automação): nunca trava o laço principal;
+// cache de 30 s por pid; erro ou permissão negada = fica a conta da tela, com um aviso só no stderr.
+let chromium: Set<String> = ["com.google.chrome", "com.microsoft.edgemac", "com.brave.browser",
+                             "com.vivaldi.vivaldi", "com.operasoftware.opera", "org.chromium.chromium"]
+var scriptCount: [pid_t: (t: Date, n: Int?)] = [:]
+var scriptBusy: Set<pid_t> = []
+var scriptWarned = false
+func chromiumWindows(_ app: NSRunningApplication) -> Int? {
+    let pid = app.processIdentifier
+    guard let id = app.bundleIdentifier, chromium.contains(id.lowercased()) else { return nil }
+    let cached = scriptCount[pid]
+    if (cached.map { Date().timeIntervalSince($0.t) >= 30 } ?? true) && !scriptBusy.contains(pid) {
+        scriptBusy.insert(pid)
+        let p = Process(), out = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        p.arguments = ["-e", "tell application id \"\(id)\" to count windows"]
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        p.terminationHandler = { p in
+            let n = p.terminationStatus == 0 ? Int(String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)) : nil
+            DispatchQueue.main.async {
+                scriptBusy.remove(pid)
+                scriptCount[pid] = (Date(), n)
+                if n == nil && !scriptWarned { scriptWarned = true; fputs("janelas de \(id) pelo AppleScript falhou (permissão de Automação?); usando a conta da tela\n", stderr) }
+            }
+        }
+        if (try? p.run()) == nil { scriptBusy.remove(pid); scriptCount[pid] = (Date(), nil) }
+        else { DispatchQueue.main.asyncAfter(deadline: .now() + 2) { if p.isRunning { p.terminate() } } }
+    }
+    scriptCount = scriptCount.filter { k, _ in NSRunningApplication(processIdentifier: k) != nil }
+    return cached?.n
 }
 
 // ---------- áudio ----------
@@ -137,26 +175,26 @@ func audioPids() -> [Int] {
 }
 
 // ---------- disco ----------
-// Tempo ocupado (leitura + escrita, ns) por driver de disco; diskActive = o mais ocupado no intervalo, 0-100.
-var lastDisk: (t: UInt64, busy: [UInt64: UInt64])?
+// ponytail: aproximação por vazão, não "% de tempo ativo": Δ(bytes lidos + escritos) de todos os drivers por
+// segundo, contra um teto fixo de 2 GB/s. O tempo das operações ("Total Time") se sobrepõe e satura em 100.
+// Nada age sobre este número; só o gráfico do Início.
+let diskCeiling = 2_000_000_000.0
+var lastDisk: (t: UInt64, bytes: UInt64)?
 func diskActive() -> Any {
     var it: io_iterator_t = 0
     guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOBlockStorageDriver"), &it) == KERN_SUCCESS else { return NSNull() }
     defer { IOObjectRelease(it) }
-    var busy: [UInt64: UInt64] = [:]
+    var bytes: UInt64 = 0
     while case let svc = IOIteratorNext(it), svc != 0 {
         defer { IOObjectRelease(svc) }
-        var id: UInt64 = 0
-        IORegistryEntryGetRegistryEntryID(svc, &id)
         guard let st = IORegistryEntryCreateCFProperty(svc, "Statistics" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? [String: Any] else { continue }
-        busy[id] = ((st["Total Time (Read)"] as? NSNumber)?.uint64Value ?? 0) + ((st["Total Time (Write)"] as? NSNumber)?.uint64Value ?? 0)
+        bytes &+= ((st["Bytes (Read)"] as? NSNumber)?.uint64Value ?? 0) &+ ((st["Bytes (Write)"] as? NSNumber)?.uint64Value ?? 0)
     }
     let now = DispatchTime.now().uptimeNanoseconds
-    defer { lastDisk = (now, busy) }
-    guard let last = lastDisk, now > last.t else { return NSNull() }   // 1ª leitura
-    var top = 0.0
-    for (id, v) in busy { if let p = last.busy[id], v >= p { top = max(top, Double(v - p) / Double(now - last.t) * 100) } }
-    return (min(100, top) * 10).rounded() / 10
+    defer { lastDisk = (now, bytes) }
+    guard let last = lastDisk, now > last.t, bytes >= last.bytes else { return NSNull() }   // 1ª leitura (ou disco que sumiu)
+    let pct = Double(bytes - last.bytes) / (Double(now - last.t) / 1e9) / diskCeiling * 100
+    return (min(100, pct) * 10).rounded() / 10
 }
 
 func process(_ pid: pid_t, _ wins: [pid_t: Int], _ regular: Set<pid_t>) -> [String: Any]? {
@@ -193,10 +231,14 @@ func processes() -> [[String: Any]] {
     guard n > 0 else { return [] }
     var pids = [pid_t](repeating: 0, count: Int(n) + 64)
     let got = Int(proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size)))
-    let wins = windowCounts()
     // Decisão 2026-10-20: no Mac "tem janela" = app do Dock (.regular), no processo principal do bundle;
     // app do Dock sem janela e parado pode sair com Cmd+Q. Barra de menus/agente segue "sem janela" (P03).
-    let regular = Set(NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map(\.processIdentifier))
+    var wins = windowCounts()
+    var regular = Set<pid_t>()
+    for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
+        regular.insert(app.processIdentifier)
+        if let n = chromiumWindows(app) { wins[app.processIdentifier] = n }
+    }
     return pids.prefix(max(0, got)).filter { $0 > 0 }.compactMap { process($0, wins, regular) }
 }
 

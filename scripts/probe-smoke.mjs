@@ -1,6 +1,6 @@
 // Teste de fumaca da sonda (Windows e Mac): 3 snapshots conferidos pelo contrato, filho de carga
 // (CPU ~100 % e ~200 MB, pega unidade errada), resumo, comando close vazio, saida ao fechar o stdin.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,7 +57,8 @@ try {
   if (!a || !b) fail('o filho de carga nao aparece nos snapshots');
   const cpu = (b.cpuTimeMs - a.cpuTimeMs) / (s.t - snaps[1].t) * 100;
   console.log(`filho de carga: CPU ${cpu.toFixed(0)} %  ${(b.privateWorkingSet / MB).toFixed(1)} MB`);
-  if (cpu < 70 || cpu > 130) fail(`CPU do filho de carga ${cpu.toFixed(0)} % (esperado ~100): unidade errada?`);
+  // faixa larga: máquina carregada rouba CPU do filho; ainda pega o erro de unidade (ticks 41×, páginas 4×)
+  if (cpu < 40 || cpu > 160) fail(`CPU do filho de carga ${cpu.toFixed(0)} % (esperado ~100): unidade errada?`);
   if (b.privateWorkingSet < 190e6) fail(`memória do filho de carga ${b.privateWorkingSet} < 190 MB: unidade errada?`);
   if (isMac) { const h = s.processes.find((p) => / Helper \(/.test(p.name)); if (h) fail(`helper fora do bundle: ${h.name}`); }
   const gb = (n) => (n / GB).toFixed(2);
@@ -74,6 +75,9 @@ try {
   if (!(s.totalPhys > s.availPhys && s.availPhys > 0 && s.processes.length > 20)) fail('numeros implausiveis');
 
   if (textedit) {
+    // só fecha no fim se não estava aberto antes (não mexer em app real do usuário)
+    const wasRunning = spawnSync('/usr/bin/pgrep', ['-x', 'TextEdit']).status === 0;
+    if (!wasRunning) process.on('exit', () => spawnSync('/usr/bin/osascript', ['-e', 'quit app "TextEdit" saving no']));
     spawn('/usr/bin/open', ['-a', 'TextEdit'], { stdio: 'ignore' });
     const ok = (x) => x.processes.some((p) => p.pid === x.foregroundPid && p.name.toLowerCase() === 'com.apple.textedit' && p.hasVisibleWindow === true && p.windowCount >= 1);
     try { await until(() => ok(snaps.at(-1)), 10000, 'TextEdit'); }
