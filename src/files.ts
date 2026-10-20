@@ -31,12 +31,15 @@ export type InspectError = { erro: string };
 export type FileMeta = { lastUsed: number | null; added: number | null; dataless: boolean; missing: boolean };
 const META_BATCH = 500;
 const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
-/** Mac: último uso = max(mtime, Spotlight "última abertura" ?? "adicionado"); sem Spotlight vale o mtime. */
+/**
+ * Mac: último uso = o mais novo entre mtime, "última abertura" e "adicionado" do Spotlight (arquivo que acabou de chegar
+ * na pasta não é parado, mesmo aberto há muito tempo). Empate: spotlight, depois adicionado. Sem Spotlight vale o mtime.
+ */
 function macUsage(mtime: number, m: FileMeta | null): { lastUsed: number; basis: StaleBasis } {
   const used = num(m?.lastUsed), added = num(m?.added);
-  const sig = used ?? added ?? 0;
-  if (sig > mtime) return { lastUsed: sig, basis: used !== null ? 'spotlight' : 'adicionado' };
-  return { lastUsed: mtime, basis: 'modificacao' };
+  const lastUsed = Math.max(mtime, used ?? 0, added ?? 0);
+  const basis: StaleBasis = used === lastUsed ? 'spotlight' : added === lastUsed ? 'adicionado' : 'modificacao';
+  return { lastUsed, basis };
 }
 
 const DAY = 86_400_000;
@@ -292,6 +295,7 @@ export function createFiles(deps: FilesDeps) {
           if (b.stopped || !e.isDirectory() || !e.name.toLowerCase().endsWith('.app')) continue;
           const path = join(appRoot, e.name);
           const a = await appStats(path, b);
+          if (b.stopped) break;   // soma cortada pelo teto: o tamanho não bateria com o da aprovação (M5)
           if (a.size >= minBytes && (t0 - a.mtime) / DAY >= days) cands.push({ path, root, size: a.size, mtime: a.mtime, isApp: true });
         }
       }

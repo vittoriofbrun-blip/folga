@@ -257,7 +257,9 @@ try {
 
   if (MAC) {
     const META: Record<string, Partial<FileMeta>> = { 'nuvem.mov': { dataless: true }, 'aberto.iso': { lastUsed: Date.now() - 2 * DAY },
-      'spot.iso': { lastUsed: Date.now() - 300 * DAY }, 'add.iso': { added: Date.now() - 250 * DAY } };
+      'spot.iso': { lastUsed: Date.now() - 300 * DAY }, 'add.iso': { added: Date.now() - 250 * DAY },
+      // aberto há 300 d, mas chegou na pasta há 10 d (ou 200 d): o mais novo vale
+      'chegou.iso': { lastUsed: Date.now() - 300 * DAY, added: Date.now() - 10 * DAY }, 'mix.iso': { lastUsed: Date.now() - 300 * DAY, added: Date.now() - 200 * DAY } };
     const meta = async (ps: string[]) => ps.map(p => ({ lastUsed: null, added: null, dataless: false, missing: false, ...META[basename(p)] }));
     for (const n of Object.keys(META)) file(join(downloads, n), 3 * MB, 400);
     const f = mk({ meta });
@@ -268,6 +270,9 @@ try {
     assert.equal(by('spot.iso')!.basis, 'spotlight');
     assert.equal(by('add.iso')!.basis, 'adicionado');         // chegou há 250 d, mtime de 400 d: vale o mais novo
     assert.ok(Math.abs(by('add.iso')!.lastUsed - (Date.now() - 250 * DAY)) < 60_000);
+    assert.equal(by('chegou.iso'), undefined);               // chegou há 10 dias: não é parado, mesmo aberto há 300
+    assert.equal(by('mix.iso')!.basis, 'adicionado');
+    assert.ok(Math.abs(by('mix.iso')!.lastUsed - (Date.now() - 200 * DAY)) < 60_000);
     assert.equal(s.accessTracking, true);
     assert.ok('erro' in (await f.inspect([join(downloads, 'nuvem.mov')]))[0]!);
     const ri = await f.inspect([join(downloads, 'spot.iso'), join(downloads, 'add.iso')]);
@@ -291,7 +296,7 @@ try {
     file(join(dir('Fora', 'Solto.app', 'Contents'), 'bin'), 5 * MB, 400);
     assert.ok(!(await mk({ meta, appRoot: realpathSync(outside) }).scan({ olderThanDays: 30, minMB: 1 })).files.some(x => x.isApp), 'appRoot fora das raízes: nenhum .app');
     for (const n of [...Object.keys(META), 'Atalho.app']) await rm(join(downloads, n));
-    await rm(join(downloads, 'Instalador.app'), { recursive: true });
+    for (const d of [join(downloads, 'Instalador.app'), join(downloads, 'pasta'), join(docs, 'Outro.app'), join(outside, 'Solto.app')]) await rm(d, { recursive: true });
     ok('Mac: Spotlight (spotlight/adicionado), só na nuvem fora, Spotlight fora → mtime; .app só filho direto de Downloads');
   }
 
