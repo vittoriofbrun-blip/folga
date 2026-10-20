@@ -37,6 +37,18 @@ Estado real do Mac (raio-X de 2026-10-20, só leitura):
 8. **App do Dock sem janela e parado pode ser encerrado (Cmd+Q).** É o desperdício mais comum no Mac. App de
    barra de menus/agente continua protegido (P03).
 
+### Decisões do Vittorio (2026-10-20, plano 2)
+
+9. **Medir `~/Library/Containers` e `Group Containers`**, aceitando o aviso único do macOS "acessar dados de outros
+   apps". Quem constrói nunca responde o aviso no lugar dele.
+10. **Acesso Total ao Disco: sim, mas só para o `Folga.app` (plano 3), nunca para o `node`.** Liberar para o `node`
+    daria acesso total a todo script Node do Mac. No plano 2, o que depende dele (tamanho da Lixeira, cache do Safari)
+    é lido pelo binário Swift e, sem a permissão, aparece como "não deu para ler".
+11. **O assistente pode propor "limpar cache do app X"** pelo cartão de sempre (R20–R25). O servidor revalida tudo no
+    clique, com a mesma allowlist e o app fechado; as ferramentas do agente continuam só de leitura.
+12. **`.app` velho em `~/Downloads` (e só lá) pode ir para a Lixeira**, como um item só, com o tamanho total e o
+    último uso pelo Spotlight. Em qualquer outra pasta o pacote continua fechado; nunca um `.app` de `/Applications`.
+
 ## Objetivos
 
 - Rodar no Mac com as mesmas telas e o mesmo comportamento do Windows, trocando só as peças do sistema.
