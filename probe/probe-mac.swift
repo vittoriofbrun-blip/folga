@@ -114,22 +114,31 @@ func windowCounts() -> [pid_t: Int] {
 }
 
 // Navegadores Chromium: o AppleScript do app conta minimizada e de outro Espaço, que é o que a R29 precisa.
-// osascript em processo separado: nunca trava o laço principal; cache de 30 s por pid; erro ou permissão negada =
-// fica a conta da tela, com um aviso só no stderr. A 1ª tentativa por bundle id dura até 60 s: é ela que mostra o
-// pedido de permissão de Automação, e matar o osascript cedo some com o pedido antes de o usuário responder.
-// Enquanto ela espera, vale a conta da tela. As seguintes têm 2 s (+1 s até o SIGKILL).
+// osascript em processo separado: nunca trava o laço principal; cache de 30 s por pid. Erro ou permissão negada
+// (-1743) = fica a conta da tela, com um aviso só no stderr. A 1ª tentativa por bundle id dura até 60 s: é ela que
+// mostra o pedido de permissão de Automação, e matar o osascript cedo some com o pedido antes de o usuário
+// responder; enquanto ela espera (para qualquer instância do mesmo navegador), vale a conta da tela. As seguintes
+// têm 2 s (+1 s até o SIGKILL). Tentativa que estourou o prazo = sem resposta do usuário: aquele bundle id não é
+// mais perguntado enquanto a sonda viver, senão o pedido piscaria a cada 30 s.
 let chromium: Set<String> = ["com.google.chrome", "com.microsoft.edgemac", "com.brave.browser",
                              "com.vivaldi.vivaldi", "com.operasoftware.opera", "org.chromium.chromium"]
+enum ScriptState { case pending, settled, givenUp }   // ausente = nunca perguntado
+var bundleState: [String: ScriptState] = [:]
 var scriptCount: [pid_t: (t: Date, n: Int?)] = [:]
 var scriptBusy: Set<pid_t> = []
-var scriptWarned = false, scriptRunWarned = false
-var scriptTried: Set<String> = []   // bundle ids que já tiveram a 1ª tentativa (a de 60 s)
+var scriptKilled: Set<pid_t> = []   // osascript que nós matamos por prazo
+var scriptWarned = false, scriptRunWarned = false, scriptGaveUpWarned = false
 func chromiumWindows(_ app: NSRunningApplication) -> Int? {
     let pid = app.processIdentifier
     guard let id = app.bundleIdentifier, chromium.contains(id.lowercased()) else { return nil }
+    let key = id.lowercased(), state = bundleState[key]
+    scriptCount = scriptCount.filter { k, _ in NSRunningApplication(processIdentifier: k) != nil }
+    if state == .givenUp { return nil }
     let cached = scriptCount[pid]
-    if (cached.map { Date().timeIntervalSince($0.t) >= 30 } ?? true) && !scriptBusy.contains(pid) {
+    if (cached.map { Date().timeIntervalSince($0.t) >= 30 } ?? true) && !scriptBusy.contains(pid) && state != .pending {
+        let first = state == nil
         scriptBusy.insert(pid)
+        if first { bundleState[key] = .pending }
         let p = Process(), out = Pipe()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         p.arguments = ["-e", "tell application id \"\(id)\" to count windows"]
@@ -139,27 +148,34 @@ func chromiumWindows(_ app: NSRunningApplication) -> Int? {
         p.terminationHandler = { p in
             let n = p.terminationStatus == 0 ? Int(String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)) : nil
+            let child = p.processIdentifier
             DispatchQueue.main.async {
                 scriptBusy.remove(pid)
+                if scriptKilled.remove(child) != nil {
+                    bundleState[key] = .givenUp
+                    if !scriptGaveUpWarned { scriptGaveUpWarned = true; fputs("janelas de \(id) pelo AppleScript: sem resposta no prazo; não pergunto mais, uso a conta da tela\n", stderr) }
+                    return
+                }
+                bundleState[key] = .settled
                 scriptCount[pid] = (Date(), n)
                 if n == nil && !scriptWarned { scriptWarned = true; fputs("janelas de \(id) pelo AppleScript falhou (permissão de Automação?); usando a conta da tela\n", stderr) }
             }
         }
-        let limit: Double = scriptTried.insert(id).inserted ? 60 : 2
         do {
             try p.run()
-            DispatchQueue.main.asyncAfter(deadline: .now() + limit) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + (first ? 60 : 2)) {
                 guard p.isRunning else { return }
-                p.terminate()
                 let child = p.processIdentifier
+                scriptKilled.insert(child)
+                p.terminate()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { if p.isRunning { kill(child, SIGKILL) } }
             }
         } catch {
-            scriptBusy.remove(pid); scriptCount[pid] = (Date(), nil)
+            scriptBusy.remove(pid)
+            bundleState[key] = .givenUp   // sem osascript não adianta tentar de novo
             if !scriptRunWarned { scriptRunWarned = true; fputs("osascript não abriu: \(error.localizedDescription); usando a conta da tela\n", stderr) }
         }
     }
-    scriptCount = scriptCount.filter { k, _ in NSRunningApplication(processIdentifier: k) != nil }
     return cached?.n
 }
 

@@ -68,8 +68,10 @@ export function createReleaser(deps: ReleaseDeps) {
           // Mac: Cmd+Q que não saiu (pergunta de salvar, recusa) fica aberto, com ou sem janela; não existe "bandeja"
           outcome = hasWindow || mac ? 'ficou_aberto' : 'bandeja';
           // ADR 0003: encerrar à força só app sem janela que o usuário liberou (P03)
-          if (!hasWindow && settings.mayForceQuit.includes(g.key)) {
-            try { await deps.probe.send({ type: 'kill', pids: living }); outcome = 'encerrado'; } catch { /* fica o desfecho anterior */ }
+          // só os pids que seguem neste mesmo grupo: pid reaproveitado por outro app na espera nunca é forçado
+          const target = now ? living.filter(p => now.pids.includes(p)) : [];
+          if (!hasWindow && target.length && settings.mayForceQuit.includes(g.key)) {
+            try { if ((await deps.probe.send({ type: 'kill', pids: target })).ok) outcome = 'encerrado'; } catch { /* fica o desfecho anterior */ }
           }
         }
         results.push({ key: g.key, name: g.name, outcome });

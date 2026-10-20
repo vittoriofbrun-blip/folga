@@ -15,13 +15,13 @@ const mem = (apps: AppGroup[], availPhys: number): MemoryState => ({
   autoCare: { nextEligibleAt: null, lastRunAt: null },
 });
 
-function setup(before: MemoryState, after: MemoryState, measured: MemoryState, settings: Settings = DEFAULT_SETTINGS, platform?: NodeJS.Platform) {
+function setup(before: MemoryState, after: MemoryState, measured: MemoryState, settings: Settings = DEFAULT_SETTINGS, platform?: NodeJS.Platform, killOk = true) {
   const dir = mkdtempSync(join(tmpdir(), 'folga-rel-'));
   const sent: Omit<ProbeCommand, 'id'>[] = [];
   const queue = [after, measured];
   const releaser = createReleaser({
     dataDir: dir,
-    probe: { send: async cmd => { sent.push(cmd); return { type: 'reply', id: 'x', ok: true, windowsClosed: 1 }; } },
+    probe: { send: async cmd => { sent.push(cmd); return { type: 'reply', id: 'x', ok: cmd.type === 'close' || killOk, windowsClosed: 1 }; } },
     getState: () => before,
     getSettings: () => settings,
     waitForSnapshot: async () => queue.shift() ?? measured,
@@ -114,6 +114,40 @@ const ok = (name: string) => { passed++; console.log(`ok  ${name}`); };
   assert.deepEqual(sent.filter(c => c.type === 'kill'), [{ type: 'kill', pids: [5] }]);   // Preview tem janela: nunca forçado
   ok('Mac: quem não saiu fica aberto; forçar só sem janela e em mayForceQuit');
   await rm(dir, { recursive: true, force: true, maxRetries: 5 });
+}
+
+{
+  // kill que a sonda recusou (ok:false) mantém o desfecho anterior, nos dois sistemas
+  const before = mem([app('teams', [3])], 200);
+  const after = mem([app('teams', [3], { state: 'protected', reason: 'no_window' })], 200);
+  const settings = { ...DEFAULT_SETTINGS, mayForceQuit: ['teams'] };
+  for (const [platform, esperado] of [['win32', 'bandeja'], ['darwin', 'ficou_aberto']] as const) {
+    const { dir, sent, releaser } = setup(before, after, after, settings, platform, false);
+    const r = await releaser.release(['teams'], 'manual');
+    assert.ok(!('erro' in r));
+    assert.equal(r.results[0]!.outcome, esperado);
+    assert.deepEqual(sent.at(-1), { type: 'kill', pids: [3] });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  }
+  ok('kill com ok:false não vira encerrado (bandeja no Windows, ficou_aberto no Mac)');
+}
+
+{
+  // pid reaproveitado por outro app durante a espera nunca é forçado
+  const settings = { ...DEFAULT_SETTINGS, mayForceQuit: ['teams'] };
+  const before = mem([app('teams', [3, 4])], 200);
+  const after = mem([app('teams', [3], { state: 'protected', reason: 'no_window' }), app('intruso', [4])], 200);
+  const { dir, sent, releaser } = setup(before, after, after, settings, 'win32');
+  await releaser.release(['teams'], 'manual');
+  assert.deepEqual(sent.filter(c => c.type === 'kill'), [{ type: 'kill', pids: [3] }]);
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
+
+  const gone = mem([app('intruso', [4])], 200);   // teams sumiu; o pid 4 agora é de outro app
+  const s2 = setup(before, gone, gone, settings, 'darwin');
+  await s2.releaser.release(['teams'], 'manual');
+  assert.equal(s2.sent.filter(c => c.type === 'kill').length, 0);
+  await rm(s2.dir, { recursive: true, force: true, maxRetries: 5 });
+  ok('kill só nos pids que seguem no mesmo grupo; grupo sumido = nada forçado');
 }
 
 console.log(`release: ${passed} casos ok`);

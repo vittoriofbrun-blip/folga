@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { snapshotErrors, replyErrors } from './contract.mjs';
 
@@ -14,6 +14,9 @@ const exe = join(dirname(fileURLToPath(import.meta.url)), '..', 'probe', 'bin', 
 const GB = 1024 ** 3, MB = 1024 ** 2;
 let load;
 const fail = (msg) => { load?.kill(); console.error('FALHOU:', msg); process.exit(1); };
+
+// --textedit fecha o TextEdit pela sonda: nunca o do usuário
+if (textedit && spawnSync('/usr/bin/pgrep', ['-x', 'TextEdit']).status === 0) fail('feche o TextEdit antes de rodar --textedit');
 
 // Filho de carga: um núcleo a 100 % e ~200 MB residentes. Sobe antes da sonda.
 load = spawn(process.execPath, ['-e', 'const b = Buffer.alloc(200e6, 1); for (;;) b[0]++'], { stdio: 'ignore' });
@@ -77,16 +80,23 @@ try {
   if (!(s.totalPhys > s.availPhys && s.availPhys > 0 && s.processes.length > 20)) fail('numeros implausiveis');
 
   if (textedit) {
-    // só fecha no fim se não estava aberto antes (não mexer em app real do usuário)
-    const wasRunning = spawnSync('/usr/bin/pgrep', ['-x', 'TextEdit']).status === 0;
-    if (!wasRunning) process.on('exit', () => spawnSync('/usr/bin/osascript', ['-e', 'quit app "TextEdit" saving no']));
     // abre um arquivo: sem documento o TextEdit mostra só o painel Abrir, que é de outro processo (sem janela no app)
-    const doc = join(mkdtempSync(join(tmpdir(), 'folga-smoke-')), 'teste.txt');
+    const dir = mkdtempSync(join(tmpdir(), 'folga-smoke-'));
+    const doc = join(dir, 'teste.txt');
     writeFileSync(doc, 'teste folga\n');
+    // o TextEdit é nosso (conferido no início): sai no fim mesmo se o teste falhar; a pasta temporária também
+    process.on('exit', () => {
+      spawnSync('/usr/bin/osascript', ['-e', 'quit app "TextEdit" saving no']);
+      rmSync(dir, { recursive: true, force: true });
+    });
     spawn('/usr/bin/open', ['-a', 'TextEdit', doc], { stdio: 'ignore' });
     const ok = (x) => x.processes.some((p) => p.pid === x.foregroundPid && p.name.toLowerCase() === 'com.apple.textedit' && p.hasVisibleWindow === true && p.windowCount >= 1);
     try { await until(() => ok(snaps.at(-1)), 10000, 'TextEdit'); }
-    catch { fail('primeiro plano ou janela do TextEdit não apareceu'); }
+    catch {
+      const x = snaps.at(-1), fg = x.processes.find((p) => p.pid === x.foregroundPid);
+      const tes = x.processes.filter((p) => p.name.toLowerCase() === 'com.apple.textedit').map((p) => `${p.pid}:${p.hasVisibleWindow}/${p.windowCount}`);
+      fail(`primeiro plano ou janela do TextEdit não apareceu (primeiro plano: ${fg?.name ?? x.foregroundPid}; TextEdit: ${tes.join(' ') || 'nenhum'})`);
+    }
     te = snaps.at(-1).processes.find((p) => p.pid === snaps.at(-1).foregroundPid);
     console.log(`TextEdit em primeiro plano: pid=${te.pid} windowCount=${te.windowCount}`);
   }
