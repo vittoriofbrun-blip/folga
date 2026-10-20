@@ -6,7 +6,7 @@ import { realpathSync, type Dirent, type Stats } from 'node:fs';
 import { lstat, opendir, readdir, realpath, unlink } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { userFolders } from './platform.ts';
+import { macHelper, userFolders } from './platform.ts';
 import type { QuickCleanCategory, QuickCleanItem, Settings, StaleBasis, StaleFile, StaleScan } from './types.ts';
 
 export type Browser = 'chrome' | 'edge';
@@ -21,10 +21,23 @@ export type FilesDeps = {
   browsersOpen?: () => Promise<Record<Browser, boolean>>;
   trash?: () => Promise<{ bytes: number; files: number }>;
   sendToTrash?: (paths: string[]) => Promise<void>;   // testes: Lixeira falsa no lugar do PowerShell
+  meta?: (paths: string[]) => Promise<FileMeta[] | null>;   // testes: Spotlight falso no lugar do `probe-mac --meta`
+  appRoot?: string | null;   // pasta onde um .app velho vira item (padrão: ~/Downloads no Mac; null = nenhum .app)
   maxEntries?: number; maxMs?: number; now?: () => number;
 };
 export type Inspected = { path: string; size: number; lastUsed: number; basis: StaleBasis };
 export type InspectError = { erro: string };
+/** O que o `probe-mac --meta` diz de um caminho (datas em ms). */
+export type FileMeta = { lastUsed: number | null; added: number | null; dataless: boolean; missing: boolean };
+const META_BATCH = 500;
+const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+/** Mac: último uso = max(mtime, Spotlight "última abertura" ?? "adicionado"); sem Spotlight vale o mtime. */
+function macUsage(mtime: number, m: FileMeta | null): { lastUsed: number; basis: StaleBasis } {
+  const used = num(m?.lastUsed), added = num(m?.added);
+  const sig = used ?? added ?? 0;
+  if (sig > mtime) return { lastUsed: sig, basis: used !== null ? 'spotlight' : 'adicionado' };
+  return { lastUsed: mtime, basis: 'modificacao' };
+}
 
 const DAY = 86_400_000;
 const MAX_ENTRIES = 100_000;
@@ -158,6 +171,35 @@ export function createFiles(deps: FilesDeps) {
   let lastScan: StaleScan | null = null;
   let trackingCache: boolean | null = null;
 
+  // ---------- Mac: Spotlight e .app de Downloads ----------
+  /** Metadados em lotes; lote sem resposta (ou resposta torta) vira null por item e answered = false. Sempre pergunta ao menos uma vez. */
+  async function metaAll(ps: string[]): Promise<{ list: Array<FileMeta | null>; answered: boolean }> {
+    const list: Array<FileMeta | null> = [];
+    let answered = true;
+    for (let i = 0; i === 0 || i < ps.length; i += META_BATCH) {
+      const part = ps.slice(i, i + META_BATCH);
+      const r = await (deps.meta ? deps.meta(part) : macHelper(['--meta'], part, 30_000)).catch(() => null);
+      const got = Array.isArray(r) && r.length === part.length ? (r as Array<FileMeta | null>) : null;
+      if (!got) answered = false;
+      list.push(...part.map((_, j) => (got?.[j] && typeof got[j] === 'object' ? got[j] : null)));
+    }
+    return { list, answered };
+  }
+  /** Pasta (real) onde um .app velho pode virar item; só vale se estiver numa pasta permitida. */
+  function appRootIn(roots: string[]): string | null {
+    const want = deps.appRoot !== undefined ? deps.appRoot : (MAC ? join(homedir(), 'Downloads') : null);
+    if (!want) return null;
+    let r: string;
+    try { r = realpathSync.native(want); } catch { return null; }
+    return roots.some(o => o === r || inside(o, r)) ? r : null;
+  }
+  /** Tamanho somado de um pacote .app e o mtime mais novo lá dentro (a pasta em si muda de data por qualquer coisa). */
+  async function appStats(app: string, b: Budget): Promise<{ size: number; mtime: number }> {
+    let size = 0, mtime = 0;
+    await walk(app, 32, null, b, (_p, st) => { size += st.size; if (st.mtimeMs > mtime) mtime = st.mtimeMs; });
+    return { size, mtime };
+  }
+
   // ---------- pastas permitidas ----------
   function allowedRoots(): string[] {
     const candidates = deps.roots ?? userFolders();
@@ -223,9 +265,13 @@ export function createFiles(deps: FilesDeps) {
     const b = newBudget(deps.maxEntries ?? MAX_ENTRIES, deps.maxMs ?? MAX_MS, now);
     const found: StaleFile[] = [];
     let total = 0;
+    // Mac: o passeio só junta candidatos (o último uso nunca é menor que o mtime, então o corte pelo mtime não perde nada);
+    // quem decide é o Spotlight, depois, em lotes
+    const cands: Array<{ path: string; root: string; size: number; mtime: number; isApp?: true }> = [];
     for (const root of roots) {
       await walk(root, MAX_DEPTH, n => n.startsWith('.') || SKIP_DIRS.has(lc(n)) || (MAC && isPackageDir(n)), b, (path, st) => {
         if (st.size < minBytes) return;
+        if (MAC) { if ((t0 - st.mtimeMs) / DAY >= days) cands.push({ path, root, size: st.size, mtime: st.mtimeMs }); return; }
         const name = basename(path);
         const u = usage(name, st, tracking, recent);
         if ((t0 - u.lastUsed) / DAY < days) return;
@@ -234,9 +280,35 @@ export function createFiles(deps: FilesDeps) {
       }, PROJECT_MARKERS);
       if (b.stopped) break;
     }
+    let tracked = tracking;
+    if (MAC) {
+      // decisão 12: .app (pasta de verdade, não link) filho direto do Downloads vira um item só, com o tamanho total
+      const appRoot = appRootIn(roots);
+      if (appRoot && !b.stopped) {
+        const root = roots.find(o => o === appRoot || inside(o, appRoot))!;
+        let ents: Dirent[] = [];
+        try { ents = await readdir(appRoot, { withFileTypes: true }); } catch { /* sem acesso */ }
+        for (const e of ents) {
+          if (b.stopped || !e.isDirectory() || !e.name.toLowerCase().endsWith('.app')) continue;
+          const path = join(appRoot, e.name);
+          const a = await appStats(path, b);
+          if (a.size >= minBytes && (t0 - a.mtime) / DAY >= days) cands.push({ path, root, size: a.size, mtime: a.mtime, isApp: true });
+        }
+      }
+      const { list, answered } = await metaAll(cands.map(c => c.path));
+      tracked = answered;
+      cands.forEach((c, i) => {
+        const m = list[i] ?? null;
+        if (m && (m.missing === true || m.dataless === true)) return;   // sumiu ou só existe no iCloud: nunca entra
+        const u = macUsage(c.mtime, m);
+        if ((t0 - u.lastUsed) / DAY < days) return;
+        total += c.size;
+        found.push({ path: c.path, name: basename(c.path), root: c.root, size: c.size, lastUsed: u.lastUsed, lastModified: c.mtime, basis: u.basis, ...(c.isApp ? { isApp: true as const } : {}) });
+      });
+    }
     found.sort((a, c) => c.size - a.size);
     const scan: StaleScan = {
-      t: t0, durationMs: now() - t0, roots, scanned: b.entries, truncated: b.stopped, accessTracking: tracking,
+      t: t0, durationMs: now() - t0, roots, scanned: b.entries, truncated: b.stopped, accessTracking: tracked,
       olderThanDays: days, minBytes, files: found.slice(0, MAX_FINDINGS), totalBytes: total,
     };
     lastScan = scan;
@@ -272,12 +344,16 @@ export function createFiles(deps: FilesDeps) {
   }
 
   // ---------- revalidação de caminhos (R21) ----------
-  /** Um caminho só passa se estiver dentro de uma pasta permitida, existir e for arquivo comum (não pasta, não link). */
+  /**
+   * Um caminho só passa se estiver dentro de uma pasta permitida, existir e for arquivo comum (não pasta, não link).
+   * Única pasta aceita: no Mac, um .app (pasta de verdade) filho direto do appRoot (decisão 12).
+   */
   async function inspect(paths: string[]): Promise<Array<Inspected | InspectError>> {
     projectCache.clear();   // a pasta pode ter virado (ou deixado de ser) projeto desde a última validação
     const roots = allowedRoots();
     const tracking = await accessTracking();
     const recent = await recentMap();
+    const appRoot = MAC ? appRootIn(roots) : null;
     const one = async (raw: unknown): Promise<Inspected | InspectError> => {
       const shape = pathShapeError(raw, process.platform);
       if (shape) return { erro: shape };
@@ -289,13 +365,32 @@ export function createFiles(deps: FilesDeps) {
       const [st, st2] = await Promise.all([lstat(full).catch(() => null), lstat(real).catch(() => null)]);
       if (!st || !st2) return { erro: 'o arquivo não existe mais' };
       if (st.isSymbolicLink() || st2.isSymbolicLink()) return { erro: 'é um atalho ou link, não um arquivo' };
-      if (!st2.isFile()) return { erro: 'não é um arquivo comum' };
+      const isApp = !!appRoot && st2.isDirectory() && dirname(real) === appRoot && lc(real).endsWith('.app');
+      if (!st2.isFile() && !isApp) return { erro: 'não é um arquivo comum' };
       const blocked = await inProject(real, roots);
       if (blocked) return { erro: blocked };
+      if (isApp) {
+        const a = await appStats(real, newBudget(MAX_ENTRIES, MAX_MS, now));
+        return { path: real, size: a.size, lastUsed: a.mtime, basis: 'modificacao' };   // lastUsed: mtime, o Spotlight entra abaixo
+      }
+      if (MAC) return { path: real, size: st2.size, lastUsed: st2.mtimeMs, basis: 'modificacao' };
       return { path: real, size: st2.size, ...usage(basename(real), st2, tracking, recent) };
     };
     const out: Array<Inspected | InspectError> = [];
     for (let i = 0; i < paths.length; i += 32) out.push(...await Promise.all(paths.slice(i, i + 32).map(one)));
+    if (MAC) {
+      // mesma regra da busca: a aprovação (M5) compara o lastUsed visto no cartão com este
+      const idx = out.flatMap((x, i) => ('erro' in x ? [] : [i]));
+      if (idx.length) {
+        const { list } = await metaAll(idx.map(i => (out[i] as Inspected).path));
+        idx.forEach((i, k) => {
+          const x = out[i] as Inspected, m = list[k] ?? null;
+          if (m?.missing === true) out[i] = { erro: 'o arquivo não existe mais' };
+          else if (m?.dataless === true) out[i] = { erro: 'só existe no iCloud' };
+          else out[i] = { ...x, ...macUsage(x.lastUsed, m) };
+        });
+      }
+    }
     return out;
   }
 
@@ -317,7 +412,10 @@ export function createFiles(deps: FilesDeps) {
     let inTrash: number | null = 0;
     if (send.length) {
       const before = await trashCount();
-      await (deps.sendToTrash ? deps.sendToTrash(send) : runPS(PS_RECYCLE, send, 120_000));
+      if (deps.sendToTrash) await deps.sendToTrash(send);
+      // Mac: o --trash revalida sozinho (inclusive o .app só como filho direto do appRoot); a contagem fina vem na Task 4
+      else if (MAC) { const roots = allowedRoots(); await macHelper(['--trash'], { roots, appRoot: appRootIn(roots), paths: send }, 120_000); }
+      else await runPS(PS_RECYCLE, send, 120_000);
       // o disco diz o que saiu da pasta; a contagem da Lixeira (antes × depois) diz quantos de fato entraram (M4)
       for (const real of send) (await exists(real) ? failed : ok).push(sentFor.get(real)!);
       const after = await trashCount();

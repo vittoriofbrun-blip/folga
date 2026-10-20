@@ -105,10 +105,11 @@ export type DiskInfo = { drive: string; total: number; free: number };
 export type StartupApp = { name: string; command: string; source: 'registro_usuario' | 'registro_maquina' | 'pasta_inicializar'; enabled: boolean };
 
 // Arquivos parados (D16)
-export type StaleBasis = 'acesso' | 'recentes' | 'modificacao';
+export type StaleBasis = 'acesso' | 'recentes' | 'modificacao' | 'spotlight' | 'adicionado';
 export type StaleFile = {
   path: string; name: string; root: string;   // root = pasta do usuário onde foi achado
   size: number; lastUsed: number; lastModified: number; basis: StaleBasis;
+  isApp?: true;   // Mac: pasta .app velha direto no Downloads, um item com o tamanho somado
 };
 export type StaleScan = {
   t: number; durationMs: number; roots: string[]; scanned: number; truncated: boolean;

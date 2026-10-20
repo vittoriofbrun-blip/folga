@@ -123,7 +123,8 @@ export const TOOLS: Tool[] = [
         buscaTruncada: r.truncated,
         semUsoHaDias: r.olderThanDays,
         minMB: mb(r.minBytes),
-        // base: 'acesso' = último acesso registrado; 'recentes' = lista Recentes do Windows; 'modificacao' = só a data de modificação
+        // base: 'acesso' = último acesso registrado; 'recentes' = lista Recentes do Windows; 'modificacao' = só a data de modificação;
+        // 'spotlight' = última abertura registrada pelo Spotlight do Mac; 'adicionado' = quando o arquivo chegou na pasta (Mac)
         arquivos: r.files.slice(0, 40).map(f => ({ caminho: texto(f.path), MB: mb(f.size), ultimoUso: dia(f.lastUsed), base: f.basis })),
         mostrando: Math.min(40, r.files.length),
       };

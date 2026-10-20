@@ -4,9 +4,9 @@ import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { createFiles, isPackageDir, pathKey, pathShapeError, type FilesDeps, type Inspected } from '../files.ts';
+import { createFiles, isPackageDir, pathKey, pathShapeError, type FileMeta, type FilesDeps, type Inspected } from '../files.ts';
 import { DEFAULT_SETTINGS } from '../types.ts';
 
 const WIN = process.platform === 'win32';
@@ -16,6 +16,8 @@ const MB = 1024 * 1024;
 // nome com acento de propósito (o caminho real do usuário tem: C:\Users\Antônio)
 const base = mkdtempSync(join(tmpdir(), 'folga-arq-ção-'));
 const dir = (...p: string[]) => { const d = join(base, ...p); mkdirSync(d, { recursive: true }); return d; };
+// Spotlight falso e neutro: no Mac nenhum teste depende do índice real (nem do binário, que a CI compila depois)
+const noMeta = async (ps: string[]): Promise<FileMeta[]> => ps.map(() => ({ lastUsed: null, added: null, dataless: false, missing: false }));
 const file = (path: string, bytes: number, daysOld: number) => {
   writeFileSync(path, '');
   truncateSync(path, bytes);
@@ -34,7 +36,7 @@ try {
   const mk = (over: Partial<FilesDeps> = {}) => createFiles({
     getSettings: () => DEFAULT_SETTINGS, roots: [downloads, docs], recentDir: recent, accessTracking: true,
     tempDirs: [join(base, 'sem-temp')], cacheDirs: {}, browsersOpen: async () => ({ chrome: false, edge: false }),
-    trash: async () => ({ bytes: 0, files: 0 }), ...over,
+    trash: async () => ({ bytes: 0, files: 0 }), meta: noMeta, ...over,
   });
 
   // ---------- allowedRoots ----------
@@ -79,7 +81,7 @@ try {
     assert.equal(s.accessTracking, true);
     assert.equal(s.olderThanDays, 30);
     assert.equal(s.minBytes, MB);
-    assert.equal(s.files[0]!.basis, 'acesso');
+    assert.equal(s.files[0]!.basis, MAC ? 'modificacao' : 'acesso');   // no Mac quem dá o uso é o Spotlight (neutro aqui)
     assert.equal(s.files[0]!.root.toLowerCase(), realpathSync.native(downloads).toLowerCase());
     assert.ok(s.scanned > 5 && s.durationMs >= 0 && s.t > 0);
     assert.equal(f.last(), s);
@@ -89,14 +91,14 @@ try {
     assert.deepEqual(s2.files.map(x => x.name), ['velho-grande.iso']);
     ok('scan: parâmetros mudam o resultado');
 
-    const def = await createFiles({ getSettings: () => ({ ...DEFAULT_SETTINGS, staleDays: 300, staleMinMB: 1 }), roots: [downloads, docs], recentDir: recent, accessTracking: true }).scan();
+    const def = await createFiles({ getSettings: () => ({ ...DEFAULT_SETTINGS, staleDays: 300, staleMinMB: 1 }), roots: [downloads, docs], recentDir: recent, accessTracking: true, meta: noMeta }).scan();
     assert.equal(def.files.length, 1);
     ok('scan: sem parâmetros usa os Ajustes (staleDays/staleMinMB)');
   }
 
   {
     const s = await mk({ accessTracking: false }).scan({ olderThanDays: 30, minMB: 1 });
-    assert.equal(s.accessTracking, false);
+    assert.equal(s.accessTracking, !!MAC);   // no Mac: o Spotlight respondeu
     assert.ok(s.files.every(x => x.basis === 'modificacao'));
     ok("scan: rastreio de acesso desligado → basis 'modificacao'");
   }
@@ -251,6 +253,46 @@ try {
     assert.match((fora.at(-1) as { erro: string }).erro, /pacote/);
     assert.ok(!(await mk().scan({ olderThanDays: 30, minMB: 1 })).files.some(f => /photoslibrary/.test(f.path)));
     ok('Mac: firmlink /private, NFC/NFD, sem caixa, link para fora, /etc e pacote opaco');
+  }
+
+  if (MAC) {
+    const META: Record<string, Partial<FileMeta>> = { 'nuvem.mov': { dataless: true }, 'aberto.iso': { lastUsed: Date.now() - 2 * DAY },
+      'spot.iso': { lastUsed: Date.now() - 300 * DAY }, 'add.iso': { added: Date.now() - 250 * DAY } };
+    const meta = async (ps: string[]) => ps.map(p => ({ lastUsed: null, added: null, dataless: false, missing: false, ...META[basename(p)] }));
+    for (const n of Object.keys(META)) file(join(downloads, n), 3 * MB, 400);
+    const f = mk({ meta });
+    const s = await f.scan({ olderThanDays: 30, minMB: 1 });
+    const by = (n: string) => s.files.find(x => x.name === n);
+    assert.equal(by('nuvem.mov'), undefined);                 // só na nuvem: nunca entra
+    assert.equal(by('aberto.iso'), undefined);                // aberto há 2 dias pelo Spotlight: não é parado
+    assert.equal(by('spot.iso')!.basis, 'spotlight');
+    assert.equal(by('add.iso')!.basis, 'adicionado');         // chegou há 250 d, mtime de 400 d: vale o mais novo
+    assert.ok(Math.abs(by('add.iso')!.lastUsed - (Date.now() - 250 * DAY)) < 60_000);
+    assert.equal(s.accessTracking, true);
+    assert.ok('erro' in (await f.inspect([join(downloads, 'nuvem.mov')]))[0]!);
+    const ri = await f.inspect([join(downloads, 'spot.iso'), join(downloads, 'add.iso')]);
+    assert.deepEqual(ri.map(x => (x as Inspected).basis), ['spotlight', 'adicionado']);   // a aprovação (M5) usa a mesma regra
+    const sNull = await mk({ meta: async () => null }).scan({ olderThanDays: 30, minMB: 1 });
+    assert.ok(sNull.files.every(x => x.basis === 'modificacao'));   // Spotlight fora: cai para mtime
+    assert.ok(sNull.files.some(x => x.name === 'nuvem.mov') && sNull.accessTracking === false, 'sem Spotlight não esconde nada');
+    // decisão 12: .app velho só como filho direto de Downloads, um item com o tamanho total
+    const velho = dir('Downloads', 'Instalador.app', 'Contents'); file(join(velho, 'bin'), 2 * MB, 400); file(join(velho, 'res'), 2 * MB, 400);
+    file(join(dir('Documentos', 'Outro.app', 'Contents'), 'bin'), 5 * MB, 400);
+    file(join(dir('Downloads', 'pasta', 'Fundo.app', 'Contents'), 'bin'), 5 * MB, 400);
+    symlinkSync('/Applications/Safari.app', join(downloads, 'Atalho.app'));
+    const fa = mk({ meta, appRoot: realpathSync(downloads) });
+    const sa = await fa.scan({ olderThanDays: 30, minMB: 1 });
+    assert.deepEqual(sa.files.filter(x => x.isApp).map(x => [x.name, x.size]), [['Instalador.app', 4 * MB]]);
+    assert.ok(!sa.files.some(x => /Outro\.app|Fundo\.app|Atalho\.app|Contents/.test(x.path)));
+    const ia = await fa.inspect([join(downloads, 'Instalador.app'), join(docs, 'Outro.app'), join(downloads, 'pasta', 'Fundo.app'), join(downloads, 'Atalho.app'), '/Applications/Safari.app']);
+    assert.ok(!('erro' in ia[0]!), JSON.stringify(ia[0])); ia.slice(1).forEach(x => assert.ok('erro' in x, JSON.stringify(x)));
+    assert.equal((ia[0] as Inspected).size, 4 * MB);
+    assert.ok('erro' in (await mk({ meta, appRoot: null }).inspect([join(downloads, 'Instalador.app')]))[0]!);
+    file(join(dir('Fora', 'Solto.app', 'Contents'), 'bin'), 5 * MB, 400);
+    assert.ok(!(await mk({ meta, appRoot: realpathSync(outside) }).scan({ olderThanDays: 30, minMB: 1 })).files.some(x => x.isApp), 'appRoot fora das raízes: nenhum .app');
+    for (const n of [...Object.keys(META), 'Atalho.app']) await rm(join(downloads, n));
+    await rm(join(downloads, 'Instalador.app'), { recursive: true });
+    ok('Mac: Spotlight (spotlight/adicionado), só na nuvem fora, Spotlight fora → mtime; .app só filho direto de Downloads');
   }
 
   // ---------- limpeza rápida ----------

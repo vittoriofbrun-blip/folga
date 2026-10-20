@@ -25,6 +25,8 @@ const BASIS: Record<StaleFile['basis'], string> = {
   acesso: 'último acesso registrado pelo Windows',
   recentes: 'atalho na pasta Recentes do Windows',
   modificacao: 'data de modificação',
+  spotlight: 'última abertura registrada pelo Mac',
+  adicionado: 'data em que chegou na pasta',
 };
 
 type SortKey = 'name' | 'folder' | 'size' | 'lastUsed';
