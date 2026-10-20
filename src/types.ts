@@ -9,11 +9,14 @@ export type ProbeProcess = {
   windowCount?: number;        // quantas dessas janelas (R29); sondas antigas não mandam
   accessible: boolean;         // OpenProcess com o token do usuário funcionou
 };
+export type MemPressure = 'normal' | 'warn' | 'critical';
 export type ProbeSnapshot = {
   type: 'snapshot'; t: number; memLoad: number; totalPhys: number; availPhys: number;
   foregroundPid: number | null;
   audioPids?: number[];        // pids com sessão de áudio ativa no dispositivo padrão (F-11); ausente = sonda antiga
   diskActive?: number | null;  // tempo de atividade do disco em %, como no Gerenciador de Tarefas; null na 1ª leitura
+  memPressure?: MemPressure;   // só no Mac (kern.memorystatus_vm_pressure_level); ausente = sonda do Windows
+  swapUsed?: number;           // bytes de swap em uso (só no Mac)
   processes: ProbeProcess[];
 };
 // Node → sonda

@@ -69,9 +69,12 @@ export type ProbeProcess = {
   hasVisibleWindow: boolean;   // janela de topo visível, sem dono
   accessible: boolean;         // OpenProcess com o token do usuário funcionou
 };
+export type MemPressure = 'normal' | 'warn' | 'critical';
 export type ProbeSnapshot = {
   type: 'snapshot'; t: number; memLoad: number; totalPhys: number; availPhys: number;
   foregroundPid: number | null; processes: ProbeProcess[];
+  memPressure?: MemPressure;   // só no Mac (kern.memorystatus_vm_pressure_level); ausente = sonda do Windows
+  swapUsed?: number;           // bytes de swap em uso (só no Mac)
 };
 // Node → sonda
 export type ProbeCommand =
