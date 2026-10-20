@@ -34,6 +34,8 @@ Estado real do Mac (raio-X de 2026-10-20, só leitura):
 7. **"Dados dos apps" vale nos dois sistemas.** O Windows ganha a mesma visão, com a própria allowlist de caches
    em `%LOCALAPPDATA%`/`%APPDATA%` (Chrome/Edge/Electron: `Cache`, `Code Cache`, `GPUCache`, …; versões antigas
    do Claude Code se existirem lá).
+8. **App do Dock sem janela e parado pode ser encerrado (Cmd+Q).** É o desperdício mais comum no Mac. App de
+   barra de menus/agente continua protegido (P03).
 
 ## Objetivos
 
