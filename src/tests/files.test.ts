@@ -227,7 +227,10 @@ try {
     assert.ok(pathShapeError('/Users/v/a.txt', 'win32'));                       // Windows segue só com letra de unidade
     assert.equal(pathShapeError('C:\\Users\\v\\a.txt', 'win32'), null);
     assert.equal(isPackageDir('Fotos.photoslibrary'), true); assert.equal(isPackageDir('Projeto 2025'), false);
-    assert.equal(pathKey('/A/Anto\u0302nio'), pathKey('/a/antônio'));
+    const nfc = '/A/Ant\u00f4nio', nfd = '/a/Anto\u0302nio';
+    assert.equal(pathKey(nfc, 'darwin'), pathKey(nfd, 'darwin'));             // APFS: mesma pasta
+    assert.notEqual(pathKey(nfc, 'win32'), pathKey(nfd, 'win32'));            // NTFS não normaliza: arquivos distintos
+    assert.equal(pathKey('C:\\A\\B.TXT', 'win32'), 'c:\\a\\b.txt');
     ok('pathShapeError/isPackageDir/pathKey: forma do caminho por sistema, pacote pelo nome, chave NFC sem caixa');
   }
   if (MAC) {

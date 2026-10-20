@@ -4,7 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { pathKey, type Files } from './files.ts';
 import type { ReleaseError } from './release.ts';
 import type {
@@ -111,7 +111,7 @@ export function createSuggestions(deps: SuggestionsDeps) {
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({
-        id: c.path, label: c.path.split(/[\\/]/).pop()!,
+        id: c.path, label: basename(c.path),
         detail: `${folderOf(c.path)} · último uso há ${since(now() - c.lastUsed)}`, bytes: c.size, lastUsed: c.lastUsed,
       });
     }
@@ -208,7 +208,7 @@ export function createSuggestions(deps: SuggestionsDeps) {
     const changed = s.items.findIndex((it, i) => good[i]!.size !== it.bytes || good[i]!.lastUsed > (it.lastUsed ?? -Infinity));
     if (changed !== -1) return { status: 'falhou', result: `Nada foi enviado: o arquivo ${s.items[changed]!.label} foi usado ou mudou depois da sugestão.` };
     const r = await deps.files.recycle(good.map(g => g.path));
-    const okSet = new Set(r.ok.map(pathKey));
+    const okSet = new Set(r.ok.map(p => pathKey(p)));
     const moved = good.filter(g => okSet.has(pathKey(g.path)));
     const bytes = moved.reduce((a, g) => a + g.size, 0);
     const parts: string[] = [];

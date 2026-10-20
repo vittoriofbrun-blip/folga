@@ -49,8 +49,9 @@ export function pathShapeError(raw: unknown, platform: NodeJS.Platform): string 
   // absoluto e sem '.'/'..': quem pede não navega, aponta
   return !raw.startsWith('/') || raw.split('/').some(seg => seg === '.' || seg === '..') ? 'caminho inválido ou fora das pastas permitidas' : null;
 }
-/** Chave de comparação de caminho: o APFS não distingue caixa nem NFC/NFD, o NTFS não distingue caixa. */
-export const pathKey = (p: string) => p.normalize('NFC').toLowerCase();
+/** Chave de comparação de caminho: o APFS não distingue caixa nem NFC/NFD; o NTFS só não distingue caixa (NFC e NFD são arquivos distintos). */
+export const pathKey = (p: string, platform: NodeJS.Platform = process.platform) =>
+  (platform === 'darwin' ? p.normalize('NFC') : p).toLowerCase();
 // ponytail: toda pasta com extensão é opaca; pasta comum com ponto no nome fica de fora da busca — falso negativo seguro.
 // LaunchServices diria "é pacote" com certeza, mas é outro processo por pasta.
 /** Pasta-pacote do Mac (.app, .photoslibrary, .bundle…): por dentro é do app, não do usuário. */
