@@ -47,6 +47,8 @@ export type LogEntry = {
 export type Settings = {
   idleMinutes: number; busyCpuPercent: number; sampleSeconds: number;
   autoCareEnabled: boolean; autoCareThreshold: number; autoCareCooldownMinutes: number;
+  autoCareTrigger: 'percent' | 'pressure';   // Mac: pressão do sistema; Windows e arquivo antigo: percentual
+  autoCarePressure: 'warn' | 'critical';     // a partir de qual pressão dispara (só no modo pressure)
   neverClose: string[]; mayForceQuit: string[];
   // v2
   warningsLevel: 'todos' | 'criticos';   // R27
@@ -59,6 +61,7 @@ export type MemoryState = {
   t: number; memLoad: number; totalPhys: number; availPhys: number;
   apps: AppGroup[]; freed: ReleaseResult[]; settings: Settings; startedAt: number;
   autoCare: { nextEligibleAt: number | null; lastRunAt: number | null };   // preenchido no F-06
+  memPressure?: MemPressure; swapUsed?: number;   // só no Mac
   samples?: Sample[];   // últimos 60 s para os gráficos de linha do Início; ausente = servidor antigo
 };
 /** Uma leitura para os gráficos: memória em uso e atividade do disco, em %. */
@@ -73,6 +76,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoCareEnabled: false,
   autoCareThreshold: 92,
   autoCareCooldownMinutes: 10,
+  autoCareTrigger: 'percent',
+  autoCarePressure: 'warn',
   // terminais, editores e apps de agente rodam agentes e servidores; fechar mata o que está dentro (R05)
   neverClose: ['windowsterminal', 'cmd', 'powershell', 'pwsh', 'code', 'cursor', 'claude', 'antigravity ide', 'codex'],
   mayForceQuit: [],

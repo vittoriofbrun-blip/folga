@@ -12,13 +12,17 @@ caso('dataDir: darwin, win32 e FOLGA_DATA_DIR', () => {
   assert.equal(dataDir('darwin', { FOLGA_DATA_DIR: '/tmp/f' }, '/Users/v'), '/tmp/f');
 });
 
-caso('defaultSettings: win32 intacto; darwin só muda neverClose', () => {
+caso('defaultSettings: win32 intacto; darwin muda neverClose e o gatilho', () => {
   assert.deepEqual(defaultSettings('win32'), DEFAULT_SETTINGS);
   const mac = defaultSettings('darwin');
   assert.deepEqual(mac.neverClose, MAC_NEVER_CLOSE);
   assert.ok(mac.neverClose.includes('com.apple.terminal') && mac.neverClose.includes('com.anthropic.claudefordesktop'));
   assert.ok(mac.neverClose.every(k => k === k.toLowerCase()));
-  assert.deepEqual({ ...mac, neverClose: DEFAULT_SETTINGS.neverClose }, DEFAULT_SETTINGS);
+  assert.deepEqual({ ...mac, neverClose: DEFAULT_SETTINGS.neverClose, autoCareTrigger: 'percent' }, DEFAULT_SETTINGS);
+  assert.equal(mac.autoCareTrigger, 'pressure');
+  assert.equal(defaultSettings('win32').autoCareTrigger, 'percent');
+  assert.equal(mac.autoCarePressure, 'warn');
+  assert.equal(defaultSettings('win32').autoCarePressure, 'warn');
 });
 
 casos.forEach((c) => console.log('ok  ' + c));

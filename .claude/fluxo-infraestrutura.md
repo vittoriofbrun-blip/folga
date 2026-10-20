@@ -100,12 +100,15 @@ export type LogEntry = {
 export type Settings = {
   idleMinutes: number; busyCpuPercent: number; sampleSeconds: number;
   autoCareEnabled: boolean; autoCareThreshold: number; autoCareCooldownMinutes: number;
+  autoCareTrigger: 'percent' | 'pressure';   // Mac: pressão; Windows e arquivo antigo: percentual
+  autoCarePressure: 'warn' | 'critical';     // a partir de qual pressão dispara (modo pressure)
   neverClose: string[]; mayForceQuit: string[];
 };
 export type MemoryState = {
   t: number; memLoad: number; totalPhys: number; availPhys: number;
   apps: AppGroup[]; freed: ReleaseResult[]; settings: Settings; startedAt: number;
   autoCare: { nextEligibleAt: number | null; lastRunAt: number | null };   // preenchido no F-06
+  memPressure?: MemPressure; swapUsed?: number;   // só no Mac
 };
 ```
 

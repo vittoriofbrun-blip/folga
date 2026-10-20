@@ -53,7 +53,8 @@ function loadSettings(): Settings {
   try {
     // tira o BOM: editor ou PowerShell 5.1 gravando o arquivo o coloca, e aí o JSON.parse falha e os
     // ajustes do usuário somem em silêncio (visto num teste nosso em 2026-10-18)
-    const r = mergeSettings(DEFAULTS, JSON.parse(readFileSync(settingsFile, 'utf8').replace(/^﻿/, '')));
+    // arquivo sem o campo é de antes do Mac: percentual, sem migração (spec)
+    const r = mergeSettings({ ...DEFAULTS, autoCareTrigger: 'percent' }, JSON.parse(readFileSync(settingsFile, 'utf8').replace(/^﻿/, '')));
     if (typeof r === 'string') throw new Error(r);
     settingsFrom = 'settings.json';
     settingsProblem = null;
@@ -74,6 +75,7 @@ const RANGES: Partial<Record<keyof Settings, [number, number]>> = {
 };
 const ENUMS: Partial<Record<keyof Settings, readonly string[]>> = {
   warningsLevel: ['todos', 'criticos'], agentProvider: ['claude', 'gpt'],
+  autoCareTrigger: ['percent', 'pressure'], autoCarePressure: ['warn', 'critical'],
 };
 const BOOLS: readonly (keyof Settings)[] = ['autoCareEnabled', 'watchEnabled'];
 /** Valida um PUT parcial; devolve o ajuste completo ou uma mensagem de erro. */
@@ -147,6 +149,7 @@ function onSnapshot(snap: ProbeSnapshot, fresh = false) {
     t: now, memLoad: snap.memLoad, totalPhys: snap.totalPhys, availPhys: snap.availPhys,
     apps: r.apps, freed: releaser.freed(), settings, startedAt,
     autoCare: { nextEligibleAt: null, lastRunAt: null }, samples,
+    memPressure: snap.memPressure, swapUsed: snap.swapUsed,
   };
   if (fresh) {
     const d = decide({ ...ac, running: ac.running || releaser.isBusy() }, state, settings, now);

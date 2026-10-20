@@ -26,6 +26,14 @@ await caso('a linha vem do Auto Care: 7 pontos antes dele, ou 85 % com ele desli
   assert.equal(memoryLine(set({ autoCareEnabled: false, autoCareThreshold: 92 })), 85);
 });
 
+await caso('modo pressão: a linha é a pressão amarela, não a porcentagem', () => {
+  const pr = set({ autoCareTrigger: 'pressure' });
+  assert.ok(memoryPlan({ ...mem(10, [app('chrome', 900)]), memPressure: 'warn' }, pr));
+  assert.equal(memoryPlan({ ...mem(10, [app('chrome', 900)]), memPressure: 'normal' }, pr), null);
+  assert.equal(memoryPlan(mem(99, [app('chrome', 900)]), pr), null);   // sem pressão (Windows): quieto
+  assert.equal(memoryPlan({ ...mem(10, [app('chrome', 900)]), memPressure: 'warn' }, set({ autoCareTrigger: 'percent' })), null);   // percentual: nada muda
+});
+
 await caso('abaixo da linha, ou com pouca coisa parada, não propõe', () => {
   assert.equal(memoryPlan(mem(84, [app('chrome', 900)]), DEFAULT_SETTINGS), null);
   assert.equal(memoryPlan(mem(90, [app('chrome', 100)]), DEFAULT_SETTINGS), null);   // 100 MB < 500 MB

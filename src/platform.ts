@@ -19,6 +19,6 @@ export function dataDir(
 
 export function defaultSettings(platform: NodeJS.Platform = process.platform): Settings {
   const s = { ...DEFAULT_SETTINGS };
-  if (platform === 'darwin') s.neverClose = [...MAC_NEVER_CLOSE];
+  if (platform === 'darwin') { s.neverClose = [...MAC_NEVER_CLOSE]; s.autoCareTrigger = 'pressure'; }
   return s;
 }

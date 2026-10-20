@@ -1,5 +1,6 @@
 // F-20: o vigia (R30). Olha memória e disco sozinho e PROPÕE um cartão; nada acontece sem o clique do
 // usuário (R20), e a aprovação revalida tudo (R21). Sem modelo de linguagem: os números já estão aqui.
+import { pressureAtLeast } from './autocare.ts';
 import { EXPIRED, size } from './suggestions.ts';
 import type { DiskInfo, MemoryState, QuickCleanItem, Settings, Suggestion, SuggestionDraft, SuggestionKind } from './types.ts';
 
@@ -35,7 +36,9 @@ export function memoryLine(s: Settings): number {
 
 /** Os apps parados que valem a pena fechar agora, maiores primeiro. Null = não vale propor. */
 export function memoryPlan(state: MemoryState, settings: Settings): { keys: string[]; names: string[]; bytes: number } | null {
-  if (state.memLoad < memoryLine(settings)) return null;
+  // Mac: propõe já na pressão amarela (R30), antes ou junto do Auto Care; Windows: pela porcentagem
+  const above = settings.autoCareTrigger === 'pressure' ? pressureAtLeast(state.memPressure, 'warn') : state.memLoad >= memoryLine(settings);
+  if (!above) return null;
   const idle = state.apps.filter(a => a.state === 'idle')
     .sort((a, b) => b.privateWorkingSet - a.privateWorkingSet).slice(0, MEM_MAX_APPS);
   const bytes = idle.reduce((a, b) => a + b.privateWorkingSet, 0);
