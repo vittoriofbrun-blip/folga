@@ -106,6 +106,28 @@ func servidorFora(_ error: Error) -> Bool {
     && [NSURLErrorCannotConnectToHost, NSURLErrorNetworkConnectionLost, NSURLErrorTimedOut, NSURLErrorCannotFindHost].contains(e.code)
 }
 
+/// Apps que o servidor já classificou como parados (só `state == "idle"`; `in_use`, `protected` — que inclui
+/// `__self` e o app em primeiro plano — e item sem chave ficam fora), maior memória primeiro.
+func idleApps(_ state: [String: Any]) -> [(key: String, name: String, bytes: Int64)] {
+  ((state["apps"] as? [[String: Any]]) ?? []).compactMap { a in
+    guard a["state"] as? String == "idle", let key = a["key"] as? String, !key.isEmpty else { return nil }
+    return (key, a["name"] as? String ?? key, (a["privateWorkingSet"] as? NSNumber)?.int64Value ?? 0)
+  }.sorted { $0.bytes > $1.bytes }
+}
+
+/// Mesmo formato do `size()` da interface: "180 MB", "1,5 GB" (base 1024, vírgula, espaço não separável).
+func tamanho(_ b: Int64) -> String {
+  let gb = 1_073_741_824.0, mb = 1_048_576.0
+  let f = NumberFormatter()
+  f.locale = Locale(identifier: "pt_BR")
+  if Double(b) >= gb {
+    f.minimumFractionDigits = 1; f.maximumFractionDigits = 1
+    return "\(f.string(from: NSNumber(value: Double(b) / gb)) ?? "?")\u{a0}GB"
+  }
+  f.maximumFractionDigits = 0
+  return "\(f.string(from: NSNumber(value: max(0, Double(b)) / mb)) ?? "?")\u{a0}MB"
+}
+
 func statusText(memLoad: Int?, freeBytes: Int64?) -> String {
   guard let m = memLoad else { return "Folga" }
   guard let f = freeBytes else { return "\(m)%" }
@@ -189,6 +211,22 @@ func selftest() -> Int32 {
                                 (NSURLErrorDomain, NSURLErrorBadURL, false)] {
     caso("servidorFora(\(dom) \(cod)) = \(esperado)", servidorFora(NSError(domain: dom, code: cod)) == esperado)
   }
+  let estadoTeste = try! JSONSerialization.jsonObject(with: Data("""
+    {"memLoad": 70, "apps": [
+      {"key": "com.apple.preview", "name": "Prévia", "privateWorkingSet": 80000000, "state": "idle"},
+      {"key": "com.apple.textedit", "name": "TextEdit", "privateWorkingSet": 100000000, "state": "idle"},
+      {"key": "com.google.chrome", "name": "Google Chrome", "privateWorkingSet": 900000000, "state": "in_use"},
+      {"key": "__self", "name": "Folga", "privateWorkingSet": 70000000, "state": "protected"},
+      {"key": "com.apple.terminal", "name": "Terminal", "privateWorkingSet": 50000000, "state": "protected"},
+      {"name": "Sem chave", "privateWorkingSet": 999000000, "state": "idle"}
+    ]}
+    """.utf8)) as! [String: Any]
+  let parados = idleApps(estadoTeste)
+  caso("idleApps: só idle, maior primeiro", parados.map(\.key) == ["com.apple.textedit", "com.apple.preview"])
+  caso("idleApps: nome e bytes", parados.first?.name == "TextEdit" && parados.first?.bytes == 100_000_000)
+  caso("idleApps: estado sem apps → vazio", idleApps(["memLoad": 50]).isEmpty)
+  caso("tamanho: 180 MB e 1,5 GB", tamanho(180 * 1_048_576) == "180\u{a0}MB" && tamanho(1_610_612_736) == "1,5\u{a0}GB")
+
   caso("statusText sem servidor → Folga", statusText(memLoad: nil, freeBytes: nil) == "Folga")
   caso("statusText 62% · 39 GB", statusText(memLoad: 62, freeBytes: 39_000_000_000) == "62% · 39 GB")
 
@@ -242,13 +280,70 @@ final class Supervisor {
     sair.target = self
     let abrir = NSMenuItem(title: "Abrir Folga", action: #selector(abrirJanela), keyEquivalent: "o")
     abrir.target = self
-    for i in [abrir, .separator(), estado, tentar, .separator(), sair] { menu.addItem(i) }
+    let liberar = NSMenuItem(title: "Liberar parados…", action: #selector(liberarParados), keyEquivalent: "")
+    liberar.target = self
+    for i in [abrir, liberar, .separator(), estado, tentar, .separator(), sair] { menu.addItem(i) }
     item.menu = menu
     relogio = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in Task { @MainActor in await self.atualizarTexto() } }
     Task { await atualizarTexto() }
   }
 
   @objc func abrirJanela() { janela.abrir() }
+
+  @objc private func liberarParados() { Task { await liberar() } }
+
+  private func pedir(_ metodo: String, _ caminho: String, token: String? = nil, corpo: Data? = nil) async -> (Int, [String: Any])? {
+    var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(caminho)")!)
+    req.httpMethod = metodo
+    req.timeoutInterval = metodo == "POST" ? 60 : 5   // liberar espera os apps fecharem
+    if let corpo {
+      req.httpBody = corpo
+      req.setValue("application/json", forHTTPHeaderField: "content-type")
+    }
+    if let token { req.setValue(token, forHTTPHeaderField: "x-folga-token") }
+    guard let (data, resp) = try? await sessao.data(for: req), let http = resp as? HTTPURLResponse else { return nil }
+    return (http.statusCode, (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:])
+  }
+
+  private func avisar(_ titulo: String, _ texto: String) {
+    let a = NSAlert()
+    a.messageText = titulo
+    a.informativeText = texto
+    NSApp.activate(ignoringOtherApps: true)
+    a.runModal()
+  }
+
+  /// O mesmo caminho do botão da tela Memória: lista do servidor, confirmação, POST /api/release com o token.
+  /// O releaser revalida tudo no clique (protegido → 409). O token é lido só aqui e não fica guardado.
+  private func liberar() async {
+    guard let (st, estado) = await pedir("GET", "/api/state"), st == 200 else {
+      return avisar("O Folga não respondeu", "Tente de novo em alguns segundos.")
+    }
+    let apps = idleApps(estado)
+    if apps.isEmpty { return avisar("Nada parado agora", "Nenhum app está parado neste momento.") }
+    let total = apps.reduce(0) { $0 + $1.bytes }
+    let a = NSAlert()
+    a.messageText = "Liberar parados"
+    a.informativeText = "Fechar do jeito normal (como Cmd+Q): \(apps.map(\.name).joined(separator: ", ")) — cerca de \(tamanho(total)). Cada app pode perguntar se você quer salvar."
+    a.addButton(withTitle: "Fechar")
+    a.addButton(withTitle: "Cancelar").keyEquivalent = "\u{1b}"   // Esc cancela
+    NSApp.activate(ignoringOtherApps: true)
+    guard a.runModal() == .alertFirstButtonReturn else { return }
+
+    guard let (ts, tk) = await pedir("GET", "/api/token"), ts == 200, let token = tk["token"] as? String else {
+      return avisar("Não deu para liberar agora", "O Folga não respondeu. Tente de novo.")
+    }
+    let corpo = try? JSONSerialization.data(withJSONObject: ["keys": apps.map(\.key)])
+    guard let (rs, r) = await pedir("POST", "/api/release", token: token, corpo: corpo) else {
+      return avisar("Não deu para liberar agora", "O Folga não respondeu. Tente de novo.")
+    }
+    guard rs == 200 else { return avisar("Não deu para liberar agora", r["erro"] as? String ?? "Erro \(rs).") }
+    // R08: o que voltou é o disponível depois menos o de antes, nunca a soma dos apps
+    let volta = ((r["availAfter"] as? NSNumber)?.int64Value ?? 0) - ((r["availBefore"] as? NSNumber)?.int64Value ?? 0)
+    avisar(volta > 0 ? "\(tamanho(volta)) liberados" : "Nada voltou para a memória",
+           volta > 0 ? "Medido antes e depois de fechar." : "Os apps podem ter pedido para salvar ou continuam abertos.")
+    await atualizarTexto()
+  }
 
   private func titulo(_ t: String) {
     item.button?.attributedTitle = NSAttributedString(string: " " + t, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)])
