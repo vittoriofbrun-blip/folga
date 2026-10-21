@@ -56,6 +56,11 @@ Estado real do Mac (raio-X de 2026-10-20, só leitura):
 15. **Ao ligar o Mac (se ativado), só o ícone** — a janela não abre sozinha.
 16. **Pode criar a assinatura local "Folga Local"** (chave só no Mac, na pasta do Folga) para a permissão de disco não
     sumir a cada atualização.
+17. **O Folga NÃO pede Acesso Total ao Disco** (2026-10-21, depois da revisão de segurança do plano 3). Com o servidor
+    Node dentro do bundle, uma cópia adulterada do app herdaria a permissão (o selo dos recursos não é conferido ao
+    executar) e qualquer processo local poderia usá-la pela API. Substitui a parte "pedido pelo Folga.app" das
+    decisões 10 e 16. Perde-se: tamanho da Lixeira, tamanho do cache do Safari e busca no iCloud Drive. Se a permissão
+    aparecer ligada mesmo assim, o app avisa para desligar.
 
 ## Objetivos
 
