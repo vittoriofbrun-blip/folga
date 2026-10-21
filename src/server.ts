@@ -7,7 +7,7 @@ import { extname, join, normalize, sep } from 'node:path';
 import { decide, emptyAutoCare, finishRun } from './autocare.ts';
 import { classify, emptyHistory, type ClassifyHistory } from './classify.ts';
 import { startProbe } from './probe.ts';
-import { pushSample } from './samples.ts';
+import { pushSample, freshWindowMs } from './samples.ts';
 import { createReleaser } from './release.ts';
 import { openWindow, setStartup, startupInstalled } from './window.ts';
 import { createWarnings } from './warnings.ts';
@@ -204,8 +204,9 @@ const warnings = createWarnings({
   getState: () => state, getSettings: () => settings, probeAlive: () => probeUp,
   lastAutoCareRun: () => ac.lastRunAt, emit, settingsProblem: () => settingsProblem,
 });
-/** Apps abertos, para apagar cache: só com sonda viva e leitura nova de até 10 s. Senão null = tratar tudo como aberto. */
-const runningKeys = () => (state && probeUp && Date.now() - lastFreshAt <= 10_000 ? new Set(state.apps.map(a => a.key)) : null);
+/** Apps abertos, para apagar cache: só com sonda viva e leitura nova (3 intervalos, mín. 10 s). Senão null = tratar tudo como aberto. */
+const runningKeys = () => (state && probeUp && Date.now() - lastFreshAt <= freshWindowMs(settings.sampleSeconds)
+  ? new Set(state.apps.map(a => a.key)) : null);
 const files = createFiles({
   getSettings: () => settings, roots: process.env.FOLGA_FILES_ROOTS?.split(';'),   // testes: pastas no lugar das do usuário
   runningKeys,                                                                      // Mac: navegador aberto pela sonda
