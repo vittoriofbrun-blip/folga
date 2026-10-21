@@ -61,6 +61,10 @@ Estado real do Mac (raio-X de 2026-10-20, só leitura):
     executar) e qualquer processo local poderia usá-la pela API. Substitui a parte "pedido pelo Folga.app" das
     decisões 10 e 16. Perde-se: tamanho da Lixeira, tamanho do cache do Safari e busca no iCloud Drive. Se a permissão
     aparecer ligada mesmo assim, o app avisa para desligar.
+18. **Barra de menus: ícone + só a memória ("81%")** (2026-10-21, teste ao vivo). Com "81% · 34 GB" o item ficava
+    escondido atrás do entalhe do MacBook Air; o disco livre aparece ao clicar. Substitui a decisão 13.
+19. **Pegada aceita como medida** (2026-10-21): ~180 MB só com o ícone e ~350 MB com a janela aberta (o WebKit da
+    janela é o que pesa). As metas de 120/150 MB viram referência; abrir a janela só quando for olhar.
 
 ## Objetivos
 
