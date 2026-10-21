@@ -66,6 +66,15 @@ Estado real do Mac (raio-X de 2026-10-20, só leitura):
 19. **Pegada aceita como medida** (2026-10-21): ~180 MB só com o ícone e ~350 MB com a janela aberta (o WebKit da
     janela é o que pesa). As metas de 120/150 MB viram referência; abrir a janela só quando for olhar.
 
+### Decisões do Vittorio (2026-10-21, plano 4)
+
+20. **Aviso crítico também vira notificação** (ex.: disco quase cheio, memória crítica). Só o nível crítico, uma vez
+    por aviso até ele sair da lista (se voltar depois, avisa de novo), pelo mesmo caminho de notificação do app; vale
+    nos dois modos de "Avisos no ícone" (todos / só críticos). Atenção e informação ficam só na tela Avisos e na
+    contagem do menu.
+21. **Itens de login ficam de fora.** Ler os itens de login pediria Automação (System Events) ou senha de
+    administrador (`sfltool`); o Folga não pede nenhum dos dois. A tela mostra só LaunchAgents/LaunchDaemons e diz isso.
+
 ## Objetivos
 
 - Rodar no Mac com as mesmas telas e o mesmo comportamento do Windows, trocando só as peças do sistema.

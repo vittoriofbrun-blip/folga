@@ -8,11 +8,12 @@
 
 **Tech Stack:** Node 24 (type stripping, `node:assert`), TypeScript 7, React (Vite), Swift 6 via `swiftc -O` (AppKit, UserNotifications), ferramentas do sistema só de leitura, GitHub Actions (windows-latest + macos-latest).
 
-**Spec:** docs/superpowers/specs/2026-10-20-folga-mac-design.md (seções "Avisos (R26 / D15)", "Notificações"; decisões 17–19; fase 6 da ordem sugerida) · ADR 0007, seção "Avisos do Mac (Task 8)"
+**Spec:** docs/superpowers/specs/2026-10-20-folga-mac-design.md (seções "Avisos (R26 / D15)", "Notificações"; decisões 17–21; fase 6 da ordem sugerida) · ADR 0007, seção "Avisos do Mac (Task 8)"
 
 ## Global Constraints
 - Nenhuma dependência npm nova; só `swiftc`. Windows intacto: toda fonte nova é `platform === 'darwin'` (dep `platform` já existe no `WarningsDeps`); os casos atuais de `warnings.test.ts` (rig com `platform: 'win32'`) continuam passando sem mudança. A CI dos dois sistemas é a prova.
-- **Só leitura, sem administrador.** Nenhum `sudo`, `sfltool`, `launchctl` com verbo que não seja `print`, `defaults write`, `tccutil`, `osascript` para System Events. **`sfltool dumpbtm` está fora:** no planejamento (21/10) ele ficou >120 s parado esperando autorização de administrador e foi morto — itens de login (Ajustes › Geral › Itens de Início) não são lidos, e a tela diz isso.
+- **Só leitura, sem administrador.** Nenhum `sudo`, `sfltool`, `launchctl` com verbo que não seja `print`, `defaults write`, `tccutil`, `osascript` para System Events. **`sfltool dumpbtm` está fora:** no planejamento (21/10) ele ficou >120 s parado esperando autorização de administrador e foi morto — itens de login (Ajustes › Geral › Itens de Início) não são lidos, e a tela diz isso (decisão 21).
+- **Só aviso crítico vira notificação** (decisão 20), uma vez por id até ele sair da lista; atenção e informação ficam na tela Avisos e na contagem do menu.
 - Comando externo: caminho absoluto, `shell:false`, argumentos fixos. Nada lido de arquivo (nome de app, nome de plist) entra em argumento de processo; texto de notificação só pelo ambiente (R31, já pinado em `notify.test.ts`).
 - Saída de ferramenta que não bate com o formato conhecido = "não sei" → **nenhum aviso** (nunca alarme falso) e o último valor bom fica.
 - Fixtures de teste são saídas reais deste Mac, capturadas com o sandbox desligado e reduzidas ao mínimo; nomes de pasta/arquivo pessoais trocados por neutros.
@@ -24,17 +25,18 @@
 1. **Nome vindo de arquivo virando comando ou texto enganoso.** `app_name` de um `.ips` e o nome de um `.plist` são escritos por qualquer programa do usuário. Fixado: `cleanName` (sem caracteres de controle, sem quebra de linha, até 80 caracteres) testado com nome hostil em `warnings.test.ts` (Task 3), e o teste do `exec` gravado da Task 5 exigindo que nenhum nome de plist apareça em argumento.
 2. **Comando privilegiado ou que escreve.** Fixado: rig `darwin` em `warnings.test.ts` grava todo `exec` e compara com a lista fechada (5 comandos, caminhos absolutos) — Tasks 4 e 5; um teste `git grep` barra `sfltool`, `sudo` e `launchctl (load|unload|bootstrap|bootout|enable|disable|kickstart)` em `src` e `mac` (Task 5).
 3. **Alarme falso ou mudo.** `.diag`, pasta `Retired`, relatório com mais de 24 h, `bug_type` que não é travamento e saída desconhecida de `fdesetup`/`spctl`/`csrutil` não geram aviso; consulta quebrada mantém os avisos que havia. Fixado em `warnings.test.ts` (Tasks 3 e 4).
-4. **Notificação que "funciona" sem aparecer.** `--notify` saindo 0 sem postar, ou pedindo autorização num processo de 10 s que ninguém vê. Fixado: `notifyExit(status:alert:)` no `--selftest` (autorizado + alerta ligado → 0; não perguntado → 3; recusado ou alerta desligado → 4) e o item de menu "Notificações do Folga desligadas" (Task 2); contagem no menu independente da notificação (Task 6).
+4. **Notificação que "funciona" sem aparecer.** `--notify` saindo 0 sem postar, ou pedindo autorização num processo de 10 s que ninguém vê. Fixado: `notifyExit(status:alert:)` no `--selftest` (autorizado + alerta ligado → 0; não perguntado → 3; recusado ou alerta desligado → 4) e o item de menu "Notificações do Folga desligadas" (Task 2); contagem no menu independente da notificação (Task 6); e o oposto, notificação repetida a cada ciclo de 30 s ou para aviso de atenção — fixado por `warnings.test.ts` na Task 7.
 5. **Windows quebrado pela troca de fonte.** Fixado: rig `win32` continua chamando PowerShell/`reg.exe` (casos atuais), rig `darwin` nunca chama `powershell.exe` nem `reg.exe` (Task 4), `Avisos.tsx` com o texto do Windows quando a plataforma não é Mac (Task 5).
 
 ---
 
 ## File Structure
-- `src/warnings.ts` — `cleanName`, `crashCandidates` (compartilhada), `parseIpsHeader`, `parseCrashText`, `macCrashes`, `parseMacSecurity`, `macSecurityWarnings`, `parseLaunchctlPrint`; jobs por plataforma.
+- `src/warnings.ts` — dep `notify` (aviso crítico novo → uma notificação), `cleanName`, `crashCandidates` (compartilhada), `parseIpsHeader`, `parseCrashText`, `macCrashes`, `parseMacSecurity`, `macSecurityWarnings`, `parseLaunchctlPrint`; jobs por plataforma.
 - `src/types.ts` — `WarningKind` ganha `'seguranca'`; `StartupApp.source` ganha `'launchagent_usuario' | 'launchagent_sistema' | 'launchdaemon'`.
 - `src/tests/warnings.test.ts` — casos do Mac + rig `darwin`. `src/tests/fixtures/mac/` (novo) — saídas reais reduzidas.
 - `mac/Folga.swift` — `notifyExit`, autorização na instância principal, item "Notificações desligadas", `avisosTexto`, item "N avisos" abrindo a tela Avisos.
 - `scripts/mac-app.mjs` — `install` registra o app no LaunchServices.
+- `src/server.ts` — liga `notify` do `createWarnings` ao `notify.toast` de sempre.
 - `web/src/App.tsx` — vista inicial pelo `#hash`. `web/src/Avisos.tsx` — "Apps que abrem com o Mac", fontes novas, nota dos itens de login.
 - `.claude/adr/0007-app-de-barra-webkit-no-mac.md` — resultado do diagnóstico e estratégia de entrega. `.claude/requirements.md` — R26/R31 com a parte do Mac (emenda).
 
@@ -152,14 +154,31 @@
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   ```
 
-### Task 7: Revisão de segurança dedicada e emendas
+### Task 7: Aviso crítico vira notificação (decisão 20)
+
+**Files:** Modify `src/warnings.ts` (`apply`, `WarningsDeps`), `src/tests/warnings.test.ts`, `src/server.ts`
+**Interfaces:** Produces: dep opcional `notify?: (title: string, body: string) => void` no `WarningsDeps` · regra: quando um aviso com `severity === 'critico'` entra (id que não estava notificado), chama `notify(w.title, w.detail)` uma vez; o id fica marcado até sair da lista; saiu e voltou → notifica de novo. `atencao`/`info` nunca notificam. Subir de atenção para crítico com o mesmo id conta como entrada (notifica uma vez).
+
+- [ ] **Step 1: Write the failing test** — rig com `notify` gravado: memória 98 % → 1 chamada com "Memória quase esgotada"; mais dois `run.fast()` iguais → continua 1; memória 40 % (sai) e 98 % de novo → 2; memória 92 % (atenção) e um disco com 8 % livre (atenção) → nenhuma; atenção 92 % → 98 % → 1 (subiu para crítico); sonda fora > 30 s (crítico) → 1; Auto Care (`info`) → nenhuma; `warningsLevel` `'todos'` e `'criticos'` dão o mesmo resultado (as duas mostram crítico, R27); depois de `stop()` nada notifica; `notify` que lança não derruba o `apply` nem impede o `emit`. Os casos atuais sem `notify` continuam iguais.
+- [ ] **Step 2: Run test to verify it fails** Run: `node --no-warnings src/tests/warnings.test.ts` Expected: nenhuma chamada a `notify`.
+- [ ] **Step 3: Implement** — no `apply`, depois de atualizar `active`: um `Set` `notified`; para cada crítico ativo fora dele → adiciona e chama `notify` dentro de `try`; ids que saíram de `active` (ou deixaram de ser críticos) saem do `Set`. `server.ts`: `notify: (t, b) => notify.toast(t, b)` no `createWarnings` (closure: o `notify` do servidor já existe quando `warnings.start()` roda). O texto vai pelo caminho de sempre (`notify.ts`: só ambiente, Folga.app com `osascript` de reserva — Task 2); no Windows, o mesmo toast do PowerShell (R31).
+- [ ] **Step 4: Run test to verify it passes** Run: `npm test && npm run typecheck` Expected: verde nos dois sistemas. Ao vivo (pasta de dados temporária, `FAKE_MAC=1` com memória forçada acima de 97 %): uma notificação só em 2 min; nenhuma para atenção. Nunca encher o disco de verdade para testar.
+- [ ] **Step 5: Commit**
+  ```bash
+  git add src/warnings.ts src/tests/warnings.test.ts src/server.ts
+  git commit -m "aviso crítico vira notificação uma vez por id até sair; atenção e informação ficam na tela
+
+  Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+  ```
+
+### Task 8: Revisão de segurança dedicada e emendas
 
 **Files:** `.claude/requirements.md` (R26 e R31 com a parte do Mac, emenda); o que a revisão achar, com teste novo no módulo.
 **Interfaces:** Consumes: `git diff d2826c5..HEAD`. Produces: achados com veredito na mensagem do commit (ou "nenhum achado").
 
-- [ ] **Step 1: Write the failing test** — roteiro do revisor (novo, sem o contexto desta sessão): os 5 itens do Review Focus; nome de `.ips`/plist chegando ao menu, à notificação ou ao `server.log` (injeção de texto, quebra de linha forjando linha de log); leitura de `crashDir` seguindo link simbólico para fora (usar `lstat`, ignorar links); arquivo gigante ou `.ips` sem quebra de linha (lê só 4 KB); `launchctl`/`fdesetup` pendurado (timeout de 20 s mata e o `job` libera); `lsregister -f` só com o caminho do app instalado; o `#hash` não vira navegação para fora (`allowedURL`); nenhum comando com administrador, nenhum `.env` tocado. Resíduo aceito, para não reabrir: `GET /api/warnings` e `/api/startup-apps` respondem a qualquer processo local, como as outras leituras.
+- [ ] **Step 1: Write the failing test** — roteiro do revisor (novo, sem o contexto desta sessão): os 5 itens do Review Focus; notificação de aviso crítico repetida ou com texto de arquivo; nome de `.ips`/plist chegando ao menu, à notificação ou ao `server.log` (injeção de texto, quebra de linha forjando linha de log); leitura de `crashDir` seguindo link simbólico para fora (usar `lstat`, ignorar links); arquivo gigante ou `.ips` sem quebra de linha (lê só 4 KB); `launchctl`/`fdesetup` pendurado (timeout de 20 s mata e o `job` libera); `lsregister -f` só com o caminho do app instalado; o `#hash` não vira navegação para fora (`allowedURL`); nenhum comando com administrador, nenhum `.env` tocado. Resíduo aceito, para não reabrir: `GET /api/warnings` e `/api/startup-apps` respondem a qualquer processo local, como as outras leituras.
 - [ ] **Step 2: Run test to verify it fails** Run: a skill `security-review` sobre o branch e um `code-review` nível `high` com o foco acima Expected: lista de achados, cada um com cenário concreto.
-- [ ] **Step 3: Implement** — confirmar cada achado por sonda (pasta temporária, app em `build/`) antes de corrigir; descartado fica registrado com o porquê. Correção = menor diff + teste que pina o cenário. Emendar R26 (no Mac: travamento por DiagnosticReports, segurança `info` no lugar do antivírus) e R31 (no Mac: Folga.app com `osascript` de reserva, contagem no menu).
+- [ ] **Step 3: Implement** — confirmar cada achado por sonda (pasta temporária, app em `build/`) antes de corrigir; descartado fica registrado com o porquê. Correção = menor diff + teste que pina o cenário. Emendar R26 (no Mac: travamento por DiagnosticReports, segurança `info` no lugar do antivírus) e R31 (no Mac: Folga.app com `osascript` de reserva, contagem no menu; aviso crítico também notifica, decisão 20).
 - [ ] **Step 4: Run test to verify it passes** Run: `npm test && npm run typecheck && node scripts/mac-app.mjs build && node scripts/mac-app.mjs check build/Folga.app`, depois `git push fork mac-port` Expected: tudo verde, os dois jobs da CI verdes. Só então o plano conta como feito.
 - [ ] **Step 5: Commit**
   ```bash
@@ -171,4 +190,4 @@
 
 ---
 
-**Fica para os próximos planos (sem pintar o canto):** itens de login (só com System Events/Automação, se o Vittorio quiser pagar esse pedido); aviso crítico também virar notificação (hoje só a proposta do vigia notifica, R31); Foco/Não Perturbe (ilegível sem Acesso Total ao Disco); assistente no Mac (spike do ADR 0006, `PATH` de login, matar por grupo); Auto Care por pressão na tela de Ajustes; emendas restantes em `CLAUDE.md`, `fluxo-infraestrutura.md` e o PR para o Antônio.
+**Fica para os próximos planos (sem pintar o canto):** itens de login ficam fora (decisão 21: sem pedido de Automação); Foco/Não Perturbe (ilegível sem Acesso Total ao Disco); assistente no Mac (spike do ADR 0006, `PATH` de login, matar por grupo); Auto Care por pressão na tela de Ajustes; emendas restantes em `CLAUDE.md`, `fluxo-infraestrutura.md` e o PR para o Antônio.
