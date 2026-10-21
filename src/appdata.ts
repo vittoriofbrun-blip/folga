@@ -167,7 +167,7 @@ export function createAppData(deps: {
           // dono = a pasta e cada prefixo de 2+ partes: com.x.app.ShipIt é do com.x.app, notion.id.ShipIt do notion.id
           const parts = n.toLowerCase().split('.');
           const owners = parts.slice(1).map((_, i) => parts.slice(0, i + 2).join('.'));
-          if (BUNDLE_ID.test(n) && !/^com\.apple\./i.test(n)) await add(rule, b, [n], owners, n, true);
+          if (BUNDLE_ID.test(n) && !/^com\.apple(\.|$)/i.test(n)) await add(rule, b, [n], owners, n, true);
         }
         continue;
       }

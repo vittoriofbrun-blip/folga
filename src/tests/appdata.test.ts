@@ -59,6 +59,13 @@ try {
     assert.equal((await ad.clean(['caches:com.spotify.client'])).files, 0); assert.ok(existsSync(join(caches, 'com.spotify.client')));
     console.log(`ok  mac: só allowlist de app fechado, versão mais nova e máquina virtual ficam${isca ? ', link no cache não leva o alvo' : ' (sem link: pulado)'}`);
 
+    // com.apple sozinho também é da Apple; com.applefoo não
+    const cs5 = join(tmp, 'mac-apple');
+    for (const b of ['com.apple', 'com.applefoo.cache']) file(join(cs5, b, 'x'));
+    const adApple = createAppData({ platform: 'darwin', bases: { caches: cs5 }, runningKeys: () => new Set(), installedIds: async () => new Set(['com.apple', 'com.applefoo']) });
+    assert.deepEqual((await adApple.preview()).entries.flatMap(e => e.items.map(i => i.id)), ['caches:com.applefoo.cache']);
+    console.log('ok  caches: com.apple e com.apple.* nunca viram item; com.applefoo sim');
+
     // pasta de regra que é link (Claude → outra pasta): nada é oferecido nem apagado
     const root2 = join(tmp, 'mac-link'), as2 = join(root2, 'AppSupport'), real = join(root2, 'claude-real');
     file(join(real, 'Cache', 'data_0'));
