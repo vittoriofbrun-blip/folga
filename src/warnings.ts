@@ -345,7 +345,8 @@ export function createWarnings(deps: WarningsDeps) {
     if (sig !== lastSig) { lastSig = sig; deps.emit('warnings', list()); }
     // decisão 20: crítico novo (ou que subiu de atenção) notifica uma vez; saiu da lista ou desceu = libera para a próxima vez
     for (const id of notified) if (active.get(id)?.severity !== 'critico') notified.delete(id);
-    for (const w of active.values()) {
+    // só no Mac (decisão 20); stop() vale porque apply() já retornou lá em cima
+    for (const w of (deps.platform ?? process.platform) === 'darwin' ? active.values() : []) {
       if (w.severity !== 'critico' || notified.has(w.id)) continue;
       notified.add(w.id);
       try { deps.notify?.(w.title, w.detail); } catch { /* avisar nunca atrapalha a lista de avisos */ }

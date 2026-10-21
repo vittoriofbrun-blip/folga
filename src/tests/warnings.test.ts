@@ -501,7 +501,7 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
 
 {
   const sent: string[] = [];
-  const { env, w } = rig({ notify: (t, b) => { sent.push(`${t}|${b}`); } });
+  const { env, w } = rig({ platform: 'darwin', notify: (t, b) => { sent.push(`${t}|${b}`); } });
   env.memLoad = 98; await w.run.fast();
   assert.equal(sent.length, 1); assert.ok(sent[0]!.startsWith('Memória quase esgotada|'));
   await w.run.fast(); await w.run.fast();
@@ -523,7 +523,7 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
 }
 {
   let boom = 0;
-  const { env, w } = rig({ notify: () => { boom++; throw new Error('toast quebrou'); } });
+  const { env, w } = rig({ platform: 'darwin', notify: () => { boom++; throw new Error('toast quebrou'); } });
   env.memLoad = 98; await w.run.fast();
   assert.equal(boom, 1); assert.deepEqual(ids(w), ['memoria']);
   assert.ok(env.emitted.some(l => l.some(x => x.id === 'memoria')), 'o emit saiu mesmo com notify que lança');
@@ -531,10 +531,12 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   assert.deepEqual(ids(w2), ['memoria']);
   for (const lvl of [['todos'], ['criticos']] as const) {
     let n = 0;
-    const { env: e3, w: w3 } = rig({ getSettings: () => ({ ...DEFAULT_SETTINGS, autoCareThreshold: 92, warningsLevel: lvl[0] }), notify: () => { n++; } });
+    const { env: e3, w: w3 } = rig({ platform: 'darwin', getSettings: () => ({ ...DEFAULT_SETTINGS, autoCareThreshold: 92, warningsLevel: lvl[0] }), notify: () => { n++; } });
     e3.memLoad = 98; await w3.run.fast(); await w3.run.fast();
     assert.equal(n, 1, `warningsLevel ${lvl[0]}: mesmo resultado`);
   }
+  { let n = 0; const { env: e4, w: w4 } = rig({ platform: 'win32', notify: () => { n++; } });
+    e4.memLoad = 98; await w4.run.fast(); assert.deepEqual(ids(w4), ['memoria']); assert.equal(n, 0, 'Windows: crítico não notifica'); }
   ok('notificação: notify que lança não derruba o aviso nem o emit; sem notify nada muda');
 }
 
