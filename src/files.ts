@@ -630,26 +630,37 @@ export function createFiles(deps: FilesDeps) {
     const want = new Set<QuickCleanCategory>(opts.categories ?? ['temp_usuario', 'cache_navegador']);
     const { temp, cache, open } = await collect({ size: false });   // só o preview mede o Safari
     const limit = now() - TEMP_DAYS * DAY;
-    const todo: Array<[string, Stats, boolean]> = [];   // [caminho, stat, exige mtime antigo]
+    const todo: Array<[string, Stats]> = [];
     let skipped = 0;
     if (want.has('temp_usuario') && temp.length) {
       // I2: no Mac o unlink não respeita arquivo aberto; o que está aberto fica, e sem a lista nenhum temporário sai
       const held = deps.openFiles ? await deps.openFiles() : MAC ? await openFilesMac() : undefined;
       const keys = held && new Set([...held].map(k => pathKey(k)));
       if (keys === null) skipped += temp.length;
-      else for (const [p, st] of temp) if (keys?.has(pathKey(p))) skipped++; else todo.push([p, st, true]);
+      else for (const [p, st] of temp) if (keys?.has(pathKey(p))) skipped++; else todo.push([p, st]);
     }
-    if (want.has('cache_navegador')) for (const b of BROWSERS) if (!open[b]) for (const [p, st] of cache[b]) todo.push([p, st, false]);
     let bytes = 0, files = 0;
-    for (let i = 0; i < todo.length; i += 32) {
-      await Promise.all(todo.slice(i, i + 32).map(async ([p, , old]) => {
-        try {
-          const st = await lstat(p);   // reconfere logo antes: ainda arquivo comum e (se temporário) ainda antigo
-          if (!st.isFile() || (old && tempAge(st) >= limit)) { skipped++; return; }
-          await unlink(p);
-          bytes += st.size; files++;
-        } catch { skipped++; }   // travado, em uso ou sem permissão: fica
-      }));
+    /** old = temporário: ainda tem de ser antigo na hora do unlink */
+    const del = async (list: Array<[string, Stats]>, old: boolean) => {
+      for (let i = 0; i < list.length; i += 32) {
+        await Promise.all(list.slice(i, i + 32).map(async ([p]) => {
+          try {
+            const st = await lstat(p);   // reconfere logo antes: ainda arquivo comum e (se temporário) ainda antigo
+            if (!st.isFile() || (old && tempAge(st) >= limit)) { skipped++; return; }
+            await unlink(p);
+            bytes += st.size; files++;
+          } catch { skipped++; }   // travado, em uso ou sem permissão: fica
+        }));
+      }
+    };
+    await del(todo, true);
+    // M2: o navegador pode ter aberto desde a coleta; confere de novo logo antes de apagar os arquivos de cada um
+    if (want.has('cache_navegador')) {
+      for (const b of BROWSERS) {
+        if (open[b] || !cache[b].length) continue;
+        if ((await browsersOpen())[b]) { skipped += cache[b].length; continue; }
+        await del(cache[b], false);
+      }
     }
     return { bytes, files, skipped };
   }

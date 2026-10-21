@@ -391,6 +391,15 @@ try {
     assert.ok(existsSync(join(chromeC, 'data_0')) && existsSync(join(chromeC, 'data_1')), 'cache de navegador aberto nunca é apagado');
     ok('quickClean: cache de navegador aberto não é apagado');
 
+    // M2: o navegador abre entre a coleta e o apagar: confere de novo logo antes de apagar os arquivos dele
+    const abreDepois = dir('Cache', 'abre-depois'); file(join(abreDepois, 'data_0'), 5000, 0);
+    let consultas = 0;
+    const rAbre = await mk({ cacheDirs: { edge: [abreDepois] }, browsersOpen: async () => ({ edge: consultas++ > 0 }) })
+      .quickClean({ categories: ['cache_navegador'] });
+    assert.ok(existsSync(join(abreDepois, 'data_0')), 'navegador aberto depois da coleta: cache fica');
+    assert.deepEqual([rAbre.files, rAbre.skipped], [0, 1]);
+    ok('M2: navegador aberto entre a coleta e o apagar → cache dele fica');
+
     if (MAC) {
       const tempFiles = async () => (await mkc().quickCleanPreview()).find(i => i.category === 'temp_usuario')!.files;
       const antes = await tempFiles();
