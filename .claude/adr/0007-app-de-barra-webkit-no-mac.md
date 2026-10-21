@@ -133,6 +133,31 @@ pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `
 - Um `--notify` só é lançado pelo servidor, que só roda com a instância principal viva; por isso ele nunca
   pode barrar um lançamento necessário e a checagem de instância única não o distingue.
 
+#### Diagnóstico: por que nenhum aviso chega (plano 4, Task 1 — 21/10, só leitura, sem administrador)
+| Fato | Como medido | Resultado |
+|---|---|---|
+| Registro no LaunchServices | `lsregister -dump` (caminho completo em `CoreServices.framework`), sandbox desligado | **Mudou desde o planejamento.** `local.folga.app` aparece 3×: `~/Applications/Folga.app` (registrado 15:53, flags `ui-element`, é o principal), `build/Folga.app` (`ui-element launch-disabled`) e um `…/T/tmp.…/Folga.app` de smoke test (`in-temp-dir`, pasta já apagada, registro órfão). O "vazio" do planejamento não vale mais. |
+| Assinatura | `codesign -dv` nos dois bundles | `Identifier=local.folga.app`, `Signature=adhoc`, `TeamIdentifier=not set` |
+| Pedido de autorização (build) | `lsregister -f build/Folga.app`, depois `FOLGA_TOAST_TITLE=teste FOLGA_TOAST_BODY=oi build/…/Folga --notify` (6×) | **Saída 4 na hora (0 s), nenhum pedido na tela.** `log show`: `usernotificationsd` aceita ("Entitlement check success: matching bundle identifiers"), o `usernoted` acha o app pelo caminho do build, e volta `didGrant: 0 hasError: 1`. O código do erro não aparece no log e o `Folga.swift` o descarta (`{ ok, _ in }`). Hipótese: o registro que pede está `launch-disabled` (o mesmo bundle id já tem o instalado como principal). Não vale como prova para o instalado. |
+| Entrada em Notificações | `defaults export com.apple.ncprefs -` | Nenhuma entrada do Folga, nem depois dos 6 pedidos: o macOS recusa **antes** de criar a linha em Ajustes › Notificações; não há o que o Vittorio ligar lá. |
+| Reserva `osascript` | mesmo arquivo, entrada `com.apple.ScriptEditor2` | `flags = 0x200e` (8206), **sem** chave `auth`. Dos 109 apps, só ele e `com.apple.TelephonyUtilities` têm os bits 23 e 25 desligados juntos; Chrome/Notion/VS Code têm `0x80200e` (bit 23 ligado, 25 desligado), e FaceTime e Brave têm `0x280200e` (os dois ligados). Leitura provável: o Editor de Scripts nunca foi autorizado e o reserva sai mudo por ajuste, não por bug. O que cada bit significa não está documentado: falta o Vittorio dizer se o Chrome mostra avisos. |
+| Foco (Não Perturbe) | `ls ~/Library/DoNotDisturb/DB/` | `Operation not permitted`: sem Acesso Total ao Disco não dá para ler (decisão 17). Fica como limite, sem contorno. |
+| Relatórios de travamento | `ls ~/Library/Logs/DiagnosticReports` | Pelo Terminal dá para ler. São 42 itens: 40 `.diag`, 1 `.ips` (`node`, `bug_type` 309) e a pasta `Retired`. Falta medir de dentro do app (Task 3, linha no `server.log`). |
+| Segurança e serviços | `fdesetup status`, `spctl --status`, `csrutil status`, `launchctl print gui/501` e `print system` | Todos respondem sem administrador: FileVault On, `assessments enabled`, SIP `enabled`. As seções `services = {` e `disabled services = {` existem nos dois domínios. |
+| Itens de início | `sfltool dumpbtm` | Fora: no planejamento ficou parado esperando administrador e foi morto. Não foi rodado de novo. |
+
+- **Causa:** o macOS recusa o pedido sem mostrar nada. Antes era porque o app não estava registrado. Hoje, no
+  build, a recusa vem com o registro presente, só que em estado `launch-disabled`. Para o app instalado (o
+  registro principal), o `--notify` ainda não foi medido depois do registro. Esse é o passo do controlador com
+  o Vittorio (Step 3), e pode ser que apareça o pedido. Enquanto isso, o reserva `osascript` sai em nome do
+  Editor de Scripts, que muito provavelmente nunca foi autorizado.
+- **Estratégia para a Task 2:** (1) `install` roda `lsregister -f` no app instalado e `lsregister -u` nos outros
+  registros do mesmo bundle id (build e temporários), para que um só caminho responda pelo `local.folga.app`;
+  (2) o pedido de autorização sai da instância principal (o app que o macOS conhece), não do processo curto;
+  (3) o `--notify` grava no log o código do erro de `requestAuthorization` (hoje descartado); (4) o `osascript`
+  continua como reserva; (5) a contagem de avisos no menu aparece **sempre**, porque nenhum dos dois caminhos é
+  garantido; (6) o Foco não pode ser lido: a tela diz isso e não tenta adivinhar.
+
 ## Consequências
 - A CI do macOS monta o app ad-hoc e roda o `check` (sem segredo).
 - O `node` gravado no `folga.json` é o do build; trocar de Node pede rebuild.
