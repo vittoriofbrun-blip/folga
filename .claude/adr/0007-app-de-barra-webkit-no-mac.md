@@ -94,6 +94,19 @@ Spike de 2026-10-21 (macOS 26.5.1, LibreSSL 3.3.6 do sistema):
   "assistente SIM" é bug. Antes de o Vittorio liberar: `servidor não · assistente não` (visto ao vivo em 21/10).
   **Pendente (controlador):** depois de liberar, o esperado é `servidor sim · assistente não`.
 
+### Avisos do Mac (Task 8)
+- Dentro do app, o servidor roda `Folga --notify` (UNUserNotificationCenter): processo curto, não sobe a instância
+  nem a janela, nunca toca o supervisor. Título e corpo vão só pelo ambiente (`FOLGA_TOAST_TITLE/BODY`), nunca em
+  argumento. Saídas: 0 postado · 3 sem resposta em 10 s · 4 recusado · 5 erro. Clique no aviso → a instância
+  principal (delegate) abre a janela.
+- Qualquer saída ≠ 0 marca o app como `broken` **só para o app** e o aviso daquela vez já sai pelo `osascript`
+  (script fixo que lê `system attribute`; testado ao vivo com título `"; do shell script …`: nada executou).
+  Fora do app, o `osascript` direto. Windows continua no PowerShell.
+- **Ao vivo (21/10, build ad-hoc em build/):** `--notify` saiu **3** (sem resposta em 10 s): autorização do
+  macOS pendente/sem resposta; ninguém clicou. **Pendente (controlador):** o Vittorio responder o pedido de
+  autorização do Folga em Ajustes > Notificações e repetir; se continuar 3 ou 4 com app ad-hoc, o `osascript`
+  (já ligado como reserva) é o caminho definitivo.
+
 ## Consequências
 - A CI do macOS monta o app ad-hoc e roda o `check` (sem segredo).
 - O `node` gravado no `folga.json` é o do build; trocar de Node pede rebuild.

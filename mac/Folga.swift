@@ -3,10 +3,13 @@
 //   Folga             o app: ícone na barra, sobe e vigia o servidor (node de dentro do bundle)
 //   Folga --version   "folga <versão>" (o check compara com o package.json)
 //   Folga --selftest  casos puros; sai 0/1
+//   Folga --notify   posta um aviso (FOLGA_TOAST_TITLE/FOLGA_TOAST_BODY do ambiente) e sai; não sobe o app. Sai ≠ 0 se o
+//                    macOS não deixar (o servidor então cai para o osascript)
 //   Folga --login     como sem argumento, mas de LaunchAgent (Abrir com o Mac): só o ícone, nunca abre a janela
 import AppKit
 import Foundation
 import os
+import UserNotifications
 import WebKit
 
 let bundleId = "local.folga.app"
@@ -164,13 +167,14 @@ func hasFullDiskAccess(trash: String = NSHomeDirectory() + "/.Trash") -> Bool {
 /// `com.apple.preference.security?Privacy_AllFiles` abrem os Ajustes; fica o formato novo (ADR 0007).
 let painelDisco = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles")!
 
-enum Lancamento: Equatable { case versao, selftest, rodar(login: Bool), uso }
+enum Lancamento: Equatable { case versao, selftest, notificar, rodar(login: Bool), uso }
 /// Argumentos (sem o nome do programa). `--login` vale sozinho: é o que o LaunchAgent passa (decisão 15).
 func lancamento(_ args: [String]) -> Lancamento {
   switch args.first {
   case nil: return .rodar(login: false)
   case "--version": return .versao
   case "--selftest": return .selftest
+  case "--notify" where args.count == 1: return .notificar
   case "--login" where args.count == 1: return .rodar(login: true)
   default: return .uso
   }
@@ -184,7 +188,7 @@ func selftest() -> Int32 {
   caso("versão lida do Info.plist", version?.isEmpty == false)
   caso("lancamento: sem argumento e --login rodam o app", lancamento([]) == .rodar(login: false) && lancamento(["--login"]) == .rodar(login: true))
   caso("lancamento: --version, --selftest e o resto", lancamento(["--version"]) == .versao && lancamento(["--selftest"]) == .selftest
-       && lancamento(["--login", "x"]) == .uso && lancamento(["--x"]) == .uso)
+       && lancamento(["--notify"]) == .notificar && lancamento(["--notify", "x"]) == .uso && lancamento(["--login", "x"]) == .uso && lancamento(["--x"]) == .uso)
 
   let t0 = Date(timeIntervalSince1970: 1_000_000)
   var quedas: [Date] = []
@@ -635,8 +639,26 @@ func menuPrincipal() -> NSMenu {
   return principal
 }
 
+/// `Folga --notify`: roda antes da instância única e nunca toca o supervisor nem abre janela. Texto só do ambiente.
+/// 0 = postado · 3 = sem resposta em 10 s (autorização pendente) · 4 = autorização recusada · 5 = erro ao postar.
+func notificar() -> Never {
+  let e = ProcessInfo.processInfo.environment
+  let titulo = String((e["FOLGA_TOAST_TITLE"] ?? "Folga").prefix(200))
+  let corpo = String((e["FOLGA_TOAST_BODY"] ?? "").prefix(500))
+  let centro = UNUserNotificationCenter.current()
+  DispatchQueue.global().asyncAfter(deadline: .now() + 10) { exit(3) }
+  centro.requestAuthorization(options: [.alert, .sound]) { ok, _ in
+    guard ok else { exit(4) }
+    let c = UNMutableNotificationContent()
+    c.title = titulo
+    c.body = corpo
+    centro.add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil)) { erro in exit(erro == nil ? 0 : 5) }
+  }
+  dispatchMain()
+}
+
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
   var supervisor: Supervisor?
   var sigterm: DispatchSourceSignal?
 
@@ -656,6 +678,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     src.resume()
     sigterm = src
     s.subir()
+    UNUserNotificationCenter.current().delegate = self
+  }
+
+  // clique no aviso → abre a janela (o aviso é postado pelo `Folga --notify`, outro processo do mesmo bundle)
+  nonisolated func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse,
+                                          withCompletionHandler done: @escaping @Sendable () -> Void) {
+    MainActor.assumeIsolated { supervisor?.abrirJanela() }
+    done()
   }
 
   // `open` com o app já rodando não cria outro processo: o LaunchServices manda "reabrir" para este
@@ -670,6 +700,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 switch lancamento(Array(CommandLine.arguments.dropFirst())) {
 case .versao: print("folga \(version ?? "?")")
 case .selftest: exit(selftest())
+case .notificar: notificar()
 case .rodar(let login):
   let me = ProcessInfo.processInfo.processIdentifier
   if NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).contains(where: { $0.processIdentifier != me }) {
@@ -685,6 +716,6 @@ case .rodar(let login):
     app.run()
   }
 case .uso:
-  FileHandle.standardError.write(Data("uso: Folga [--version | --selftest | --login]\n".utf8))
+  FileHandle.standardError.write(Data("uso: Folga [--version | --selftest | --login | --notify]\n".utf8))
   exit(2)
 }

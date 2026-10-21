@@ -2,7 +2,7 @@
 // O disparo real contra o Windows não entra no `npm test`: encheria a tela de avisos a cada execução.
 // Ele foi conferido à mão em 2026-10-18, com título e corpo cheios de aspas, <tag>, & e $(...): saiu com 0.
 import assert from 'node:assert/strict';
-import { createNotify, SCRIPT } from '../notify.ts';
+import { createNotify, notifyCommand, SCRIPT } from '../notify.ts';
 
 const casos: string[] = [];
 const caso = (nome: string, fn: () => void) => { fn(); casos.push(nome); };
@@ -38,6 +38,40 @@ caso('se o Windows recusar uma vez, não insiste a cada proposta', () => {
 caso('avisar nunca derruba quem chamou', () => {
   const notify = createNotify({ port: 1, run: () => { throw new Error('falhou'); } });
   assert.doesNotThrow(() => notify.toast('a', 'b'));
+});
+
+caso('Mac dentro do app: o próprio Folga --notify', () => {
+  assert.deepEqual(notifyCommand('darwin', { FOLGA_APP: '1', FOLGA_APP_PATH: '/Applications/Folga.app' }),
+    { cmd: '/Applications/Folga.app/Contents/MacOS/Folga', args: ['--notify'] });
+});
+
+caso('Mac fora do app (ou com caminho torto): osascript com -e fixo que lê o ambiente', () => {
+  for (const vars of [{}, { FOLGA_APP: '1', FOLGA_APP_PATH: 'rel/Folga.app' }, { FOLGA_APP: '1', FOLGA_APP_PATH: '/x/Folga' }]) {
+    const c = notifyCommand('darwin', vars)!;
+    assert.equal(c.cmd, '/usr/bin/osascript');
+    assert.equal(c.args[0], '-e');
+    assert.ok(c.args[1]!.includes('system attribute "FOLGA_TOAST_TITLE"') && c.args[1]!.includes('system attribute "FOLGA_TOAST_BODY"'));
+  }
+});
+
+caso('o texto nunca vai nos argumentos, só no ambiente', () => {
+  const mau = '"; do shell script "rm -rf ~"';
+  for (const vars of [{}, { FOLGA_APP: '1', FOLGA_APP_PATH: '/A/Folga.app' }]) {
+    const c = notifyCommand('darwin', { ...vars, FOLGA_TOAST_TITLE: mau })!;
+    assert.ok(!c.args.join(' ').includes('rm -rf'));
+  }
+});
+
+caso('Windows segue o PowerShell de hoje (null)', () => {
+  assert.equal(notifyCommand('win32', {}), null);
+});
+
+caso('no Mac o app que falha cai para o osascript, e o app não é tentado de novo', () => {
+  const vistos: string[] = [];
+  const n = createNotify({ port: 1, platform: 'darwin', vars: { FOLGA_APP: '1', FOLGA_APP_PATH: '/A/Folga.app' },
+    spawnCmd: (cmd, _args, _extra, done) => { vistos.push(cmd); done(cmd.endsWith('Folga') ? 1 : 0); } });
+  n.toast('a', 'b'); n.toast('c', 'd');
+  assert.deepEqual(vistos, ['/A/Folga.app/Contents/MacOS/Folga', '/usr/bin/osascript', '/usr/bin/osascript']);
 });
 
 console.log(casos.map(c => 'ok  ' + c).join('\n'));
