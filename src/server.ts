@@ -18,7 +18,7 @@ import { createSuggestions } from './suggestions.ts';
 import { createWatch } from './watch.ts';
 import { createNotify } from './notify.ts';
 import { createAgent } from './agent.ts';
-import { dataDir, defaultSettings, macHelper } from './platform.ts';
+import { accessText, dataDir, defaultSettings, macHelper } from './platform.ts';
 import { DEFAULT_SETTINGS, type AgentProvider, type Emit, type MemoryState, type ProbeSnapshot, type Sample, type Settings, type SuggestionDraft } from './types.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -439,7 +439,7 @@ server.listen(PORT, '127.0.0.1', () => {
   if (IN_APP) void accessLine().then(l => console.log(`[${new Date().toISOString()}] ${l}`));
 });
 
-/** R32, dentro do app: quem o macOS cobra e quem lê a Lixeira (o servidor sim, o assistente nunca). "assistente SIM" é bug. */
+/** R32, dentro do app: quem o macOS cobra e quem lê a Lixeira (decisão 17: nenhum dos dois deveria). "assistente SIM" é bug. */
 async function accessLine(): Promise<string> {
   const probe = join(ROOT, 'probe', 'bin', 'probe-mac');
   const trash = join(homedir(), '.Trash');
@@ -447,7 +447,7 @@ async function accessLine(): Promise<string> {
   const le = (r: unknown) => { const d = (r as { denied?: unknown } | null)?.denied; return d === false ? 'sim' : d === true ? 'não' : '?'; };
   const servidor = le(await macHelper(['--size'], trash, 20_000));
   const assistente = le(await macHelper(['--disclaim', probe, '--size'], trash, 20_000));
-  return `responsável ${typeof resp?.path === 'string' && resp.path ? resp.path : '?'} · acesso ao disco: servidor ${servidor} · assistente ${assistente === 'sim' ? 'SIM' : assistente}`;
+  return accessText(typeof resp?.path === 'string' && resp.path ? resp.path : '?', servidor, assistente);
 }
 
 const shutdown = () => {

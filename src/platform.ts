@@ -18,6 +18,13 @@ export function dataDir(
   return join(env.LOCALAPPDATA ?? join(import.meta.dirname, '..'), 'Folga');
 }
 
+/** Linha R32 do server.log dentro do app. Decisão 17: o Folga não pede Acesso Total ao Disco; se o servidor lê a
+ *  Lixeira, alguém ligou a permissão e a linha manda desligar (só texto). "assistente SIM" é bug. */
+export function accessText(responsavel: string, servidor: string, assistente: string): string {
+  const aviso = servidor === 'sim' ? ' — O Folga está com Acesso Total ao Disco — desligue em Ajustes (não é necessário)' : '';
+  return `responsável ${responsavel} · acesso ao disco: servidor ${servidor}${aviso} · assistente ${assistente === 'sim' ? 'SIM' : assistente}`;
+}
+
 export function defaultSettings(platform: NodeJS.Platform = process.platform): Settings {
   const s = { ...DEFAULT_SETTINGS };
   if (platform === 'darwin') { s.neverClose = [...MAC_NEVER_CLOSE]; s.autoCareTrigger = 'pressure'; }

@@ -504,21 +504,19 @@ try {
       const lx = items.find(i => i.category === 'lixeira')!;
       assert.deepEqual([lx.unknown, lx.bytes, lx.files, lx.note, lx.label], [true, 0, 0, fdaNote(), 'Lixeira']);
     }
-    // decisão 10: o caminho dos Ajustes só dentro do Folga.app; fora dele levaria a liberar o Terminal
-    assert.match(fdaNote(true), /Ajustes do Sistema › Privacidade e Segurança › Acesso Total ao Disco/);
-    assert.match(fdaNote(true), /Folga/);
-    assert.doesNotMatch(fdaNote(false), /Ajustes do Sistema|Privacy_AllFiles/);
-    for (const n of [fdaNote(true), fdaNote(false)]) assert.doesNotMatch(n, /\bnode\b|Terminal|execPath/i);
+    // decisão 17: o Folga não pede Acesso Total ao Disco. Uma nota só, dentro ou fora do app, sem caminho nos Ajustes
+    assert.equal(fdaNote(), 'Não deu para ler: o macOS protege esta pasta e o Folga não pede essa permissão.');
+    assert.doesNotMatch(fdaNote(), /Ajustes|Privacy_AllFiles|liberar|\bnode\b|Terminal|execPath/i);
     const repo = join(import.meta.dirname, '..', '..');
-    const fontes = execFileSync('git', ['grep', '-l', '-i', '-E', 'Privacy_AllFiles|Acesso Total ao Disco', '--', 'src', 'web/src', 'scripts', 'probe', 'mac', ':!src/tests/files.test.ts'], { encoding: 'utf8', cwd: repo }).trim().split('\n').filter(Boolean);
+    const grep = (re: string) => { try { return execFileSync('git', ['grep', '-l', '-i', '-E', re, '--', 'src', 'web/src', 'scripts', 'probe', 'mac', ':!src/tests/files.test.ts'], { encoding: 'utf8', cwd: repo }).trim().split('\n').filter(Boolean); } catch { return []; } };
+    // nenhum convite: nem o link do painel, nem o caminho "Ajustes do Sistema › Privacidade" (› ou >)
+    assert.deepEqual(grep('Privacy_AllFiles|Ajustes do Sistema ?[›>] ?Privacidade'), []);
+    const fontes = grep('Acesso Total ao Disco');
     assert.ok(fontes.length > 0, 'a busca não achou fonte nenhuma: o pino não está olhando nada');
     assert.ok(fontes.includes('mac/Folga.swift'), 'o pino precisa olhar o app (mac/)');
-    // só a nota de dentro do app (files.ts e o mock que a copia) ensina o caminho nos Ajustes
-    const comCaminho = new Set(['src/files.ts', 'web/src/mock.ts']);
     for (const f of fontes) {
       const txt = readFileSync(join(repo, f), 'utf8');
-      assert.doesNotMatch(txt, /(Privacy_AllFiles|Acesso Total ao Disco)[^\n]{0,160}(\bnode\b|Terminal|execPath)/i, f);
-      if (!comCaminho.has(f)) assert.doesNotMatch(txt, /Ajustes do Sistema[^\n]{0,160}Acesso Total ao Disco/i, f);
+      assert.doesNotMatch(txt, /Acesso Total ao Disco[^\n]{0,160}(\bnode\b|Terminal|execPath)/i, f);
     }
     ok(`Lixeira ilegível = desconhecida (não 0); nenhum texto manda dar Acesso Total ao Disco ao node (${fontes.length} fontes)`);
   }

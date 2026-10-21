@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { dataDir, defaultSettings, MAC_NEVER_CLOSE, userFolders } from '../platform.ts';
+import { accessText, dataDir, defaultSettings, MAC_NEVER_CLOSE, userFolders } from '../platform.ts';
 import { DEFAULT_SETTINGS } from '../types.ts';
 
 const casos: string[] = [];
@@ -10,6 +10,14 @@ caso('dataDir: darwin, win32 e FOLGA_DATA_DIR', () => {
   assert.equal(dataDir('darwin', {}, '/Users/v'), join('/Users/v', 'Library', 'Application Support', 'Folga'));
   assert.equal(dataDir('win32', { LOCALAPPDATA: 'C:\\Users\\A\\AppData\\Local' }, 'x'), join('C:\\Users\\A\\AppData\\Local', 'Folga'));
   assert.equal(dataDir('darwin', { FOLGA_DATA_DIR: '/tmp/f' }, '/Users/v'), '/tmp/f');
+});
+
+caso('accessText (R32, decisão 17): servidor com Acesso Total ao Disco é sinalizado para desligar; sem link', () => {
+  assert.equal(accessText('/A/Folga', 'não', 'não'), 'responsável /A/Folga · acesso ao disco: servidor não · assistente não');
+  const sim = accessText('/A/Folga', 'sim', 'não');
+  assert.match(sim, /servidor sim .*O Folga está com Acesso Total ao Disco — desligue em Ajustes \(não é necessário\)/);
+  assert.doesNotMatch(sim, /Privacy|›|:\/\//);
+  assert.match(accessText('?', '?', 'sim'), /assistente SIM$/);
 });
 
 caso('defaultSettings: win32 intacto; darwin muda neverClose e o gatilho', () => {

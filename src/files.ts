@@ -48,13 +48,9 @@ function macUsage(mtime: number, m: FileMeta | null): { lastUsed: number; basis:
   return { lastUsed, basis };
 }
 
-/** Nota do que o macOS guarda atrás do Acesso Total ao Disco. A permissão é do Folga.app, nunca do processo do
- *  servidor: o caminho dos Ajustes só aparece dentro do app (FOLGA_APP=1); fora dele, manda abrir pelo app (decisão 10). */
-export function fdaNote(insideApp = process.platform === 'darwin' && process.env.FOLGA_APP === '1'): string {
-  return insideApp
-    ? 'Não deu para ler: falta liberar o Acesso Total ao Disco para o Folga. No ícone do Folga na barra, clique em "Liberar acesso ao disco…" (fica em Ajustes do Sistema › Privacidade e Segurança › Acesso Total ao Disco).'
-    : 'Não deu para ler: o macOS guarda isto atrás do Acesso Total ao Disco. Abra o Folga pelo app Folga, na barra de menus, para liberar.';
-}
+/** Nota do que o macOS protege (Lixeira, cache do Safari). Decisão 17: o Folga não pede Acesso Total ao Disco,
+ *  então a nota não manda liberar nada, nem dentro do app nem fora dele. */
+export const fdaNote = (): string => 'Não deu para ler: o macOS protege esta pasta e o Folga não pede essa permissão.';
 const DAY = 86_400_000;
 const MAX_ENTRIES = 100_000;
 const MAX_MS = 20_000;

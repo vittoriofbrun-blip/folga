@@ -205,7 +205,7 @@ async function uninstall() {
   if (existsSync(plist)) { rmSync(plist); console.log(`removido: ${plist}`); }
   console.log(`desinstalado: ${app}`);
   console.log(`seus dados continuam em ${join(homedir(), 'Library', 'Application Support', 'Folga')} (apague à mão se quiser).`);
-  console.log('o Acesso Total ao Disco não foi mexido: se quiser, tire o Folga em Ajustes do Sistema > Privacidade e Segurança.');
+  console.log('o Folga não pede Acesso Total ao Disco; se ele ainda aparecer nessa lista, pode tirar.');
 }
 
 if (import.meta.main) {
