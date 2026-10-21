@@ -88,13 +88,14 @@ caso('app recusado (4) ou ausente (127): nunca mais é tentado', () => {
   assert.deepEqual(cenario([127], [0, 99 * 60_000]), ['app', 'osa', 'osa']);
 });
 
-caso('falha ao lançar o app (ENOENT) é permanente; outro erro de spawn só recua', () => {
-  for (const [codigo, depois] of [['ENOENT', 'osa'], ['EAGAIN', 'app']] as const) {
+caso('falha ao lançar o app (ENOENT/EACCES) é permanente; outro erro de spawn só recua', () => {
+  for (const [codigo, depois] of [['ENOENT', 'osa'], ['EACCES', 'osa'], ['EAGAIN', 'app']] as const) {
     const vistos: string[] = [];
     let t = 0;
     const n = createNotify({ port: 1, platform: 'darwin', vars: macApp, now: () => t,
       spawnCmd: (cmd, _a, _x, done) => { vistos.push(cmd === APP ? 'app' : 'osa'); cmd === APP ? done(null, Object.assign(new Error(codigo), { code: codigo })) : done(0); } });
     n.toast('a', 'b'); t = 11 * 60_000; n.toast('a', 'b');
+    assert.equal(vistos[1], 'osa', `${codigo}: o primeiro aviso saiu pelo osascript`);
     assert.equal(vistos[2], depois, codigo);
   }
 });

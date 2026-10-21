@@ -107,6 +107,9 @@ Spike de 2026-10-21 (macOS 26.5.1, LibreSSL 3.3.6 do sistema):
   autorização do Folga em Ajustes > Notificações e repetir; se continuar 3 ou 4 com app ad-hoc, o `osascript`
   (já ligado como reserva) é o caminho definitivo.
 
+- Um `--notify` só é lançado pelo servidor, que só roda com a instância principal viva; por isso ele nunca
+  pode barrar um lançamento necessário e a checagem de instância única não o distingue.
+
 ## Consequências
 - A CI do macOS monta o app ad-hoc e roda o `check` (sem segredo).
 - O `node` gravado no `folga.json` é o do build; trocar de Node pede rebuild.
