@@ -24,7 +24,6 @@ const folderOf = (p: string) => p.slice(0, Math.max(0, p.search(/[\\/][^\\/]*$/)
 // Mesma regra do pathKey do servidor (src/files.ts), repetida porque a interface não importa módulos do Node:
 // no Mac o APFS não distingue caixa nem NFC/NFD; no Windows só a caixa.
 const pathKey = (p: string, mac: boolean) => (mac ? p.normalize('NFC') : p).toLowerCase();
-const FDA_PANE = 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles';
 const BASIS: Record<StaleFile['basis'], string> = {
   acesso: 'último acesso registrado pelo Windows',
   recentes: 'atalho na pasta Recentes do Windows',
@@ -107,9 +106,9 @@ export function Arquivos({ state }: { state: MemoryState | null }) {
   const doneClean = sugs.filter(s => s.kind === 'limpeza_rapida' && s.status === 'feita').length;
   const firstClean = useRef(true);
   const doneApps = sugs.filter(s => s.kind === 'dados_apps' && s.status === 'feita').length;
-  const firstClean2 = useRef(true);
+  const firstApps = useRef(true);
   useEffect(() => { if (firstClean.current) { firstClean.current = false; return; } loadClean(); }, [doneClean]);
-  useEffect(() => { if (firstClean2.current) { firstClean2.current = false; return; } setAppSel(new Set()); if (mac) loadApps(); }, [doneApps]);
+  useEffect(() => { if (firstApps.current) { firstApps.current = false; return; } setAppSel(new Set()); if (mac) loadApps(); }, [doneApps]);
 
   async function search() {
     setScanning(true); setScanError(''); setSel(new Set());
@@ -328,7 +327,7 @@ export function Arquivos({ state }: { state: MemoryState | null }) {
                     <span className="arq-cat-note">
                       {i.unknown ? '' : plural(i.files, 'arquivo', 'arquivos')}
                       {i.note ? `${i.unknown ? '' : ' · '}${i.note}` : ''}
-                      {i.unknown && <> Painel: <code>{FDA_PANE}</code></>}
+                      {i.unknown && ' Fica em Ajustes do Sistema › Privacidade e Segurança › Acesso Total ao Disco.'}
                     </span>
                   </li>
                 ))}

@@ -83,4 +83,3 @@
 .arq-app > .arq-cat-note { margin: 0 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .arq-app-chk { width: 18px; height: 18px; margin: 0 10px 0 0; accent-color: var(--accent); cursor: pointer; vertical-align: middle; }
 .arq-app-chk:disabled { cursor: not-allowed; }
-.arq-cat-note code { word-break: break-all; }

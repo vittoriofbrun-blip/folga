@@ -143,10 +143,10 @@ export function mockRead(path: string): unknown {
           notes: [{ text: 'Disco da máquina virtual do Claude: não é cache, o Folga não limpa', bytes: 12.4 * GB }],
         },
         {
-          id: 'chrome', name: 'Google Chrome', where: `${lib}/Caches/Google/Chrome`, bytes: 3.1 * GB,
+          id: 'chrome', name: 'Google Chrome', where: `${lib}/Application Support/Google/Chrome`, bytes: 1.7 * GB,
           items: [
-            { id: 'chrome:cache', label: 'Cache de páginas', path: `${lib}/Caches/Google/Chrome/Default/Cache`, bytes: 2.6 * GB, files: 41_200, actionable: true },
-            { id: 'chrome:code', label: 'Cache de código', path: `${lib}/Caches/Google/Chrome/Default/Code Cache`, bytes: 0.5 * GB, files: 3_900, actionable: false, note: 'Chrome aberto: feche para limpar' },
+            { id: 'chrome:gpu', label: 'Cache de vídeo', path: `${lib}/Application Support/Google/Chrome/GPUCache`, bytes: 1.4 * GB, files: 38, actionable: true },
+            { id: 'chrome:shader', label: 'Cache de sombreadores', path: `${lib}/Application Support/Google/Chrome/ShaderCache`, bytes: 0.3 * GB, files: 21, actionable: false, note: 'Chrome aberto: feche para limpar' },
           ],
           notes: [],
         },
