@@ -66,6 +66,7 @@ await caso('disco: o do sistema, a porcentagem livre e o mínimo de 1 GB para va
   assert.equal(systemDisk([]), null);
   const mac = { drive: 'Macintosh HD', total: 1, free: 1 };
   assert.deepEqual(systemDisk([mac]), mac);
+  if (process.platform !== 'win32') assert.deepEqual(systemDisk([mac, c]), mac);   // fora do Windows é o primeiro
   assert.equal(Math.round(diskFreePct(c)), 8);
   const pouco: QuickCleanItem[] = [{ category: 'temp_usuario', label: 'Temporários', bytes: 50 * MB, files: 9, actionable: true }];
   assert.equal(cleanDraft(pouco, c), null);

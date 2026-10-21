@@ -17,6 +17,7 @@ export type WarningsDeps = {
   exec?: (file: string, args: string[]) => Promise<string>;
   now?: () => number;
   platform?: NodeJS.Platform;
+  macVolume?: () => Promise<unknown | null>;   // sonda --volume; injetável nos testes
   statfs?: (path: string) => Promise<{ bsize: number; blocks: number; bavail: number }>;
   startupFolder?: string;
 };
@@ -225,11 +226,13 @@ export function createWarnings(deps: WarningsDeps) {
   async function disk(): Promise<DiskInfo[]> {
     if ((deps.platform ?? process.platform) === 'darwin') {
       // statfs do volume de dados (o home), não do "/" lacrado
-      const s = await statfs(homedir());
+      let s;
+      try { s = await statfs(homedir()); } catch { return []; }
       if (now() - volAt > 10 * 60_000) {
         volAt = now();
-        const r = await macHelper(['--volume', homedir()], null, 15_000) as { name?: unknown; important?: unknown } | null;
-        vol = r && typeof r.name === 'string' && typeof r.important === 'number' ? { name: r.name, important: r.important } : null;
+        const r = await (deps.macVolume ?? (() => macHelper(['--volume', homedir()], null, 15_000)))() as { name?: unknown; important?: unknown } | null;
+        // falha da sonda mantém o último valor bom: o nome do disco entra no id do aviso
+        if (r && typeof r.name === 'string' && typeof r.important === 'number') vol = { name: r.name, important: r.important };
       }
       return [macDiskInfo(s, vol)];
     }

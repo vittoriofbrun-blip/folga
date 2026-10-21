@@ -309,4 +309,22 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   ok('macDiskInfo: livre do statfs, purgeable à parte e nunca negativo');
 }
 
+{
+  const res: unknown[] = [{ name: 'Macintosh HD', important: 52e9 }, null, null];
+  let calls = 0;
+  const { env, w } = rig({ platform: 'darwin', macVolume: async () => { calls++; return res.shift() ?? null; } });
+  const d1 = (await w.disk())[0]!;
+  await w.disk();
+  assert.equal(calls, 1, 'dentro de 10 min a sonda não é chamada de novo');
+  assert.equal(d1.drive, 'Macintosh HD');
+  env.t += 11 * 60_000;
+  const d2 = (await w.disk())[0]!;
+  assert.equal(calls, 2);
+  assert.equal(d2.drive, 'Macintosh HD', 'falha da sonda mantém o nome');
+  assert.equal(d2.purgeable, d1.purgeable, 'e o purgeable');
+  const { w: w2 } = rig({ platform: 'darwin', macVolume: async () => null, statfs: async () => { throw new Error('x'); } });
+  assert.deepEqual(await w2.disk(), [], 'statfs falhou: sem disco, sem rejeição');
+  ok('disco do Mac: cache de 10 min, falha da sonda mantém o último valor, statfs que falha não derruba');
+}
+
 console.log(`warnings: ${passed} casos ok`);
