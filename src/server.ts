@@ -112,6 +112,7 @@ let history: ClassifyHistory = emptyHistory();
 let lastSnap: ProbeSnapshot | null = null;
 let samples: Sample[] = [];
 let state: MemoryState | null = null;
+let lastFreshAt = 0;   // hora da última leitura NOVA da sonda (releitura re-carimba state.t, isto não)
 const extraSelfPids = new Set<number>();   // janela do Edge (F-08)
 const sse = new Set<ServerResponse>();
 const snapshotListeners: ((s: MemoryState) => void)[] = [];
@@ -141,6 +142,7 @@ function runAutoCare(keys: string[]) {
 /** fresh = leitura nova da sonda; releituras do mesmo snapshot (ajuste, liberação) não contam para o Auto Care. */
 function onSnapshot(snap: ProbeSnapshot, fresh = false) {
   lastSnap = snap;
+  if (fresh) lastFreshAt = Date.now();
   const userSession = snap.processes.find(p => p.pid === process.pid)?.session ?? 1;
   const now = Date.now();
   const r = classify(snap, history, settings, { selfPids: selfPids(snap), userSession, startedAt, now });
@@ -202,15 +204,17 @@ const warnings = createWarnings({
   getState: () => state, getSettings: () => settings, probeAlive: () => probeUp,
   lastAutoCareRun: () => ac.lastRunAt, emit, settingsProblem: () => settingsProblem,
 });
+/** Apps abertos, para apagar cache: só com sonda viva e leitura nova de até 10 s. Senão null = tratar tudo como aberto. */
+const runningKeys = () => (state && probeUp && Date.now() - lastFreshAt <= 10_000 ? new Set(state.apps.map(a => a.key)) : null);
 const files = createFiles({
   getSettings: () => settings, roots: process.env.FOLGA_FILES_ROOTS?.split(';'),   // testes: pastas no lugar das do usuário
-  runningKeys: () => (state ? new Set(state.apps.map(a => a.key)) : null),        // Mac: navegador aberto pela sonda
+  runningKeys,                                                                      // Mac: navegador aberto pela sonda
 });
 // FOLGA_APPDATA_BASES (testes e verificação ao vivo): JSON { "appSupport": "/tmp/…", … }. Ele SUBSTITUI as bases
 // padrão (não mescla): a base que o teste não listar não é lida. Torto (JSON quebrado, null, lista, base desconhecida,
 // caminho relativo) → não sobe: nunca cai nas pastas reais nem em '/'.
 const appData = createAppData({
-  runningKeys: () => (state ? new Set(state.apps.map(a => a.key)) : null),
+  runningKeys,
   bases: process.env.FOLGA_APPDATA_BASES ? parseAppDataBases(process.env.FOLGA_APPDATA_BASES) : undefined,
 });
 const suggestions = createSuggestions({

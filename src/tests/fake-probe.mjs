@@ -33,7 +33,9 @@ const tick = () => write({
   ...(MAC && { diskActive: null, memPressure: process.env.FAKE_PRESSURE ?? 'normal', swapUsed: 2 * GB }),
 });
 tick();
-setInterval(tick, intervalMs);
+const ticker = setInterval(tick, intervalMs);
+// FAKE_SILENT_AFTER_MS: a sonda trava (viva, mas sem leitura nova), como uma sonda pendurada
+if (process.env.FAKE_SILENT_AFTER_MS) setTimeout(() => clearInterval(ticker), Number(process.env.FAKE_SILENT_AFTER_MS));
 
 createInterface({ input: process.stdin })
   .on('line', line => {
