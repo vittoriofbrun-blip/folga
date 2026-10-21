@@ -1,7 +1,7 @@
 // Avisos (D15, R26): limiares, dedupe, remoção, sonda, Auto Care, antivírus, travamentos, apps de inicialização.
 // Sem processos reais: o exec, o relógio e o statfs são injetados.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -355,6 +355,8 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   assert.deepEqual(macCrashes([e('a.diag', 1), e('Retired/a.ips', 1), e('old.ips', 25), e('b.ips', 1, hdr.replace('"309"', '"999"'))], now), []);
   const dirty = cleanName('Evil\u0007\nApp' + 'x'.repeat(200));
   assert.ok(!/[\u0000-\u001f\u007f]/.test(dirty) && dirty.length <= 80 && dirty.startsWith('Evil'));
+  const sneaky = cleanName('\u202eEvil\u200bApp\ufeff' + '😀'.repeat(100));
+  assert.ok(!/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/.test(sneaky) && [...sneaky].length === 80 && sneaky.startsWith('EvilApp'));
   ok('Mac: cabeçalho .ips, .crash antigo, 24 h, Retired/.diag/tipo desconhecido fora, cleanName');
 }
 {
@@ -375,6 +377,17 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   await rm(dir, { recursive: true });
   await w.run.crashes();   // pasta ilegível: mantém
   assert.deepEqual(ids(w), ['travamento:node']);
+  {
+    const d2 = mkdtempSync(join(tmpdir(), 'folga-crash2-')), out = mkdtempSync(join(tmpdir(), 'folga-out-'));
+    writeFileSync(join(out, 'real.ips'), hdr);
+    symlinkSync(join(out, 'real.ips'), join(d2, 'link.ips'));   // aponta para fora da pasta
+    writeFileSync(join(d2, 'futuro.ips'), hdr);
+    utimesSync(join(d2, 'futuro.ips'), nowS + 3600, nowS + 3600);   // relógio no futuro
+    const { w: w2 } = rig({ platform: 'darwin', crashDir: d2 });
+    await w2.run.crashes();
+    assert.deepEqual(ids(w2), [], 'link simbólico e mtime futuro são ignorados');
+    await rm(d2, { recursive: true }); await rm(out, { recursive: true });
+  }
   ok('travamentos do Mac: lê a pasta, aviso sai quando o arquivo some, pasta ilegível mantém');
 }
 

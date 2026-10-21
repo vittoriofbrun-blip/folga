@@ -1,6 +1,6 @@
 // F-15: monitor de avisos (D15, R26), discos e apps de inicialização. Só leitura.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { open, readdir, stat, statfs as fsStatfs } from 'node:fs/promises';
+import { open, readdir, lstat, statfs as fsStatfs } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, parse } from 'node:path';
 import { macHelper } from './platform.ts';
@@ -82,7 +82,8 @@ export function avWarning(products: AvProduct[]): Candidate | null {
 
 /** Nome vindo de arquivo/log: sem controle nem quebra de linha, até 80 caracteres. */
 export function cleanName(s: string): string {
-  return s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  return [...s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '')
+    .replace(/\s+/g, ' ').trim()].slice(0, 80).join('');
 }
 
 /** Um aviso por app (id com o nome em minúsculo), com a contagem de travamentos. */
@@ -154,8 +155,8 @@ export async function readCrashEntries(dir: string, now: number): Promise<{ file
   for (const file of await readdir(dir)) {
     if (!/\.(ips|crash)$/.test(file)) continue;
     try {
-      const st = await stat(join(dir, file));
-      if (st.isFile() && now - st.mtimeMs <= DAY_MS) found.push({ file, mtimeMs: st.mtimeMs });
+      const st = await lstat(join(dir, file));   // lstat: link simbólico não é arquivo (não lê o que está fora da pasta)
+      if (st.isFile() && now - st.mtimeMs <= DAY_MS && st.mtimeMs - now <= 5 * 60_000) found.push({ file, mtimeMs: st.mtimeMs });
     } catch { /* sumiu entre o readdir e o stat */ }
   }
   found.sort((a, b) => b.mtimeMs - a.mtimeMs);
