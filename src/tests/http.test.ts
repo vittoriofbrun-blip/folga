@@ -113,6 +113,13 @@ try {
   assert.ok(!existsSync(join(startupDir, 'Folga.lnk')), 'nada foi executado');
   ok('M6: agent-token passa só em POST /api/files/scan; aprovar, liberar, ajustes e o resto dão 403');
 
+  if (process.platform === 'darwin') {
+    const w = await call('POST', '/api/window', { body: {}, token });
+    assert.equal(w.status, 409);
+    assert.equal(w.body.erro, 'abra pelo app Folga na barra de menus');
+    ok('Mac: POST /api/window → 409 "abra pelo app Folga na barra de menus" (nada de Edge)');
+  }
+
   const good = await call('PUT', '/api/settings', { body: { idleMinutes: 10, neverClose: ['Code.exe'] }, token });
   assert.equal(good.status, 200);
   assert.equal((good.body as Settings).idleMinutes, 10);

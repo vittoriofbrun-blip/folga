@@ -352,6 +352,8 @@ const server = createServer(async (req, res) => {
       return send(res, 200, r);
     }
     if (method === 'POST' && path === '/api/window') {
+      // no Mac a janela é a do Folga.app (WebKit, ADR 0007); o servidor não procura navegador
+      if (process.platform === 'darwin') return send(res, 409, { erro: 'abra pelo app Folga na barra de menus' });
       return showWindow() ? send(res, 200, { ok: true }) : send(res, 500, { erro: 'Edge não encontrado' });
     }
     if (method === 'GET' && path === '/api/startup') return send(res, 200, { on: startupInstalled() });

@@ -6,6 +6,7 @@
 import AppKit
 import Foundation
 import os
+import WebKit
 
 let bundleId = "local.folga.app"
 let logger = Logger(subsystem: "local.folga.app", category: "app")
@@ -89,6 +90,20 @@ func openLog(at path: String) -> FileHandle {
   return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
 }
 
+/// A janela só navega no próprio servidor: http, 127.0.0.1, a porta do Folga, sem usuário/senha na URL.
+/// Qualquer outra coisa (localhost, outra porta, https, file:, javascript:, about:, data:) fica fora.
+func allowedURL(_ url: URL, port: Int) -> Bool {
+  url.scheme == "http" && url.host == "127.0.0.1" && url.port == port && url.user == nil && url.password == nil
+}
+
+/// Texto da barra (decisão 13): memória usada · disco livre, "62% · 39 GB" (GB decimal, como o Finder).
+/// Sem servidor → "Folga".
+func statusText(memLoad: Int?, freeBytes: Int64?) -> String {
+  guard let m = memLoad else { return "Folga" }
+  guard let f = freeBytes else { return "\(m)%" }
+  return "\(m)% · \(Int((Double(f) / 1e9).rounded())) GB"
+}
+
 func selftest() -> Int32 {
   var falhas = 0
   func caso(_ nome: String, _ ok: Bool) {
@@ -151,6 +166,17 @@ func selftest() -> Int32 {
   caso("childEnv: PATH resolvido dentro do bundle", env["PATH"] == "/A/Folga.app/Contents/Resources/folga/bin:/usr/bin")
   caso("childEnv: FOLGA_APP=1 e FOLGA_APP_PATH", env["FOLGA_APP"] == "1" && env["FOLGA_APP_PATH"] == "/A/Folga.app")
 
+  let porta = 4780
+  for ok in ["http://127.0.0.1:4780/", "http://127.0.0.1:4780/#/arquivos", "http://127.0.0.1:4780/assets/x.js"] {
+    caso("allowedURL aceita \(ok)", allowedURL(URL(string: ok)!, port: porta))
+  }
+  for nao in ["http://localhost:4780/", "http://127.0.0.1:4781/", "https://127.0.0.1:4780/", "http://127.0.0.1.evil.com:4780/",
+              "http://evil.com/?h=127.0.0.1:4780", "file:///etc/hosts", "javascript:alert(1)", "about:blank", "data:text/html,x"] {
+    caso("allowedURL recusa \(nao)", !allowedURL(URL(string: nao)!, port: porta))
+  }
+  caso("statusText sem servidor → Folga", statusText(memLoad: nil, freeBytes: nil) == "Folga")
+  caso("statusText 62% · 39 GB", statusText(memLoad: 62, freeBytes: 39_000_000_000) == "62% · 39 GB")
+
   print(falhas == 0 ? "selftest: ok" : "selftest: \(falhas) falha(s)")
   return falhas == 0 ? 0 : 1
 }
@@ -183,8 +209,15 @@ final class Supervisor {
   private let estado = NSMenuItem(title: "Iniciando…", action: nil, keyEquivalent: "")
   private let tentar = NSMenuItem(title: "O Folga parou — tentar de novo", action: #selector(tentarDeNovo), keyEquivalent: "")
 
+  private let janela = Janela()
+  private var relogio: Timer?
+  private let sessao = URLSession(configuration: .ephemeral)
+
   init() {
-    item.button?.title = "Folga"
+    item.button?.image = NSImage(systemSymbolName: "memorychip", accessibilityDescription: "Folga")
+    item.button?.image?.isTemplate = true
+    item.button?.imagePosition = .imageLeading
+    titulo("Folga")
     let menu = NSMenu()
     menu.autoenablesItems = false
     estado.isEnabled = false
@@ -192,8 +225,32 @@ final class Supervisor {
     tentar.isHidden = true
     let sair = NSMenuItem(title: "Sair", action: #selector(sairDoApp), keyEquivalent: "q")
     sair.target = self
-    for i in [estado, tentar, .separator(), sair] { menu.addItem(i) }
+    let abrir = NSMenuItem(title: "Abrir Folga", action: #selector(abrirJanela), keyEquivalent: "o")
+    abrir.target = self
+    for i in [abrir, .separator(), estado, tentar, .separator(), sair] { menu.addItem(i) }
     item.menu = menu
+    relogio = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in Task { @MainActor in await self.atualizarTexto() } }
+    Task { await atualizarTexto() }
+  }
+
+  @objc func abrirJanela() { janela.abrir() }
+
+  private func titulo(_ t: String) {
+    item.button?.attributedTitle = NSAttributedString(string: " " + t, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)])
+  }
+
+  /// memLoad do GET /api/state (o mesmo número da tela Início) e o disco livre do volume do HOME.
+  private func atualizarTexto() async {
+    var mem: Int?
+    var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/state")!)
+    req.timeoutInterval = 3
+    if let (data, resp) = try? await sessao.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200,
+       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+      mem = (obj["memLoad"] as? NSNumber)?.intValue
+    }
+    let livre = (try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
+      .volumeAvailableCapacityForImportantUsage
+    titulo(statusText(memLoad: mem, freeBytes: livre))
   }
 
   private func mostrar(_ texto: String) { estado.title = texto; logger.notice("\(texto, privacy: .public)") }   // o log do sistema guarda o que o menu mostrou
@@ -268,6 +325,107 @@ final class Supervisor {
 
 }
 
+/// Janela WebKit presa ao 127.0.0.1 do Folga. Sem ponte para o app: nenhum WKScriptMessageHandler, nenhum
+/// addUserScript. O token chega como no navegador: a página faz GET /api/token na mesma origem.
+@MainActor
+final class Janela: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
+  private var window: NSWindow?
+  private var web: WKWebView?
+  private var aviso: NSTextField?
+  private var tentativas = 0
+  private let inicio = URL(string: "http://127.0.0.1:\(port)/")!
+
+  func abrir() {
+    if window == nil { criar() }
+    NSApp.activate(ignoringOtherApps: true)
+    window?.makeKeyAndOrderFront(nil)
+  }
+
+  private func criar() {
+    let cfg = WKWebViewConfiguration()
+    cfg.websiteDataStore = .nonPersistent()   // nada de cache nem do token em disco
+    cfg.userContentController = WKUserContentController()
+    cfg.preferences.javaScriptCanOpenWindowsAutomatically = false
+    let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 760), configuration: cfg)
+    if #available(macOS 13.3, *) { web.isInspectable = false }
+    web.navigationDelegate = self
+    web.uiDelegate = self
+    let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
+                     styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+    w.title = "Folga"
+    w.isReleasedWhenClosed = false
+    w.delegate = self
+    w.contentView = web
+    let aviso = NSTextField(labelWithString: "Abrindo…")
+    aviso.font = .systemFont(ofSize: 15)
+    aviso.textColor = .secondaryLabelColor
+    aviso.translatesAutoresizingMaskIntoConstraints = false
+    web.addSubview(aviso)
+    NSLayoutConstraint.activate([aviso.centerXAnchor.constraint(equalTo: web.centerXAnchor), aviso.centerYAnchor.constraint(equalTo: web.centerYAnchor)])
+    w.center()
+    self.window = w
+    self.web = web
+    self.aviso = aviso
+    tentativas = 0
+    web.load(URLRequest(url: inicio))
+  }
+
+  // Fechar destrói a janela e o WKWebView: o processo de conteúdo do WebKit sai (pegada em segundo plano, Task 9).
+  func windowWillClose(_ n: Notification) {
+    web?.stopLoading()
+    web?.navigationDelegate = nil
+    web?.uiDelegate = nil
+    window?.contentView = nil
+    window?.delegate = nil
+    web = nil
+    aviso = nil
+    window = nil
+  }
+
+  func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
+    guard let url = action.request.url else { return .cancel }
+    if allowedURL(url, port: port) { return .allow }
+    // link https clicado pelo usuário vai para o navegador padrão; redirecionamento ou script não abrem nada
+    if url.scheme == "https", action.navigationType == .linkActivated { NSWorkspace.shared.open(url) }
+    return .cancel
+  }
+
+  func webView(_ webView: WKWebView, createWebViewWith c: WKWebViewConfiguration, for a: WKNavigationAction,
+               windowFeatures f: WKWindowFeatures) -> WKWebView? { nil }
+
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { aviso?.isHidden = true }
+
+  // servidor ainda subindo: "Abrindo…" e nova tentativa a cada 1 s, por até 20 s
+  func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+    aviso?.isHidden = false
+    tentativas += 1
+    guard tentativas <= 20 else { aviso?.stringValue = "O Folga não respondeu. Feche e abra de novo."; return }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+      guard let self, let web = self.web else { return }
+      web.load(URLRequest(url: self.inicio))
+    }
+  }
+}
+
+/// Menu principal mínimo: sem ele, Cmd+C/Cmd+V/Cmd+W não funcionam na janela de um app de barra.
+@MainActor
+func menuPrincipal() -> NSMenu {
+  let principal = NSMenu()
+  let app = NSMenuItem()
+  app.submenu = NSMenu()
+  app.submenu?.addItem(NSMenuItem(title: "Fechar janela", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
+  let editar = NSMenuItem()
+  editar.submenu = NSMenu(title: "Editar")
+  for (t, sel, k) in [("Desfazer", Selector(("undo:")), "z"), ("Recortar", #selector(NSText.cut(_:)), "x"),
+                      ("Copiar", #selector(NSText.copy(_:)), "c"), ("Colar", #selector(NSText.paste(_:)), "v"),
+                      ("Selecionar tudo", #selector(NSText.selectAll(_:)), "a")] {
+    editar.submenu?.addItem(NSMenuItem(title: t, action: sel, keyEquivalent: k))
+  }
+  principal.addItem(app)
+  principal.addItem(editar)
+  return principal
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
   var supervisor: Supervisor?
@@ -276,16 +434,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ n: Notification) {
     // app de barra sem janela: sem isto o macOS pode encerrá-lo sozinho (Automatic Termination)
     ProcessInfo.processInfo.disableAutomaticTermination("Folga vigia o servidor")
+    NSApp.mainMenu = menuPrincipal()
     let s = Supervisor()
     supervisor = s
-    // segundo open: a outra instância avisa e sai; a janela abre na Task 3
-    DistributedNotificationCenter.default().addObserver(forName: Notification.Name("\(bundleId).open"), object: nil, queue: .main) { _ in }
+    // segundo open: a outra instância avisa e sai; aqui só abre a janela (nunca lê object/userInfo)
+    DistributedNotificationCenter.default().addObserver(forName: Notification.Name("\(bundleId).open"), object: nil, queue: .main) { _ in
+      MainActor.assumeIsolated { s.abrirJanela() }
+    }
     signal(SIGTERM, SIG_IGN)
     let src = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
     src.setEventHandler { MainActor.assumeIsolated { s.parar(); exit(0) } }
     src.resume()
     sigterm = src
     s.subir()
+  }
+
+  // `open` com o app já rodando não cria outro processo: o LaunchServices manda "reabrir" para este
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    supervisor?.abrirJanela()
+    return false
   }
 
   func applicationWillTerminate(_ n: Notification) { supervisor?.parar() }
