@@ -188,6 +188,19 @@ func hasFullDiskAccess(trash: String = homeDir() + "/.Trash") -> Bool {
 /// Texto do aviso do menu: só texto, sem link para os Ajustes (nada que convide a ligar).
 let avisoAcessoTotal = "O Folga está com Acesso Total ao Disco — desligue em Ajustes (não é necessário)"
 
+/// Item do menu quando os avisos do Folga não chegam: só texto, sem link (quem muda Ajustes é o usuário).
+let avisoNotificacoes = "Notificações do Folga desligadas — ligue em Ajustes do Sistema › Notificações › Folga"
+
+/// Código de saída do `--notify` pelo estado das notificações: 0 entrega · 3 ainda não perguntado · 4 recusado.
+/// Autorizado com alertas desligados não conta como entregue (o aviso iria só para a Central, mudo).
+func notifyExit(status: UNAuthorizationStatus, alert: UNNotificationSetting) -> Int32 {
+  switch status {
+  case .authorized, .provisional: return alert == .enabled ? 0 : 4
+  case .notDetermined: return 3
+  default: return 4
+  }
+}
+
 enum Lancamento: Equatable { case versao, selftest, notificar, rodar(login: Bool), uso }
 /// Argumentos (sem o nome do programa). `--login` vale sozinho: é o que o LaunchAgent passa (decisão 15).
 func lancamento(_ args: [String]) -> Lancamento {
@@ -323,6 +336,13 @@ func selftest() -> Int32 {
   caso("hasFullDiskAccess: pasta inexistente → false (sem aviso)", !hasFullDiskAccess(trash: semAcesso.path))
   caso("aviso: manda desligar, sem link nem caminho dos Ajustes", avisoAcessoTotal.contains("desligue")
        && !avisoAcessoTotal.contains("Privacy") && !avisoAcessoTotal.contains("›") && !avisoAcessoTotal.contains("://"))
+  caso("notifyExit: autorizado com alertas → 0", notifyExit(status: .authorized, alert: .enabled) == 0)
+  caso("notifyExit: provisório com alertas → 0", notifyExit(status: .provisional, alert: .enabled) == 0)
+  caso("notifyExit: ainda não perguntado → 3", notifyExit(status: .notDetermined, alert: .enabled) == 3
+       && notifyExit(status: .notDetermined, alert: .disabled) == 3)
+  caso("notifyExit: recusado → 4", notifyExit(status: .denied, alert: .enabled) == 4 && notifyExit(status: .denied, alert: .disabled) == 4)
+  caso("notifyExit: autorizado mas alertas desligados → 4", notifyExit(status: .authorized, alert: .disabled) == 4)
+  caso("aviso de notificações: só texto, sem link", avisoNotificacoes.contains("desligadas") && !avisoNotificacoes.contains("://"))
   caso("disco livre: 39 GB", discoLivreTexto(39_000_000_000) == "Disco livre: 39 GB")
   caso("disco livre: ilegível → —", discoLivreTexto(nil) == "Disco livre: —")
   caso("statusText só memória (decisão 18)", statusText(memLoad: 62) == "62%")
@@ -363,6 +383,8 @@ final class Supervisor: NSObject, NSMenuDelegate {
   private let liberar = NSMenuItem(title: "Liberar parados…", action: #selector(liberarParados), keyEquivalent: "")
   private let disco = NSMenuItem(title: "Disco livre: —", action: nil, keyEquivalent: "")
   private let acessoTotal = NSMenuItem(title: avisoAcessoTotal, action: nil, keyEquivalent: "")   // só texto, decisão 17
+  private let notificacoes = NSMenuItem(title: avisoNotificacoes, action: nil, keyEquivalent: "")   // só texto
+  var aoAbrirJanela: (() -> Void)?
   private var relogio: Timer?
   private let sessao = URLSession(configuration: .ephemeral)
 
@@ -386,18 +408,33 @@ final class Supervisor: NSObject, NSMenuDelegate {
     liberar.target = self
     acessoTotal.isEnabled = false
     acessoTotal.isHidden = !hasFullDiskAccess()
+    notificacoes.isEnabled = false
+    notificacoes.isHidden = true
+    atualizarNotificacoes()
     menu.delegate = self
-    for i in [disco, .separator(), abrir, liberar, .separator(), acessoTotal, estado, tentar, .separator(), sair] { menu.addItem(i) }
+    for i in [disco, .separator(), abrir, liberar, .separator(), acessoTotal, notificacoes, estado, tentar, .separator(), sair] { menu.addItem(i) }
     item.menu = menu
     relogio = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in Task { @MainActor in await self.atualizarTexto() } }
     Task { await atualizarTexto() }
   }
 
-  @objc func abrirJanela() { janela.abrir() }
+  /// Item "Notificações desligadas" visível sempre que um `--notify` não entregaria (mesma regra, notifyExit ≠ 0).
+  private func atualizarNotificacoes() {
+    UNUserNotificationCenter.current().getNotificationSettings { st in
+      let desligadas = notifyExit(status: st.authorizationStatus, alert: st.alertSetting) != 0
+      DispatchQueue.main.async { MainActor.assumeIsolated { self.notificacoes.isHidden = !desligadas } }
+    }
+  }
+
+  @objc func abrirJanela() {
+    janela.abrir()
+    aoAbrirJanela?()
+  }
 
   /// Reavaliado a cada abertura do menu: desligada a permissão, o aviso some sozinho.
   func menuNeedsUpdate(_ menu: NSMenu) {
     acessoTotal.isHidden = !hasFullDiskAccess()
+    atualizarNotificacoes()
     disco.title = discoLivreTexto((try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
       .volumeAvailableCapacityForImportantUsage)
   }
@@ -664,20 +701,31 @@ func menuPrincipal() -> NSMenu {
   return principal
 }
 
+/// Erro do UNUserNotificationCenter no stderr e no log (público): domínio, código e texto, nunca o conteúdo do aviso.
+func relatar(_ etapa: String, _ erro: Error?) {
+  guard let erro else { return }
+  let e = erro as NSError
+  let linha = "\(etapa): \(e.domain) \(e.code) \(e.localizedDescription)"
+  logger.error("avisos \(linha, privacy: .public)")
+  FileHandle.standardError.write(Data("folga avisos: \(linha)\n".utf8))
+}
+
 /// `Folga --notify`: roda antes da instância única e nunca toca o supervisor nem abre janela. Texto só do ambiente.
-/// 0 = postado · 3 = sem resposta em 10 s (autorização pendente) · 4 = autorização recusada · 5 = erro ao postar.
+/// Não pede autorização: quem pede é a instância principal (um processo de 10 s matava o pedido na tela).
+/// 0 = postado · 3 = ainda não perguntado (ou sem resposta em 10 s) · 4 = recusado · 5 = erro ao postar.
 func notificar() -> Never {
   let e = ProcessInfo.processInfo.environment
   let titulo = String((e["FOLGA_TOAST_TITLE"] ?? "Folga").prefix(200))
   let corpo = String((e["FOLGA_TOAST_BODY"] ?? "").prefix(500))
   let centro = UNUserNotificationCenter.current()
   DispatchQueue.global().asyncAfter(deadline: .now() + 10) { exit(3) }
-  centro.requestAuthorization(options: [.alert, .sound]) { ok, _ in
-    guard ok else { exit(4) }
+  centro.getNotificationSettings { st in
+    let codigo = notifyExit(status: st.authorizationStatus, alert: st.alertSetting)
+    guard codigo == 0 else { exit(codigo) }
     let c = UNMutableNotificationContent()
     c.title = titulo
     c.body = corpo
-    centro.add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil)) { erro in exit(erro == nil ? 0 : 5) }
+    centro.add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil)) { erro in relatar("add", erro); exit(erro == nil ? 0 : 5) }
   }
   dispatchMain()
 }
@@ -686,6 +734,20 @@ func notificar() -> Never {
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
   var supervisor: Supervisor?
   var sigterm: DispatchSourceSignal?
+  let login: Bool
+  private var pediu = false
+  init(login: Bool) { self.login = login }
+
+  /// Pede autorização uma vez, só se o macOS ainda não perguntou, com o app de pé (o pedido fica na tela).
+  func pedirAutorizacao() {
+    guard !pediu else { return }
+    pediu = true
+    let centro = UNUserNotificationCenter.current()
+    centro.getNotificationSettings { st in
+      guard st.authorizationStatus == .notDetermined else { return }
+      centro.requestAuthorization(options: [.alert, .sound]) { _, erro in relatar("requestAuthorization", erro) }
+    }
+  }
 
   func applicationDidFinishLaunching(_ n: Notification) {
     // app de barra sem janela: sem isto o macOS pode encerrá-lo sozinho (Automatic Termination)
@@ -704,6 +766,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     sigterm = src
     s.subir()
     UNUserNotificationCenter.current().delegate = self
+    // no login o pedido não surge sozinho: espera o primeiro "Abrir Folga"
+    if login { s.aoAbrirJanela = { [weak self] in self?.pedirAutorizacao() } } else { pedirAutorizacao() }
   }
 
   // clique no aviso → abre a janela (o aviso é postado pelo `Folga --notify`, outro processo do mesmo bundle)
@@ -736,7 +800,7 @@ case .rodar(let login):
   }
   MainActor.assumeIsolated {   // código de topo roda na thread principal
     let app = NSApplication.shared
-    let delegate = AppDelegate()
+    let delegate = AppDelegate(login: login)
     app.delegate = delegate
     app.setActivationPolicy(.accessory)
     app.run()

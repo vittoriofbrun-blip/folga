@@ -118,7 +118,9 @@ pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `
 ### Avisos do Mac (Task 8)
 - Dentro do app, o servidor roda `Folga --notify` (UNUserNotificationCenter): processo curto, não sobe a instância
   nem a janela, nunca toca o supervisor. Título e corpo vão só pelo ambiente (`FOLGA_TOAST_TITLE/BODY`), nunca em
-  argumento. Saídas: 0 postado · 3 sem resposta em 10 s · 4 recusado · 5 erro. Clique no aviso → a instância
+  argumento. Saídas: 0 postado · 3 ainda não perguntado (ou sem resposta em 10 s) · 4 recusado · 5 erro. Desde o
+  plano 4 o `--notify` **não pede** autorização: só lê o estado (`notifyExit`) e posta; erro do macOS vai para o
+  stderr e para o log público (domínio, código, texto). Clique no aviso → a instância
   principal (delegate) abre a janela.
 - Qualquer saída ≠ 0 faz o aviso daquela vez sair pelo `osascript` (script fixo que lê `system attribute`; testado
   ao vivo com título `"; do shell script …`: nada executou). Saída 4 (recusado), 126, 127 ou falha de spawn
@@ -151,7 +153,23 @@ pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `
   registro principal), o `--notify` ainda não foi medido depois do registro. Esse é o passo do controlador com
   o Vittorio (Step 3), e pode ser que apareça o pedido. Enquanto isso, o reserva `osascript` sai em nome do
   Editor de Scripts, que muito provavelmente nunca foi autorizado.
-- **Estratégia para a Task 2:** (1) `install` roda `lsregister -f` no app instalado e `lsregister -u` nos outros
+- **Erro exato (plano 4, Task 2):** `UNErrorDomain 1 Notifications are not allowed for this application`
+  (`notificationsNotAllowed`), devolvido pelo `requestAuthorization` do `--notify` do build. O log do `usernoted`
+  mostra o porquê com um app de teste ad-hoc (`local.folga.diag`, apagado e desregistrado depois):
+  - **sem registro:** `Failed to find or validate client of identifier …` → erro 1 na hora, sem pedido;
+  - **registrado, registro único, ad-hoc, rodado direto pelo binário:** `Sending request for permission … Presenting
+    … as alert`: **o pedido aparece**. Ad-hoc não é barrado. O pedido sumiu quando o processo morreu (6 s), e o
+    estado ficou recusado: o `--notify` antigo, que morria em 10 s, matava o próprio pedido (a saída 3 do
+    planejamento).
+  - O build continua com erro 1 porque o registro dele é `launch-disabled` (o instalado é o principal do mesmo id).
+  Conclusão: dá para consertar. O pedido sai da instância principal (de pé, o pedido fica na tela) e o
+  `install` registra o caminho instalado.
+- **Feito (Task 2):** `--notify` só lê o estado; a instância principal pede uma vez se `.notDetermined` (no
+  `--login`, só no primeiro "Abrir Folga"); o menu mostra "Notificações do Folga desligadas — ligue em Ajustes do
+  Sistema › Notificações › Folga" (só texto) sempre que `notifyExit ≠ 0`; `install` roda `lsregister -f` no app
+  trocado e `uninstall` roda `lsregister -u` antes de apagar (falha só avisa). **Pendente (controlador):** instalar,
+  o Vittorio responder o pedido, conferir o menu e um cartão do vigia chegando como aviso do Folga.
+- **Estratégia para a Task 2 (escrita na Task 1):** (1) `install` roda `lsregister -f` no app instalado e `lsregister -u` nos outros
   registros do mesmo bundle id (build e temporários), para que um só caminho responda pelo `local.folga.app`;
   (2) o pedido de autorização sai da instância principal (o app que o macOS conhece), não do processo curto;
   (3) o `--notify` grava no log o código do erro de `requestAuthorization` (hoje descartado); (4) o `osascript`

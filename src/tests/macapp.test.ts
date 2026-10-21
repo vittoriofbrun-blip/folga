@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // @ts-ignore: JS puro, é o próprio script de montar o Folga.app
@@ -33,10 +33,12 @@ if (process.platform === 'darwin') {
     assert.deepEqual(readdirSync(dest), [], 'nada instalado');
     // uninstall avisa que o item de login continua carregado até sair da sessão
     writeFileSync(join(tmp, 'local.folga.app.plist'), '<plist/>');   // pasta de teste, nunca ~/Library/LaunchAgents
+    mkdirSync(join(dest, 'Folga.app', 'Contents'), { recursive: true });   // não é app de verdade: lsregister -u não pode barrar
     const u = spawnSync(process.execPath, [script, 'uninstall'], { encoding: 'utf8', env: { ...process.env, FOLGA_INSTALL_DIR: dest, FOLGA_STARTUP_DIR: tmp } });
     assert.equal(u.status, 0, u.stderr);
     assert.match(u.stdout, /até você sair da sessão/);
     assert.ok(!existsSync(join(tmp, 'local.folga.app.plist')));
+    assert.ok(!existsSync(join(dest, 'Folga.app')), 'app apagado mesmo com o lsregister -u');
   } finally { rmSync(tmp, { recursive: true, force: true }); rmSync(dest, { recursive: true, force: true }); }
 }
 console.log('macapp: ok');

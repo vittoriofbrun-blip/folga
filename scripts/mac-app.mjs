@@ -147,6 +147,12 @@ function check(app, previous) {
 }
 
 // ---- install / uninstall ----
+const LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister';
+/** Registro no LaunchServices: sem ele o macOS recusa as notificações sem perguntar (ADR 0007). Falha só avisa. */
+function lsregister(flag, app) {
+  const r = run(LSREGISTER, [flag, app]);
+  if (!r.ok) console.log(`aviso: lsregister ${flag} falhou (${r.out || 'sem saída'}); o resto segue`);
+}
 const installDir = () => resolve(process.env.FOLGA_INSTALL_DIR ?? join(homedir(), 'Applications'));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 /** pids cujo executável é EXATAMENTE `exe` (nunca por nome: build/Folga.app e outras cópias ficam em paz). */
@@ -186,6 +192,7 @@ async function install() {
     rmSync(velho, { recursive: true, force: true });
     if (tinhaVelho) renameSync(app, velho);
     try { renameSync(novo, app); } catch (e) { if (tinhaVelho) renameSync(velho, app); throw e; }
+    lsregister('-f', app);
     must('/usr/bin/open', [app]);
     if (!await waitFor(join(app, 'Contents', 'MacOS', 'Folga'), true, 10000)) {
       fail(`o novo Folga não abriu; o antigo, se havia, ficou em ${velho}`);
@@ -198,6 +205,7 @@ async function install() {
 async function uninstall() {
   const app = join(installDir(), 'Folga.app');
   await stopApp(app);
+  if (existsSync(app)) lsregister('-u', app);
   rmSync(app, { recursive: true, force: true });
   rmSync(join(installDir(), 'Folga.app.novo'), { recursive: true, force: true });
   rmSync(join(installDir(), 'Folga.app.velho'), { recursive: true, force: true });
