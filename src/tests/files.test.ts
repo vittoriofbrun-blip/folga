@@ -441,7 +441,8 @@ try {
     const solto = file(join(abertos, 'solto.tmp'), 1000, 30);
     const outro = file(join(abertos, 'outro.tmp'), 1000, 30);
     const comAbertos = (set: ReadonlySet<string> | null) => mk({ tempDirs: [abertos], openFiles: async () => set, now: () => Date.now() + 8 * DAY })   // ctime = agora: o relógio anda 8 dias;
-    const rl = await comAbertos(new Set([realpathSync(segurado)])).quickClean({ categories: ['temp_usuario'] });
+    // native: como o realpath das pastas de temporários (no Windows expande o nome 8.3 do tmpdir)
+    const rl = await comAbertos(new Set([realpathSync.native(segurado)])).quickClean({ categories: ['temp_usuario'] });
     assert.ok(existsSync(segurado), 'arquivo aberto por um processo fica');
     assert.ok(!existsSync(solto) && !existsSync(outro));
     assert.deepEqual([rl.files, rl.skipped], [2, 1]);
