@@ -33,9 +33,11 @@ function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { shell: false, encoding: 'utf8', ...opts });
   return { ok: !r.error && r.status === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}`.trim(), stdout: (r.stdout ?? '').trim() };
 }
+/** Falha = exceção, nunca process.exit: o `finally` do install precisa rodar (sem pasta de montagem sobrando). */
+const fail = msg => { throw new Error(msg); };
 function must(cmd, args) {
   const r = run(cmd, args);
-  if (!r.ok) { console.error(`falhou: ${cmd} ${args.join(' ')}\n${r.out}`); process.exit(1); }
+  if (!r.ok) fail(`falhou: ${cmd} ${args.join(' ')}\n${r.out}`);
   return r;
 }
 const NODE = 'bin/node';
@@ -48,10 +50,10 @@ const nodeMajor = v => Number(/^v?(\d+)\./.exec(String(v))?.[1] ?? 0);
 const version = () => JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
 
 function build(outDir) {
-  if (!existsSync(join(ROOT, 'dist', 'index.html'))) { console.error('falta a interface: rode npm run build'); process.exit(1); }
+  if (!existsSync(join(ROOT, 'dist', 'index.html'))) fail('falta a interface: rode npm run build');
   const probe = join(ROOT, 'probe', 'bin', 'probe-mac');
-  if (!existsSync(probe)) { console.error('falta a sonda: rode npm run build:probe'); process.exit(1); }
-  if (nodeMajor(process.version) < 24) { console.error(`o Folga precisa do Node 24 ou mais novo (este é ${process.version})`); process.exit(1); }
+  if (!existsSync(probe)) fail('falta a sonda: rode npm run build:probe');
+  if (nodeMajor(process.version) < 24) fail(`o Folga precisa do Node 24 ou mais novo (este é ${process.version})`);
 
   const app = join(outDir, 'Folga.app');
   const res = join(app, 'Contents', 'Resources');
@@ -163,7 +165,7 @@ async function stopApp(app) {
   if (!pids.length) return;
   console.log(`parando o Folga instalado (pid ${pids.join(', ')})`);
   for (const pid of pids) try { process.kill(pid, 'SIGTERM'); } catch {}
-  if (!await waitFor(exe, false, 10000)) { console.error('o Folga instalado não saiu; nada foi trocado'); process.exit(1); }
+  if (!await waitFor(exe, false, 10000)) fail('o Folga instalado não saiu; nada foi trocado');
 }
 
 async function install() {
@@ -175,7 +177,7 @@ async function install() {
     must(process.execPath, [join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js'), 'build']);
     must(process.execPath, [join(ROOT, 'scripts', 'build-probe.mjs')]);
     build(stage);
-    if (check(join(stage, 'Folga.app')) !== 0) { console.error('check vermelho: o instalado não foi tocado'); process.exit(1); }
+    if (check(join(stage, 'Folga.app')) !== 0) fail('check vermelho: o instalado não foi tocado');
     mkdirSync(dir, { recursive: true });
     rmSync(novo, { recursive: true, force: true });
     must('/usr/bin/ditto', [join(stage, 'Folga.app'), novo]);
@@ -186,8 +188,7 @@ async function install() {
     try { renameSync(novo, app); } catch (e) { if (tinhaVelho) renameSync(velho, app); throw e; }
     must('/usr/bin/open', [app]);
     if (!await waitFor(join(app, 'Contents', 'MacOS', 'Folga'), true, 10000)) {
-      console.error(`o novo Folga não abriu; o antigo, se havia, ficou em ${velho}`);
-      process.exit(1);
+      fail(`o novo Folga não abriu; o antigo, se havia, ficou em ${velho}`);
     }
     rmSync(velho, { recursive: true, force: true });
     console.log(`instalado e aberto: ${app}`);
@@ -202,7 +203,10 @@ async function uninstall() {
   rmSync(join(installDir(), 'Folga.app.velho'), { recursive: true, force: true });
   const startup = process.env.FOLGA_STARTUP_DIR ?? join(homedir(), 'Library', 'LaunchAgents');
   const plist = join(startup, 'local.folga.app.plist');
-  if (existsSync(plist)) { rmSync(plist); console.log(`removido: ${plist}`); }
+  if (existsSync(plist)) {
+    rmSync(plist);
+    console.log(`removido: ${plist} (o item de login continua carregado até você sair da sessão; no próximo login ele não volta)`);
+  }
   console.log(`desinstalado: ${app}`);
   console.log(`seus dados continuam em ${join(homedir(), 'Library', 'Application Support', 'Folga')} (apague à mão se quiser).`);
   console.log('o Folga não pede Acesso Total ao Disco; se ele ainda aparecer nessa lista, pode tirar.');
@@ -218,9 +222,11 @@ if (import.meta.main) {
     return v;
   };
   if (process.platform !== 'darwin') { console.error('o Folga.app só existe no Mac'); process.exit(1); }
-  if (cmd === 'build') build(resolve(opt('--out') ?? join(ROOT, 'build'))); // --adhoc: aceito, é o único ramo
-  else if (cmd === 'install') await install();
-  else if (cmd === 'uninstall') await uninstall();
-  else if (cmd === 'check' && rest[0]) process.exitCode = check(resolve(rest[0]), opt('--previous'));
-  else { console.error(`subcomando desconhecido: ${cmd ?? '(nenhum)'}\nuso: node scripts/mac-app.mjs install | uninstall | build [--adhoc] [--out <dir>] | check <app> [--previous <arquivo>]`); process.exit(1); }
+  try {
+    if (cmd === 'build') build(resolve(opt('--out') ?? join(ROOT, 'build'))); // --adhoc: aceito, é o único ramo
+    else if (cmd === 'install') await install();
+    else if (cmd === 'uninstall') await uninstall();
+    else if (cmd === 'check' && rest[0]) process.exitCode = check(resolve(rest[0]), opt('--previous'));
+    else fail(`subcomando desconhecido: ${cmd ?? '(nenhum)'}\nuso: node scripts/mac-app.mjs install | uninstall | build [--adhoc] [--out <dir>] | check <app> [--previous <arquivo>]`);
+  } catch (e) { console.error(e instanceof Error ? e.message : String(e)); process.exitCode = 1; }
 }

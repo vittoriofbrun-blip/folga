@@ -1,7 +1,7 @@
 // Servidor local do Folga: sonda → classificador → HTTP/SSE (ADR 0001, R15–R17).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
@@ -18,7 +18,7 @@ import { createSuggestions } from './suggestions.ts';
 import { createWatch } from './watch.ts';
 import { createNotify } from './notify.ts';
 import { createAgent } from './agent.ts';
-import { accessText, dataDir, defaultSettings, macHelper } from './platform.ts';
+import { accessText, dataDir, defaultSettings, macHelper, readPrivate, writePrivate } from './platform.ts';
 import { DEFAULT_SETTINGS, type AgentProvider, type Emit, type MemoryState, type ProbeSnapshot, type Sample, type Settings, type SuggestionDraft } from './types.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -32,16 +32,13 @@ const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 
 mkdirSync(DATA_DIR, { recursive: true });
 
-/** Gravação atômica (ADR 0005): o leitor nunca vê o arquivo pela metade. */
-function writeAtomic(file: string, content: string) {
-  writeFileSync(file + '.tmp', content);
-  renameSync(file + '.tmp', file);
-}
+/** Gravação atômica (ADR 0005): o leitor nunca vê o arquivo pela metade. Privada (0600, sem seguir link). */
+const writeAtomic = writePrivate;
 
 // ---------- tokens (R16) ----------
 // ui-token: da interface, autoriza tudo. Arquivo com menos de 32 caracteres (vazio, cortado, editado à mão) é regerado.
 const tokenFile = join(DATA_DIR, 'ui-token');
-let TOKEN = existsSync(tokenFile) ? readFileSync(tokenFile, 'utf8').trim() : '';
+let TOKEN = readPrivate(tokenFile);
 if (TOKEN.length < 32) { TOKEN = randomBytes(32).toString('hex'); writeAtomic(tokenFile, TOKEN); }
 // agent-token: só do processo MCP do agente, novo a cada início, aceito apenas na varredura de arquivos (que só lê).
 // O ui-token também aprova sugestões; o agente nunca o vê.

@@ -1,8 +1,9 @@
 // Janela do app: Edge em modo app com perfil próprio (ADR 0001) e atalho opcional na pasta Inicializar (P04).
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { writePrivate } from './platform.ts';
 
 const EDGE_CANDIDATES = [
   join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
@@ -66,7 +67,7 @@ export function setStartup(on: boolean, root: string): Promise<boolean> {
   if (MAC) {
     const app = appBundlePath();
     if (!app) return Promise.resolve(false);
-    try { mkdirSync(startupDir(), { recursive: true }); writeFileSync(lnkPath(), launchAgentXml(app)); } catch { /* sem escrita: on=false abaixo */ }
+    try { mkdirSync(startupDir(), { recursive: true }); writePrivate(lnkPath(), launchAgentXml(app)); } catch { /* sem escrita: on=false abaixo */ }
     return Promise.resolve(startupInstalled());
   }
   const script = [

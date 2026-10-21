@@ -258,8 +258,9 @@ function Startup() {
     <section className="set-list" aria-labelledby="startup-t">
       <h2 className="set-h" id="startup-t">{mac ? 'Abrir com o Mac' : 'Abrir com o Windows'}</h2>
       <label className="set-startup">
-        <input type="checkbox" role="switch" checked={on ?? false} disabled={on === null || !available}
+        <input type="checkbox" role="switch" checked={on ?? false} disabled={on === null || (!available && !on)}
           onChange={e => void toggle(e.target.checked)} />
+        {/* ligado e indisponível (aberto fora do app): ainda dá para desligar, nunca fica preso */}
         <span>{!available ? 'Disponível pelo app Folga.'
           : mac ? 'Abrir o Folga quando você entrar no Mac. Só o ícone aparece na barra de menus; o Auto Care passa a valer o dia todo.'
           : 'Abrir o Folga quando você entrar no Windows. O Auto Care passa a valer o dia todo, com a janela aberta ou fechada.'}</span>

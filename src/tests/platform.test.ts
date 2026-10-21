@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { accessText, dataDir, defaultSettings, MAC_NEVER_CLOSE, userFolders } from '../platform.ts';
+import { accessText, dataDir, readPrivate, writePrivate, defaultSettings, MAC_NEVER_CLOSE, userFolders } from '../platform.ts';
 import { DEFAULT_SETTINGS } from '../types.ts';
 
 const casos: string[] = [];
@@ -18,6 +20,29 @@ caso('accessText (R32, decisão 17): servidor com Acesso Total ao Disco é sinal
   assert.match(sim, /servidor sim .*O Folga está com Acesso Total ao Disco — desligue em Ajustes \(não é necessário\)/);
   assert.doesNotMatch(sim, /Privacy|›|:\/\//);
   assert.match(accessText('?', '?', 'sim'), /assistente SIM$/);
+});
+
+caso('writePrivate/readPrivate: 0600, nunca segue link (nem no .tmp), 0644 antigo vira 0600', () => {
+  const d = mkdtempSync(join(tmpdir(), 'folga-priv-'));
+  try {
+    const f = join(d, 'ui-token');
+    writePrivate(f, 'abc');
+    assert.equal(readPrivate(f), 'abc');
+    if (process.platform === 'win32') return;
+    assert.equal(statSync(f).mode & 0o777, 0o600);
+    const alvo = join(d, 'alvo'); writeFileSync(alvo, 'intacto');
+    writeFileSync(join(d, 't'), 'x', { mode: 0o644 });
+    assert.equal(readPrivate(join(d, 't')), 'x');
+    assert.equal(statSync(join(d, 't')).mode & 0o777, 0o600, '0644 antigo fechado em 0600');
+    symlinkSync(alvo, join(d, 'link'));
+    assert.equal(readPrivate(join(d, 'link')), '', 'link lido como ausente');
+    writePrivate(join(d, 'link'), 'novo');
+    assert.ok(!lstatSync(join(d, 'link')).isSymbolicLink() && readFileSync(alvo, 'utf8') === 'intacto', 'link trocado, alvo intacto');
+    symlinkSync(alvo, join(d, 'p.tmp'));
+    writePrivate(join(d, 'p'), 'novo');
+    assert.equal(readFileSync(alvo, 'utf8'), 'intacto', '.tmp plantado não é seguido');
+    assert.ok(!existsSync(join(d, 'p.tmp')));
+  } finally { rmSync(d, { recursive: true, force: true }); }
 });
 
 caso('defaultSettings: win32 intacto; darwin muda neverClose e o gatilho', () => {

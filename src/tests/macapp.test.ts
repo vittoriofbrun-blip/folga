@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // @ts-ignore: JS puro, é o próprio script de montar o Folga.app
 import { requirementWeak } from '../../scripts/mac-app.mjs';
@@ -21,5 +23,20 @@ if (process.platform === 'darwin') {
     assert.equal(o.status, 1, o.stderr);
     assert.match(o.stderr, /--out precisa de um valor/);
   }
+  // T10: install que falha no meio (swiftc da sonda sem Command Line Tools) não deixa a pasta de montagem para trás
+  const tmp = mkdtempSync(join(tmpdir(), 'folga-macapp-')), dest = mkdtempSync(join(tmpdir(), 'folga-macapp-dest-'));
+  try {
+    const script = join(import.meta.dirname, '..', '..', 'scripts', 'mac-app.mjs');
+    const i = spawnSync(process.execPath, [script, 'install'], { encoding: 'utf8', env: { ...process.env, TMPDIR: tmp, FOLGA_INSTALL_DIR: dest, DEVELOPER_DIR: '/nao/existe' } });
+    assert.equal(i.status, 1, i.stdout + i.stderr);
+    assert.deepEqual(readdirSync(tmp).filter(n => n.startsWith('folga-install-')), [], 'pasta de montagem vazou');
+    assert.deepEqual(readdirSync(dest), [], 'nada instalado');
+    // uninstall avisa que o item de login continua carregado até sair da sessão
+    writeFileSync(join(tmp, 'local.folga.app.plist'), '<plist/>');   // pasta de teste, nunca ~/Library/LaunchAgents
+    const u = spawnSync(process.execPath, [script, 'uninstall'], { encoding: 'utf8', env: { ...process.env, FOLGA_INSTALL_DIR: dest, FOLGA_STARTUP_DIR: tmp } });
+    assert.equal(u.status, 0, u.stderr);
+    assert.match(u.stdout, /até você sair da sessão/);
+    assert.ok(!existsSync(join(tmp, 'local.folga.app.plist')));
+  } finally { rmSync(tmp, { recursive: true, force: true }); rmSync(dest, { recursive: true, force: true }); }
 }
 console.log('macapp: ok');

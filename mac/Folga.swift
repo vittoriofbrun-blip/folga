@@ -57,11 +57,18 @@ func findNode(recorded: String, resources: URL = resources) -> String? {
   return p.terminationStatus == 0 && v.hasPrefix("v") && major >= 24 ? path : nil
 }
 
+/// Pasta do usuário pela conta do sistema (getpwuid), nunca pelo HOME do ambiente, que quem lança o app escolhe.
+func homeDir() -> String {
+  if let pw = getpwuid(getuid()), let d = pw.pointee.pw_dir { return String(cString: d) }
+  return NSHomeDirectory()
+}
+
 /// Ambiente do servidor, montado do zero: nada de NODE_OPTIONS, NODE_*, DYLD_* nem do resto do ambiente do app.
-/// Entradas do PATH sem "/" na frente são relativas a Contents/Resources.
+/// HOME vem da conta (homeDir). Entradas do PATH sem "/" na frente são relativas a Contents/Resources.
 func childEnv(from env: [String: String], appPath: String, path: String, resources: URL = resources) -> [String: String] {
   var out: [String: String] = [:]
-  for k in ["HOME", "LANG", "TMPDIR", "USER", "LOGNAME"] { if let v = env[k] { out[k] = v } }
+  for k in ["LANG", "TMPDIR", "USER", "LOGNAME"] { if let v = env[k] { out[k] = v } }
+  out["HOME"] = homeDir()
   out["FOLGA_APP"] = "1"
   out["FOLGA_APP_PATH"] = appPath
   out["PATH"] = path.split(separator: ":").map { $0.hasPrefix("/") ? String($0) : resources.appendingPathComponent(String($0)).path }
@@ -90,6 +97,7 @@ func openLog(at path: String) -> FileHandle {
     logger.error("server.log não é arquivo comum; sem log")
     return FileHandle.nullDevice
   }
+  _ = fchmod(fd, 0o600)   // log 0644 de antes da correção: o O_CREAT só vale para arquivo novo
   if st.st_size > 1_000_000 { _ = ftruncate(fd, 0) }
   return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
 }
@@ -157,7 +165,7 @@ func statusText(memLoad: Int?, freeBytes: Int64?) -> String {
 
 /// Decisão 17: o Folga não pede Acesso Total ao Disco. Lixeira legível = alguém ligou a permissão mesmo assim, e o
 /// menu avisa para desligar. Só abrir de verdade conta: pasta negada, inexistente ou outro erro → false (sem aviso).
-func hasFullDiskAccess(trash: String = NSHomeDirectory() + "/.Trash") -> Bool {
+func hasFullDiskAccess(trash: String = homeDir() + "/.Trash") -> Bool {
   guard let d = opendir(trash) else { return false }
   closedir(d)
   return true
@@ -234,12 +242,18 @@ func selftest() -> Int32 {
   try? hr.close()
   caso("openLog: arquivo comum acima de 1 MB é zerado e recebe o acréscimo",
        (try? FileManager.default.attributesOfItem(atPath: real.path)[.size] as? Int) == 1)
+  let antigo = tmp.appendingPathComponent("antigo.log")
+  FileManager.default.createFile(atPath: antigo.path, contents: Data("x".utf8), attributes: [.posixPermissions: 0o644])
+  try? openLog(at: antigo.path).close()
+  caso("openLog: log 0644 de antes fica 0600",
+       (try? FileManager.default.attributesOfItem(atPath: antigo.path)[.posixPermissions] as? Int) == 0o600)
   try? FileManager.default.removeItem(at: tmp)
 
   let env = childEnv(from: ["HOME": "/Users/v", "LANG": "pt_BR.UTF-8", "NODE_OPTIONS": "--require /tmp/x.js",
                             "DYLD_INSERT_LIBRARIES": "/tmp/x.dylib", "NODE_PATH": "/tmp", "SECRET": "s"],
                      appPath: "/A/Folga.app", path: "folga/bin:/usr/bin", resources: URL(fileURLWithPath: "/A/Folga.app/Contents/Resources"))
   caso("childEnv: só o permitido", Set(env.keys) == ["HOME", "LANG", "FOLGA_APP", "FOLGA_APP_PATH", "PATH"])
+  caso("childEnv: HOME do sistema (getpwuid), nunca o do ambiente", env["HOME"] == homeDir() && env["HOME"] != "/Users/v")
   caso("childEnv: sem NODE_OPTIONS nem DYLD_INSERT_LIBRARIES", env["NODE_OPTIONS"] == nil && env["DYLD_INSERT_LIBRARIES"] == nil)
   caso("childEnv: PATH resolvido dentro do bundle", env["PATH"] == "/A/Folga.app/Contents/Resources/folga/bin:/usr/bin")
   caso("childEnv: FOLGA_APP=1 e FOLGA_APP_PATH", env["FOLGA_APP"] == "1" && env["FOLGA_APP_PATH"] == "/A/Folga.app")
@@ -471,7 +485,7 @@ final class Supervisor: NSObject, NSMenuDelegate {
     p.currentDirectoryURL = resources.appendingPathComponent("folga")
     p.environment = childEnv(from: ProcessInfo.processInfo.environment, appPath: Bundle.main.bundlePath, path: cfg?["path"] ?? "/usr/bin:/bin")
     p.standardInput = Pipe()   // o app nunca fecha: se o app cair, o pipe fecha e o servidor sai
-    let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Folga")
+    let dir = URL(fileURLWithPath: homeDir()).appendingPathComponent("Library/Application Support/Folga")
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let log = openLog(at: dir.appendingPathComponent("server.log").path)
     p.standardOutput = log

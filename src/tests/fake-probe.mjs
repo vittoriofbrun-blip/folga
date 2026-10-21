@@ -28,6 +28,8 @@ const procs = new Map(MAC ? [
   [9003, { pid: 9003, ppid: 4, name: 'svchost.exe', description: '', session: 0, privateWorkingSet: 20e6, cpuTimeMs: 0, hasVisibleWindow: false, accessible: false }],
 ]);
 
+// servidor morto por SIGKILL no teste: o pipe fecha e a sonda sai quieta, como a real (sem EPIPE no stderr)
+process.stdout.on('error', () => process.exit(0));
 const write = msg => process.stdout.write(JSON.stringify(msg) + '\n');
 const tick = () => write({
   type: 'snapshot', t: Date.now(), memLoad: Math.round(100 - (avail / TOTAL) * 100),

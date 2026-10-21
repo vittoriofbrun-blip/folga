@@ -1,7 +1,7 @@
 // Servidor real numa porta alta, com pasta de dados temporária e sonda falsa (R15–R17, R07–R09, R14).
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -176,6 +176,10 @@ try {
   assert.equal((await call('PUT', '/api/startup', { body: { on: false }, token })).body.on, false);
   assert.ok(!existsSync(join(startupDir, 'Folga.lnk')));
   ok('P04: atalho de inicialização liga e desliga (pasta temporária)');
+  if (process.platform !== 'win32') {
+    for (const t of ['ui-token', 'agent-token']) assert.equal(statSync(join(dataDir, t)).mode & 0o777, 0o600, t);
+    ok('tokens gravados em 0600');
+  }
 
   if (process.platform === 'darwin') {
     // Mac: LaunchAgent só dentro do app (FOLGA_APP=1); sem ele o interruptor não existe e nada é escrito
@@ -222,7 +226,19 @@ try {
       assert.deepEqual((await c('PUT', '/api/startup', { on: false })).body, { on: false });
       assert.ok(!existsSync(file));
     });
-    for (const ruim of ['relativo/Folga.app', '/Users/x/Folga', undefined]) {
+    await appStartup(`/Users/x/A<b>"c'd.app`, async (c, dir) => {
+      const file = join(dir, 'local.folga.app.plist'), alvo = join(dir, 'alvo');
+      writeFileSync(alvo, 'intacto');
+      symlinkSync(alvo, file);   // link plantado no lugar do plist: trocado, nunca seguido
+      assert.deepEqual((await c('PUT', '/api/startup', { on: true })).body, { on: true });
+      assert.equal(readFileSync(alvo, 'utf8'), 'intacto');
+      assert.ok(!lstatSync(file).isSymbolicLink());
+      assert.equal(statSync(file).mode & 0o777, 0o600);
+      const j = JSON.parse(spawnSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', file], { encoding: 'utf8' }).stdout);
+      assert.deepEqual(j.ProgramArguments, [`/Users/x/A<b>"c'd.app/Contents/MacOS/Folga`, '--login']);
+      assert.ok(readFileSync(file, 'utf8').includes('A&lt;b&gt;&quot;c&apos;d.app'), '< > " \' escapados no XML');
+    });
+    for (const ruim of ['relativo/Folga.app', '/Users/x/Folga', undefined, '/Users/x/F\x01.app', '/Users/x/F\n.app', '/Users/x/F\x1f.app']) {
       await appStartup(ruim, async (c, dir) => {
         assert.equal((await c('PUT', '/api/startup', { on: true })).status, 409, String(ruim));
         assert.ok(!existsSync(join(dir, 'local.folga.app.plist')));

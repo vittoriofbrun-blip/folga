@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { closeSync, constants, fchmodSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_SETTINGS, type Settings } from './types.ts';
@@ -16,6 +17,26 @@ export function dataDir(
   if (env.FOLGA_DATA_DIR) return env.FOLGA_DATA_DIR;
   if (platform === 'darwin') return join(home, 'Library', 'Application Support', 'Folga');
   return join(env.LOCALAPPDATA ?? join(import.meta.dirname, '..'), 'Folga');
+}
+
+/** Gravação atômica (ADR 0005) e privada: .tmp novo em 0600 (o 'wx' falha num link plantado, que antes é removido),
+ *  e o rename troca o próprio nome, nunca segue um link no destino. No Windows o modo é ignorado. */
+export function writePrivate(file: string, content: string) {
+  const tmp = file + '.tmp';
+  try { unlinkSync(tmp); } catch { /* não havia */ }
+  writeFileSync(tmp, content, { flag: 'wx', mode: 0o600 });
+  renameSync(tmp, file);
+}
+
+/** Lê sem seguir link e fecha em 0600 o que ficou 0644 de antes. Ausente, link ou erro → ''. */
+export function readPrivate(file: string): string {
+  try {
+    const fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      if (process.platform !== 'win32') fchmodSync(fd, 0o600);
+      return readFileSync(fd, 'utf8').trim();
+    } finally { closeSync(fd); }
+  } catch { return ''; }
 }
 
 /** Linha R32 do server.log dentro do app. Decisão 17: o Folga não pede Acesso Total ao Disco; se o servidor lê a
