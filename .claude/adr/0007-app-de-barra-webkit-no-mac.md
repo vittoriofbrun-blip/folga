@@ -1,11 +1,13 @@
 # 0007 — Folga.app no Mac: app de barra com janela WebKit e o servidor dentro do bundle
 
-**Status:** aceito (2026-10-21). Plano 3; decisões 5, 10 e 16 do spec do Mac.
+**Status:** aceito (2026-10-21). Plano 3; decisões 5, 10, 16 e 17 do spec do Mac. A decisão 17 (o Folga não pede
+Acesso Total ao Disco) vale por cima de tudo o que este ADR diz sobre pedir a permissão.
 
 ## Contexto
 No Windows a janela é o Edge em modo app (ADR 0001). No Mac o Vittorio quer um ícone na barra de menus e a
-mesma interface React, sem pagar um Chromium (decisão 5), e quer o Acesso Total ao Disco só para o `Folga.app`,
-nunca para o `node` solto (decisão 10).
+mesma interface React, sem pagar um Chromium (decisão 5). A ideia inicial era pedir o Acesso Total ao Disco só para
+o `Folga.app`, nunca para o `node` solto (decisão 10); depois da revisão de segurança o Folga não pede a permissão
+de jeito nenhum (decisão 17, seção abaixo).
 
 ## Decisão
 - **Janela WebKit, não Edge/Chrome.** O `WKWebView` usa o motor do Safari, que já está no Mac. Um Chrome
@@ -18,12 +20,12 @@ nunca para o `node` solto (decisão 10).
   resolve as entradas sem `/` na frente, então mover o `.app` de `build/` para `~/Applications` não quebra nada).
 - **O servidor vai copiado no bundle** (`Contents/Resources/folga/`: `src/`, `dist/`, `probe/bin/probe-mac`,
   `package.json`) **junto com o próprio `node`** (`folga/bin/node`, cópia do Node ≥ 24 de quem rodou o build). Assim o app não depende do repositório, que outra sessão pode estar mexendo, e a assinatura
-  sela o código que de fato roda. O Acesso Total ao Disco dado ao app vale para o `node` e a sonda que ele
-  sobe (o app é o processo responsável) e para nenhum `node` de fora.
+  sela o código que de fato roda. O app é o processo responsável (TCC) pelo `node` e pela sonda que ele sobe.
 - **Por que o `node` vai dentro:** o app é o processo responsável no TCC. Se ele subisse o `node` do `~/.nvm`
   (gravável pelo usuário, fora do selo), qualquer programa rodando como o Vittorio poderia trocar esse arquivo e
-  ganhar o Acesso Total ao Disco do Folga — exatamente o que a decisão 10 proíbe. Dentro do bundle, trocar o
-  `node` quebra o selo do app. O `PATH` do filho também não tem nenhuma pasta do usuário.
+  herdar as permissões que o macOS desse ao Folga. Dentro do bundle, trocar o `node` quebra o selo do app (mas veja
+  a decisão 17: o selo dos recursos não é conferido ao executar). O `PATH` do filho também não tem nenhuma pasta do
+  usuário. Com a decisão 17 isto vira defesa em profundidade, não a barreira principal.
 - **Hardened runtime em tudo** (app, sonda, `node`): sem ele, `DYLD_INSERT_LIBRARIES` ou um depurador entrariam
   num processo que carrega a permissão. O `node` é reassinado só com `allow-jit` e
   `allow-unsigned-executable-memory` (o V8 precisa); os direitos originais da Node.js Foundation incluem
@@ -51,31 +53,45 @@ Spike de 2026-10-21 (macOS 26.5.1, LibreSSL 3.3.6 do sistema):
 - **"Sobrevive ao rebuild" só vale para rebuild idêntico** (o assunto do commit da Task 1 diz mais do que isso).
 - **Consequência:** um build idêntico (mesmos arquivos) dá o mesmo `cdhash` e o `check --previous` fica verde;
   qualquer mudança no app ou no servidor copiado muda o `cdhash`, o `check --previous` fica vermelho e
-  **depois de cada reinstalação o Vittorio liga o Folga de novo no Acesso Total ao Disco** (Ajustes do Sistema →
-  Privacidade e Segurança → Acesso Total ao Disco).
+  as permissões que o macOS guarda pelo requisito (notificações, item de segundo plano) podem ser pedidas de novo
+  depois de reinstalar. Acesso Total ao Disco não entra nisso: o Folga não o pede (decisão 17).
 - **Limite que fica:** a página continua pegando o token por `GET /api/token` (mesma origem, como hoje); quem
-  já roda como o Vittorio na máquina consegue falar com o servidor local. O Acesso Total ao Disco não aumenta isso:
-  as ferramentas expostas pela API são as mesmas, revalidadas pelo servidor.
+  já roda como o Vittorio na máquina consegue falar com o servidor local. Sem Acesso Total ao Disco (decisão 17),
+  esse resíduo é o mesmo do Windows: pela API o chamador consegue o que o próprio usuário já consegue, revalidado
+  pelo servidor, e nada além.
 - **Limite honesto:** o ad-hoc não dá para imitar (o requisito é o hash do próprio app), mas também não prova
   autoria. Se um dia o ramo A voltar (por exemplo, o Vittorio dando confiança ao certificado ele mesmo), o limite
   dele é: um programa já rodando como você consegue assinar com essa chave, como aconteceria com um certificado
   pago guardado no mesmo Mac.
 
-### Acesso Total ao Disco: pedido pelo menu (Task 5)
-- O menu do ícone mostra "Liberar acesso ao disco…" só enquanto o app não lê a `~/.Trash` (EPERM/EACCES);
-  é reavaliado toda vez que o menu abre. O clique explica em linguagem simples e "Abrir Ajustes" abre o painel.
-  Quem constrói nunca liga a chave: é passo do Vittorio.
-- **Spike do link (2026-10-21, macOS 26.5.1):** `x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles`
-  e `x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles` abriram os Ajustes (`open` rc=0) nos
-  dois casos. Não deu para ver qual painel ficou na tela (sem permissão de gravar a tela nem de acessibilidade
-  para quem constrói); fica o primeiro, o formato novo. **Pendente:** o controlador confere com o Vittorio se cai
-  direto na lista e se o Folga já aparece nela sozinho ou precisa do +.
-- A nota das telas (`fdaNote`) só ensina o caminho dos Ajustes quando o servidor roda dentro do app (`FOLGA_APP=1`);
-  fora dele, manda abrir pelo app Folga. O pino em `files.test.ts` varre `src`, `web/src`, `scripts`, `probe` e `mac`.
+### Acesso Total ao Disco: não pedido (decisão 17, 2026-10-21)
+A Task 5 pôs no menu "Liberar acesso ao disco…" com um link para o painel dos Ajustes. A revisão de segurança da
+Task 11 achou dois problemas que só existem **porque** o app teria a permissão:
+- **C1 — cópia adulterada herda a permissão.** O servidor é JavaScript dentro de `Contents/Resources`, e o macOS
+  não confere o selo dos recursos ao executar. Uma cópia do `Folga.app` com o `server.ts` trocado continua sendo
+  aceita pelo TCC como o Folga e roda o código novo com Acesso Total ao Disco.
+- **I4 — qualquer processo local usaria a permissão pela API.** `GET /api/token` responde a quem rodar como o
+  Vittorio; com o token, as ferramentas da API (varredura, tamanho, Lixeira) rodariam com o acesso do app.
+
+Decisão: o Folga **não pede** Acesso Total ao Disco. Saíram o item do menu, o alerta e o link; `fdaNote()` é uma nota
+só, sem caminho nos Ajustes ("Não deu para ler: o macOS protege esta pasta e o Folga não pede essa permissão."). O
+pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `probe` e `mac` tenha
+`Privacy_AllFiles` nem "Ajustes do Sistema › Privacidade", e continua barrando texto que junte a permissão com
+`node`/Terminal.
+- **O que se perde:** o tamanho da Lixeira, o tamanho do cache do Safari e a busca no iCloud Drive aparecem como
+  "não deu para ler" (desconhecido, nunca 0).
+- **Rede de segurança:** se a permissão estiver ligada mesmo assim (o Vittorio ligou à mão, ou sobrou de um teste),
+  o menu mostra "O Folga está com Acesso Total ao Disco — desligue em Ajustes (não é necessário)", só texto, sem
+  link; e a linha R32 do `server.log` diz o mesmo depois de `servidor sim`. A checagem é abrir a `~/.Trash`: só
+  abrir de verdade conta (pasta negada ou inexistente → sem aviso).
+- **O `--disclaim` fica** (Task 6), como defesa em profundidade: se a permissão aparecer ligada, o assistente
+  continua sem herdá-la.
+- **Resíduo do `GET /api/token`:** igual ao do Windows — sem a permissão, o servidor só faz o que o próprio usuário
+  já faz.
 
 ### O assistente fica fora do acesso ao disco (Task 6)
-- O servidor (o `node` filho do app) **continua** responsável pelo Folga.app: é ele que mede a Lixeira e o
-  Safari. Só os CLIs do assistente (claude/codex) lançados por `agent.ts` rodam por `probe-mac --disclaim`, que
+- Defesa em profundidade desde a decisão 17 (o Folga não pede a permissão). O servidor (o `node` filho do app)
+  **continua** responsável pelo Folga.app. Só os CLIs do assistente (claude/codex) lançados por `agent.ts` rodam por `probe-mac --disclaim`, que
   os torna responsáveis por si mesmos. Fora do app (ou no Windows) o `Launch` não muda.
 - **Spike (2026-10-21, macOS 26.5.1):** `responsibility_spawnattrs_setdisclaim` + `posix_spawnp` com
   `POSIX_SPAWN_SETEXEC` corta a responsabilidade: `--disclaim probe-mac --responsible` devolve
@@ -91,8 +107,8 @@ Spike de 2026-10-21 (macOS 26.5.1, LibreSSL 3.3.6 do sistema):
   por si — de novo sem nenhuma permissão do Folga. Não é um "rodar qualquer coisa com o acesso do app".
 - **Log de início (R32), só dentro do app:** `responsável <executável do --responsible> · acesso ao disco:
   servidor sim|não · assistente não|SIM` (lê a Lixeira direto e via `--disclaim`; nenhum caminho do usuário).
-  "assistente SIM" é bug. Antes de o Vittorio liberar: `servidor não · assistente não` (visto ao vivo em 21/10).
-  **Pendente (controlador):** depois de liberar, o esperado é `servidor sim · assistente não`.
+  "assistente SIM" é bug. Esperado (decisão 17): `servidor não · assistente não` (visto ao vivo em 21/10).
+  `servidor sim` vem com o aviso para desligar.
 
 ### Avisos do Mac (Task 8)
 - Dentro do app, o servidor roda `Folga --notify` (UNUserNotificationCenter): processo curto, não sobe a instância
@@ -113,4 +129,5 @@ Spike de 2026-10-21 (macOS 26.5.1, LibreSSL 3.3.6 do sistema):
 ## Consequências
 - A CI do macOS monta o app ad-hoc e roda o `check` (sem segredo).
 - O `node` gravado no `folga.json` é o do build; trocar de Node pede rebuild.
-- As Tasks 5, 6 e 8 do plano 3 completam este ADR (Acesso Total ao Disco, assistente fora dele, avisos).
+- As Tasks 5, 6 e 8 do plano 3 completam este ADR (Acesso Total ao Disco — desfeito pela decisão 17 —, assistente
+  fora dele, avisos).

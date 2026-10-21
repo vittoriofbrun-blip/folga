@@ -2,6 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Decisão 17 (2026-10-21, depois da revisão de segurança da Task 11): o Folga NÃO pede Acesso Total ao Disco.**
+> Vale por cima deste plano: a Task 5 (menu "Liberar acesso ao disco…", painel dos Ajustes, `fdaNote(true)` com o
+> caminho) foi desfeita; a nota é uma só ("o macOS protege esta pasta e o Folga não pede essa permissão"), e se a
+> permissão aparecer ligada o menu e o `server.log` avisam para desligar (só texto). Os passos "o Vittorio liga o
+> Folga no Acesso Total ao Disco" (Tasks 1, 5, 6 e 10) não existem mais. O `--disclaim` da Task 6 fica como defesa
+> em profundidade. Motivo, o que se perde e o resíduo do `GET /api/token`: ADR 0007, seção "Acesso Total ao Disco:
+> não pedido".
+
 **Goal:** O Vittorio abre o `Folga.app` (em `~/Applications`, instalado por um comando que o controlador roda), vê memória e disco num texto curto na barra de menus, abre a mesma interface React numa janela WebKit, libera os apps parados pelo menu com uma confirmação, e libera o Acesso Total ao Disco **para o `Folga.app`** — com a Lixeira, o cache do Safari e o iCloud Drive passando a ser lidos — sem que o `node` solto, o Terminal ou o assistente ganhem essa permissão, e sem quebrar o Windows.
 
 **Architecture:** Um binário Swift novo, `mac/Folga.swift` (AppKit + WebKit, `swiftc`, sem Xcode), montado num `.app` por `scripts/mac-app.mjs`. O `.app` leva dentro uma cópia do servidor (`Contents/Resources/folga/`: `src/`, `dist/`, `probe/bin/probe-mac`, `package.json`) e o caminho absoluto do `node` gravado na hora do build (`folga.json`), então não depende do `PATH` nem do que outra sessão deixou no repositório. O app é o **processo responsável** (TCC) pelo `node` e pela sonda que ele sobe: o Acesso Total ao Disco dado ao `Folga.app` vale para a árvore dele e para nenhum `node` de fora. O assistente (`claude`/`codex`) é lançado por `probe-mac --disclaim`, que corta essa herança. O token chega à página como hoje (`GET /api/token`, mesma origem); o app não injeta nada na página e a página não fala com o app. "Liberar parados" do menu usa a mesma `POST /api/release` com token que o botão da tela. Abrir com o Mac é um LaunchAgent escrito pelo Node (R33), desligado por padrão (P04). Avisos saem pelo próprio app (`Folga --notify`, `UNUserNotificationCenter`) com `osascript` de reserva.

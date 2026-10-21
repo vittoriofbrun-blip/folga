@@ -3,11 +3,11 @@
 //   node scripts/mac-app.mjs install | uninstall   -> ~/Applications/Folga.app (FOLGA_INSTALL_DIR troca a pasta, só para teste)
 //   node scripts/mac-app.mjs check <app> [--previous <arquivo>]  -> sai 0 (verde) ou 1
 // O --previous recebe a saída de `codesign -d -r- <app do build anterior>` gravada num arquivo: é a conta
-// que o TCC faz para manter o Acesso Total ao Disco depois de reinstalar.
+// que o TCC faz para manter as permissões do app depois de reinstalar.
 // Assinatura: ad-hoc (ramo B do ADR 0007). O spike da identidade "Folga Local" autoassinada falhou: o codesign
 // não acha identidade sem confiança, e dar confiança abre janela de senha. `--adhoc` fica aceito (é o que a CI passa).
 // O node vai DENTRO do bundle (Resources/folga/bin/node), selado junto: o app é o processo responsável no TCC,
-// e um node fora do selo (~/.nvm, gravável pelo usuário) poderia ser trocado e herdar o Acesso Total ao Disco.
+// e um node fora do selo (~/.nvm, gravável pelo usuário) poderia ser trocado e herdar as permissões do app.
 // folga.json guarda caminhos RELATIVOS a Contents/Resources (`node`, e as entradas do `path` sem "/" na frente):
 // o app resolve na hora, então mover o .app (build/ -> ~/Applications) não quebra nada.
 import { spawnSync } from 'node:child_process';
@@ -20,7 +20,7 @@ const ID = 'local.folga.app';
 
 /**
  * Requisito designado fraco = algum ramo do `or` não prende a um hash (cdhash ou certificado folha por hash).
- * Só `identifier` deixaria qualquer binário ad-hoc com o mesmo id herdar o Acesso Total ao Disco.
+ * Só `identifier` deixaria qualquer binário ad-hoc com o mesmo id herdar as permissões do app.
  * ponytail: corta no ` or ` sem olhar parênteses; erra para o lado de "fraco", nunca de "forte".
  */
 export function requirementWeak(dr) {
@@ -84,7 +84,7 @@ function build(outDir) {
 
   // a sonda de dentro antes do bundle (o selo do bundle cobre o binário já assinado), mesma identidade
   // Tudo com hardened runtime: sem ele, DYLD_INSERT_LIBRARIES ou um depurador entrariam num processo que
-  // carrega o Acesso Total ao Disco do app.
+  // carrega as permissões do app.
   const sign = (...a) => must('/usr/bin/codesign', ['--force', '-s', '-', '--options', 'runtime', ...a]);
   sign(join(res, 'folga', 'probe', 'bin', 'probe-mac'));
   // node: só os direitos de que o V8 precisa (JIT). Os da Node.js Foundation incluem get-task-allow,

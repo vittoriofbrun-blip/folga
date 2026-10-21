@@ -4,7 +4,7 @@ import { join } from 'node:path';
 // @ts-ignore: JS puro, é o próprio script de montar o Folga.app
 import { requirementWeak } from '../../scripts/mac-app.mjs';
 
-// Requisito designado: é a conta que o TCC faz para manter o Acesso Total ao Disco depois de reinstalar.
+// Requisito designado: é a conta que o TCC faz para manter as permissões do app depois de reinstalar.
 assert.equal(requirementWeak('designated => identifier "local.folga.app"'), true);            // qualquer ad-hoc com o id herdaria o TCC
 assert.equal(requirementWeak('designated => identifier "local.folga.app" or cdhash H"ab12"'), true);
 assert.equal(requirementWeak('designated => cdhash H"ab12"'), false);                        // ad-hoc: seguro, mas muda a cada build
