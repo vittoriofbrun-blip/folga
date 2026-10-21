@@ -229,10 +229,9 @@ export function createWarnings(deps: WarningsDeps) {
       let s;
       try { s = await statfs(homedir()); } catch { return []; }
       if (now() - volAt > 10 * 60_000) {
-        volAt = now();
         const r = await (deps.macVolume ?? (() => macHelper(['--volume', homedir()], null, 15_000)))() as { name?: unknown; important?: unknown } | null;
-        // falha da sonda mantém o último valor bom: o nome do disco entra no id do aviso
-        if (r && typeof r.name === 'string' && typeof r.important === 'number') vol = { name: r.name, important: r.important };
+        // falha da sonda mantém o último valor bom (o nome do disco entra no id do aviso) e tenta de novo na próxima leitura
+        if (r && typeof r.name === 'string' && typeof r.important === 'number') { vol = { name: r.name, important: r.important }; volAt = now(); }
       }
       return [macDiskInfo(s, vol)];
     }

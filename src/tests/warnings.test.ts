@@ -322,6 +322,14 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   assert.equal(calls, 2);
   assert.equal(d2.drive, 'Macintosh HD', 'falha da sonda mantém o nome');
   assert.equal(d2.purgeable, d1.purgeable, 'e o purgeable');
+  // 1ª chamada falhou: a próxima leitura tenta de novo, senão o nome (e o id do aviso) só mudaria 10 min depois
+  const res3: unknown[] = [null, { name: 'Macintosh HD', important: 1e9 }];
+  let calls3 = 0;
+  const { w: w3 } = rig({ platform: 'darwin', macVolume: async () => { calls3++; return res3.shift() ?? null; } });
+  assert.equal((await w3.disk())[0]!.drive, 'Mac');
+  assert.equal((await w3.disk())[0]!.drive, 'Macintosh HD', 'falha no começo: tenta de novo na leitura seguinte');
+  await w3.disk();
+  assert.equal(calls3, 2, 'depois de um sucesso volta a guardar 10 min');
   const { w: w2 } = rig({ platform: 'darwin', macVolume: async () => null, statfs: async () => { throw new Error('x'); } });
   assert.deepEqual(await w2.disk(), [], 'statfs falhou: sem disco, sem rejeição');
   ok('disco do Mac: cache de 10 min, falha da sonda mantém o último valor, statfs que falha não derruba');
