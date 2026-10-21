@@ -83,9 +83,13 @@ caso('app com autorização pendente (3): osascript desta vez; o app volta depoi
     ['app', 'osa', 'osa', 'app', 'app']);
 });
 
-caso('app recusado (4) ou ausente (127): nunca mais é tentado', () => {
-  assert.deepEqual(cenario([4], [0, 99 * 60_000, 200 * 60_000]), ['app', 'osa', 'osa', 'osa']);
+caso('app sem autorização (4): recua 10 min como o 3 (o Vittorio pode ligar depois em Ajustes)', () => {
+  assert.deepEqual(cenario([4, 0], [0, 1000, 10 * 60_000 + 1]), ['app', 'osa', 'osa', 'app']);
+});
+
+caso('app ausente (126/127): nunca mais é tentado', () => {
   assert.deepEqual(cenario([127], [0, 99 * 60_000]), ['app', 'osa', 'osa']);
+  assert.deepEqual(cenario([126], [0, 99 * 60_000]), ['app', 'osa', 'osa']);
 });
 
 caso('falha ao lançar o app (ENOENT/EACCES) é permanente; outro erro de spawn só recua', () => {

@@ -61,8 +61,9 @@ export function createNotify(deps: NotifyDeps) {
   let broken = false;   // se o Windows recusar uma vez, não insiste a cada proposta
   const url = `http://127.0.0.1:${deps.port}`;
 
-  // app do Mac: recusado (4) ou ausente (ENOENT/126/127) = só osascript para sempre; 3 (autorização pendente), 5 e
-  // falha de spawn = osascript só desta vez e o app volta a ser tentado depois do recuo (o Vittorio pode liberar depois)
+  // app do Mac: ausente (ENOENT/EACCES/126/127) = só osascript para sempre; 3 (não perguntado), 4 (sem autorização ou
+  // alertas desligados — só uma leitura de estado, o Vittorio pode ligar depois), 5 e outra falha de spawn = osascript
+  // só desta vez e o app volta a ser tentado depois do recuo de 10 min
   let appBroken = false;
   let appRetryAt = 0;
   const now = deps.now ?? Date.now;
@@ -80,7 +81,7 @@ export function createNotify(deps: NotifyDeps) {
     if (mac.cmd === OSA || appBroken || now() < appRetryAt) return viaOsascript();
     sp(mac.cmd, mac.args, extra, (code, err) => {
       if (code === 0) return;
-      if (code === 4 || code === 126 || code === 127 || err?.code === 'ENOENT' || err?.code === 'EACCES') appBroken = true;
+      if (code === 126 || code === 127 || err?.code === 'ENOENT' || err?.code === 'EACCES') appBroken = true;
       else appRetryAt = now() + APP_BACKOFF_MS;
       viaOsascript();
     });

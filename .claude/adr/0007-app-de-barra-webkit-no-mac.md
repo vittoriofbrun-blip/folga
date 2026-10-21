@@ -123,9 +123,10 @@ pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `
   stderr e para o log público (domínio, código, texto). Clique no aviso → a instância
   principal (delegate) abre a janela.
 - Qualquer saída ≠ 0 faz o aviso daquela vez sair pelo `osascript` (script fixo que lê `system attribute`; testado
-  ao vivo com título `"; do shell script …`: nada executou). Saída 4 (recusado), 126, 127 ou falha de spawn
-  ENOENT/EACCES trava o app como quebrado para sempre; as outras (3 sem resposta, 5 erro, outras falhas) só
-  recuam 10 minutos e o app é tentado de novo. Fora do app, o `osascript` direto; clicar no aviso do `osascript`
+  ao vivo com título `"; do shell script …`: nada executou). Saída 126, 127 ou falha de spawn ENOENT/EACCES
+  (app ausente) trava o app como quebrado para sempre; as outras (3 não perguntado, 4 sem autorização ou alertas
+  desligados, 5 erro, outras falhas) só recuam 10 minutos e o app é tentado de novo. O 4 deixou de travar no
+  plano 4: virou leitura de estado barata, e o Vittorio pode ligar as notificações depois sem reiniciar o Folga. Fora do app, o `osascript` direto; clicar no aviso do `osascript`
   abre o Editor de Scripts, não o Folga (limite do reserva). Windows continua no PowerShell.
 - **Ao vivo (21/10, build ad-hoc em build/):** `--notify` saiu **3** (sem resposta em 10 s): autorização do
   macOS pendente/sem resposta; ninguém clicou. **Pendente (controlador):** o Vittorio responder o pedido de
@@ -166,7 +167,8 @@ pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `
   `install` registra o caminho instalado.
 - **Feito (Task 2):** `--notify` só lê o estado; a instância principal pede uma vez se `.notDetermined` (no
   `--login`, só no primeiro "Abrir Folga"); o menu mostra "Notificações do Folga desligadas — ligue em Ajustes do
-  Sistema › Notificações › Folga" (só texto) sempre que `notifyExit ≠ 0`; `install` roda `lsregister -f` no app
+  Sistema › Notificações › Folga" (só texto) quando recusadas ou com alertas desligados, e o neutro "Notificações do
+  Folga ainda não autorizadas" enquanto o macOS não perguntou (saída 3); `install` roda `lsregister -f` no app
   trocado e `uninstall` roda `lsregister -u` antes de apagar (falha só avisa). **Pendente (controlador):** instalar,
   o Vittorio responder o pedido, conferir o menu e um cartão do vigia chegando como aviso do Folga.
 - **Estratégia para a Task 2 (escrita na Task 1):** (1) `install` roda `lsregister -f` no app instalado e `lsregister -u` nos outros

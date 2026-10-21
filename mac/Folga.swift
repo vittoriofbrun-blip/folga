@@ -190,6 +190,11 @@ let avisoAcessoTotal = "O Folga está com Acesso Total ao Disco — desligue em 
 
 /// Item do menu quando os avisos do Folga não chegam: só texto, sem link (quem muda Ajustes é o usuário).
 let avisoNotificacoes = "Notificações do Folga desligadas — ligue em Ajustes do Sistema › Notificações › Folga"
+let avisoNotificacoesPendentes = "Notificações do Folga ainda não autorizadas"
+/// Texto do item pelo código do `notifyExit`: 0 → nenhum · 3 → neutro (ainda não perguntado) · outro → desligadas.
+func avisoNotificacoesTexto(_ codigo: Int32) -> String? {
+  codigo == 0 ? nil : codigo == 3 ? avisoNotificacoesPendentes : avisoNotificacoes
+}
 
 /// Código de saída do `--notify` pelo estado das notificações: 0 entrega · 3 ainda não perguntado · 4 recusado.
 /// Autorizado com alertas desligados não conta como entregue (o aviso iria só para a Central, mudo).
@@ -343,6 +348,9 @@ func selftest() -> Int32 {
   caso("notifyExit: recusado → 4", notifyExit(status: .denied, alert: .enabled) == 4 && notifyExit(status: .denied, alert: .disabled) == 4)
   caso("notifyExit: autorizado mas alertas desligados → 4", notifyExit(status: .authorized, alert: .disabled) == 4)
   caso("aviso de notificações: só texto, sem link", avisoNotificacoes.contains("desligadas") && !avisoNotificacoes.contains("://"))
+  caso("aviso de notificações: 0 nenhum, 3 neutro, 4 desligadas", avisoNotificacoesTexto(0) == nil
+       && avisoNotificacoesTexto(3) == avisoNotificacoesPendentes && avisoNotificacoesTexto(4) == avisoNotificacoes
+       && !avisoNotificacoesPendentes.contains("desligadas"))
   caso("disco livre: 39 GB", discoLivreTexto(39_000_000_000) == "Disco livre: 39 GB")
   caso("disco livre: ilegível → —", discoLivreTexto(nil) == "Disco livre: —")
   caso("statusText só memória (decisão 18)", statusText(memLoad: 62) == "62%")
@@ -418,11 +426,16 @@ final class Supervisor: NSObject, NSMenuDelegate {
     Task { await atualizarTexto() }
   }
 
-  /// Item "Notificações desligadas" visível sempre que um `--notify` não entregaria (mesma regra, notifyExit ≠ 0).
+  /// Item de notificações visível sempre que um `--notify` não entregaria (mesma regra, notifyExit ≠ 0).
   private func atualizarNotificacoes() {
     UNUserNotificationCenter.current().getNotificationSettings { st in
-      let desligadas = notifyExit(status: st.authorizationStatus, alert: st.alertSetting) != 0
-      DispatchQueue.main.async { MainActor.assumeIsolated { self.notificacoes.isHidden = !desligadas } }
+      let texto = avisoNotificacoesTexto(notifyExit(status: st.authorizationStatus, alert: st.alertSetting))
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          self.notificacoes.title = texto ?? ""
+          self.notificacoes.isHidden = texto == nil
+        }
+      }
     }
   }
 
