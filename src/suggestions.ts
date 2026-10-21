@@ -244,7 +244,7 @@ export function createSuggestions(deps: SuggestionsDeps) {
       const gone = plural(moved.length, 'arquivo', 'arquivos');
       if (r.inTrash === null) parts.push(`${gone} saíram da pasta · ${size(bytes)} (não deu para conferir a Lixeira)`);
       else if (r.inTrash >= moved.length) parts.push(`${gone} na Lixeira · ${size(bytes)}`);
-      else parts.push(`${plural(moved.length, 'arquivo saiu', 'arquivos saíram')} da pasta; só ${nf0.format(r.inTrash)} ${r.inTrash === 1 ? 'apareceu' : 'apareceram'} na Lixeira (o Windows pode ter pedido para apagar de vez)`);
+      else parts.push(`${plural(moved.length, 'arquivo saiu', 'arquivos saíram')} da pasta; só ${nf0.format(r.inTrash)} ${r.inTrash === 1 ? 'apareceu' : 'apareceram'} na Lixeira (${process.platform === 'darwin' ? 'o macOS não confirmou os outros' : 'o Windows pode ter pedido para apagar de vez'})`);
     }
     if (r.failed.length) parts.push(`${plural(r.failed.length, 'arquivo não pôde', 'arquivos não puderam')} ir para a Lixeira`);
     return { status: moved.length ? 'feita' : 'falhou', result: parts.join('. ') };

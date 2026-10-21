@@ -335,7 +335,8 @@ try {
     inTrashMode = 1;   // 2 saíram da pasta, só 1 apareceu na Lixeira
     const r = asSug(await s.approve(x.id));
     assert.equal(r.status, 'feita');
-    assert.equal(r.result, '2 arquivos saíram da pasta; só 1 apareceu na Lixeira (o Windows pode ter pedido para apagar de vez)');
+    // texto por sistema: no Mac não existe o "pedir para apagar de vez" do Windows
+    assert.equal(r.result, `2 arquivos saíram da pasta; só 1 apareceu na Lixeira (${process.platform === 'darwin' ? 'o macOS não confirmou os outros' : 'o Windows pode ter pedido para apagar de vez'})`);
     const y = asSug(await s.add(draft('lixeira', [a, b]), 'agente'));
     inTrashMode = 0;
     assert.match(asSug(await s.approve(y.id)).result!, /^2 arquivos saíram da pasta; só 0 apareceram na Lixeira/);
