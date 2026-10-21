@@ -1,5 +1,6 @@
 // Monta e confere o Folga.app (plano 3, ADR 0007). Só Mac.
 //   node scripts/mac-app.mjs build [--adhoc] [--out <dir>]   -> <dir>/Folga.app (padrão build/)
+//   node scripts/mac-app.mjs install | uninstall   -> ~/Applications/Folga.app (FOLGA_INSTALL_DIR troca a pasta, só para teste)
 //   node scripts/mac-app.mjs check <app> [--previous <arquivo>]  -> sai 0 (verde) ou 1
 // O --previous recebe a saída de `codesign -d -r- <app do build anterior>` gravada num arquivo: é a conta
 // que o TCC faz para manter o Acesso Total ao Disco depois de reinstalar.
@@ -10,8 +11,8 @@
 // folga.json guarda caminhos RELATIVOS a Contents/Resources (`node`, e as entradas do `path` sem "/" na frente):
 // o app resolve na hora, então mover o .app (build/ -> ~/Applications) não quebra nada.
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -143,6 +144,70 @@ function check(app, previous) {
   return falhas ? 1 : 0;
 }
 
+// ---- install / uninstall ----
+const installDir = () => resolve(process.env.FOLGA_INSTALL_DIR ?? join(homedir(), 'Applications'));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+/** pids cujo executável é EXATAMENTE `exe` (nunca por nome: build/Folga.app e outras cópias ficam em paz). */
+function pidsOf(exe) {
+  try { exe = realpathSync(exe); } catch {}   // o ps mostra /private/var, não /var
+  const r = run('/bin/ps', ['-axo', 'pid=,comm=']);
+  return r.stdout.split('\n').map(l => /^\s*(\d+)\s+(.*)$/.exec(l)).filter(m => m && m[2] === exe).map(m => Number(m[1]));
+}
+async function waitFor(exe, running, ms) {
+  for (let t = 0; t < ms; t += 200) { if ((pidsOf(exe).length > 0) === running) return true; await sleep(200); }
+  return (pidsOf(exe).length > 0) === running;
+}
+async function stopApp(app) {
+  const exe = join(app, 'Contents', 'MacOS', 'Folga');
+  const pids = pidsOf(exe);
+  if (!pids.length) return;
+  console.log(`parando o Folga instalado (pid ${pids.join(', ')})`);
+  for (const pid of pids) try { process.kill(pid, 'SIGTERM'); } catch {}
+  if (!await waitFor(exe, false, 10000)) { console.error('o Folga instalado não saiu; nada foi trocado'); process.exit(1); }
+}
+
+async function install() {
+  const dir = installDir();
+  const app = join(dir, 'Folga.app'), novo = join(dir, 'Folga.app.novo'), velho = join(dir, 'Folga.app.velho');
+  const stage = mkdtempSync(join(tmpdir(), 'folga-install-'));
+  try {
+    // process.execPath, sem npx: o mesmo node que vai dentro do bundle
+    must(process.execPath, [join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js'), 'build']);
+    must(process.execPath, [join(ROOT, 'scripts', 'build-probe.mjs')]);
+    build(stage);
+    if (check(join(stage, 'Folga.app')) !== 0) { console.error('check vermelho: o instalado não foi tocado'); process.exit(1); }
+    mkdirSync(dir, { recursive: true });
+    rmSync(novo, { recursive: true, force: true });
+    must('/usr/bin/ditto', [join(stage, 'Folga.app'), novo]);
+    await stopApp(app);
+    const tinhaVelho = existsSync(app);
+    rmSync(velho, { recursive: true, force: true });
+    if (tinhaVelho) renameSync(app, velho);
+    try { renameSync(novo, app); } catch (e) { if (tinhaVelho) renameSync(velho, app); throw e; }
+    must('/usr/bin/open', [app]);
+    if (!await waitFor(join(app, 'Contents', 'MacOS', 'Folga'), true, 10000)) {
+      console.error(`o novo Folga não abriu; o antigo, se havia, ficou em ${velho}`);
+      process.exit(1);
+    }
+    rmSync(velho, { recursive: true, force: true });
+    console.log(`instalado e aberto: ${app}`);
+  } finally { rmSync(stage, { recursive: true, force: true }); }
+}
+
+async function uninstall() {
+  const app = join(installDir(), 'Folga.app');
+  await stopApp(app);
+  rmSync(app, { recursive: true, force: true });
+  rmSync(join(installDir(), 'Folga.app.novo'), { recursive: true, force: true });
+  rmSync(join(installDir(), 'Folga.app.velho'), { recursive: true, force: true });
+  const startup = process.env.FOLGA_STARTUP_DIR ?? join(homedir(), 'Library', 'LaunchAgents');
+  const plist = join(startup, 'local.folga.app.plist');
+  if (existsSync(plist)) { rmSync(plist); console.log(`removido: ${plist}`); }
+  console.log(`desinstalado: ${app}`);
+  console.log(`seus dados continuam em ${join(homedir(), 'Library', 'Application Support', 'Folga')} (apague à mão se quiser).`);
+  console.log('o Acesso Total ao Disco não foi mexido: se quiser, tire o Folga em Ajustes do Sistema > Privacidade e Segurança.');
+}
+
 if (import.meta.main) {
   const [cmd, ...rest] = process.argv.slice(2);
   const opt = name => {
@@ -154,6 +219,8 @@ if (import.meta.main) {
   };
   if (process.platform !== 'darwin') { console.error('o Folga.app só existe no Mac'); process.exit(1); }
   if (cmd === 'build') build(resolve(opt('--out') ?? join(ROOT, 'build'))); // --adhoc: aceito, é o único ramo
+  else if (cmd === 'install') await install();
+  else if (cmd === 'uninstall') await uninstall();
   else if (cmd === 'check' && rest[0]) process.exitCode = check(resolve(rest[0]), opt('--previous'));
-  else { console.error('uso: node scripts/mac-app.mjs build [--adhoc] [--out <dir>] | check <app> [--previous <arquivo>]'); process.exit(1); }
+  else { console.error(`subcomando desconhecido: ${cmd ?? '(nenhum)'}\nuso: node scripts/mac-app.mjs install | uninstall | build [--adhoc] [--out <dir>] | check <app> [--previous <arquivo>]`); process.exit(1); }
 }

@@ -3,6 +3,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, statSync, truncateSync } from 'node:fs';
 import { request } from 'node:http';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { dataDir as platformDataDir } from '../src/platform.ts';
 
@@ -45,6 +46,14 @@ function logFd() {
     fd = 'ignore';   // sem log é melhor que não subir
   }
   return fd;
+}
+
+// no Mac o servidor mora dentro do Folga.app instalado (ADR 0007): aqui só abrimos o app
+if (process.platform === 'darwin') {
+  const app = join(process.env.FOLGA_INSTALL_DIR ?? join(homedir(), 'Applications'), 'Folga.app');
+  if (!existsSync(app)) { console.error('Folga.app não está instalado: rode node scripts/mac-app.mjs install'); process.exit(1); }
+  spawn('/usr/bin/open', [app], { stdio: 'ignore' }).unref();
+  process.exit(0);
 }
 
 if (!existsSync(join(root, 'dist', 'index.html'))) {
