@@ -58,8 +58,8 @@ caso('defaultSettings: win32 intacto; darwin muda neverClose e o gatilho', () =>
   assert.equal(defaultSettings('win32').autoCarePressure, 'warn');
 });
 
-caso('userFolders: as 7 do Mac (com iCloud Drive) e a lista de hoje do Windows', () => {
-  assert.deepEqual(userFolders('darwin', {}, '/Users/v'), ['Downloads', 'Desktop', 'Documents', 'Pictures', 'Movies', 'Music', join('Library', 'Mobile Documents', 'com~apple~CloudDocs')]
+caso('userFolders: as 6 do Mac (sem iCloud Drive) e a lista de hoje do Windows', () => {
+  assert.deepEqual(userFolders('darwin', {}, '/Users/v'), ['Downloads', 'Desktop', 'Documents', 'Pictures', 'Movies', 'Music']
     .map(n => join('/Users/v', n)));
   const nomes = ['Downloads', 'Desktop', 'Documents', 'Pictures', 'Videos', 'Music'];
   assert.deepEqual(userFolders('win32', { OneDrive: 'D:\\OD' }, 'C:\\Users\\A'), ['C:\\Users\\A', 'D:\\OD'].flatMap(b => nomes.map(n => join(b, n))));

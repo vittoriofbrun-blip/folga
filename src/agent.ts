@@ -68,7 +68,7 @@ const PROBE_MAC = join(import.meta.dirname, '..', 'probe', 'bin', 'probe-mac');
 /** probe-mac --disclaim sai 125 sem executar quando o macOS não tem a API (e o probe-mac pode faltar no bundle): o assistente
  *  não roda no app (fail closed). 125 é só do disclaim; um 126 do próprio CLI continua a mensagem comum. */
 export const DISCLAIM_UNAVAILABLE = 125;
-export const DISCLAIM_FAIL = 'O assistente não roda dentro do app Folga neste macOS: não deu para separar o acesso ao disco do app. Nada foi executado.';
+export const DISCLAIM_FAIL = 'O assistente não roda dentro do app Folga neste macOS: não deu para isolá-lo do app. Nada foi executado.';
 
 /** Comando real de cada provedor, com as flags exatas do spike (ADR 0006). */
 export function realLaunch(t: TurnInput, dataDir: string, port: number): Launch {

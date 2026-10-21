@@ -61,11 +61,6 @@ if (!existsSync(join(root, 'dist', 'index.html'))) {
   process.exit(1);
 }
 
-if (process.platform === 'darwin' && !existsSync(join(root, 'probe', 'bin', 'probe-mac'))) {
-  console.error('sonda do Mac não compilada: rode npm run build:probe');
-  process.exit(1);
-}
-
 // /api/settings responde mesmo antes da primeira leitura da sonda
 let up = (await call('GET', '/api/settings')) === 200;
 if (!up) {

@@ -209,7 +209,6 @@ async function uninstall() {
   }
   console.log(`desinstalado: ${app}`);
   console.log(`seus dados continuam em ${join(homedir(), 'Library', 'Application Support', 'Folga')} (apague à mão se quiser).`);
-  console.log('o Folga não pede Acesso Total ao Disco; se ele ainda aparecer nessa lista, pode tirar.');
 }
 
 if (import.meta.main) {

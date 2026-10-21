@@ -63,12 +63,20 @@ func homeDir() -> String {
   return NSHomeDirectory()
 }
 
+/// Pasta temporária do usuário pelo sistema (confstr), nunca pelo TMPDIR do ambiente, que quem lança o app escolhe.
+func userTempDir() -> String {
+  var buf = [CChar](repeating: 0, count: Int(PATH_MAX))
+  if confstr(_CS_DARWIN_USER_TEMP_DIR, &buf, buf.count) > 0 { return String(cString: buf) }
+  return "/tmp"
+}
+
 /// Ambiente do servidor, montado do zero: nada de NODE_OPTIONS, NODE_*, DYLD_* nem do resto do ambiente do app.
 /// HOME vem da conta (homeDir). Entradas do PATH sem "/" na frente são relativas a Contents/Resources.
 func childEnv(from env: [String: String], appPath: String, path: String, resources: URL = resources) -> [String: String] {
   var out: [String: String] = [:]
-  for k in ["LANG", "TMPDIR", "USER", "LOGNAME"] { if let v = env[k] { out[k] = v } }
+  for k in ["LANG", "USER", "LOGNAME"] { if let v = env[k] { out[k] = v } }
   out["HOME"] = homeDir()
+  out["TMPDIR"] = userTempDir()
   out["FOLGA_APP"] = "1"
   out["FOLGA_APP_PATH"] = appPath
   out["PATH"] = path.split(separator: ":").map { $0.hasPrefix("/") ? String($0) : resources.appendingPathComponent(String($0)).path }
@@ -250,10 +258,11 @@ func selftest() -> Int32 {
   try? FileManager.default.removeItem(at: tmp)
 
   let env = childEnv(from: ["HOME": "/Users/v", "LANG": "pt_BR.UTF-8", "NODE_OPTIONS": "--require /tmp/x.js",
-                            "DYLD_INSERT_LIBRARIES": "/tmp/x.dylib", "NODE_PATH": "/tmp", "SECRET": "s"],
+                            "DYLD_INSERT_LIBRARIES": "/tmp/x.dylib", "TMPDIR": "/tmp/plantado", "NODE_PATH": "/tmp", "SECRET": "s"],
                      appPath: "/A/Folga.app", path: "folga/bin:/usr/bin", resources: URL(fileURLWithPath: "/A/Folga.app/Contents/Resources"))
-  caso("childEnv: só o permitido", Set(env.keys) == ["HOME", "LANG", "FOLGA_APP", "FOLGA_APP_PATH", "PATH"])
+  caso("childEnv: só o permitido", Set(env.keys) == ["HOME", "LANG", "TMPDIR", "FOLGA_APP", "FOLGA_APP_PATH", "PATH"])
   caso("childEnv: HOME do sistema (getpwuid), nunca o do ambiente", env["HOME"] == homeDir() && env["HOME"] != "/Users/v")
+  caso("childEnv: TMPDIR do sistema (confstr), nunca o do ambiente", env["TMPDIR"] == userTempDir() && env["TMPDIR"] != "/tmp/plantado")
   caso("childEnv: sem NODE_OPTIONS nem DYLD_INSERT_LIBRARIES", env["NODE_OPTIONS"] == nil && env["DYLD_INSERT_LIBRARIES"] == nil)
   caso("childEnv: PATH resolvido dentro do bundle", env["PATH"] == "/A/Folga.app/Contents/Resources/folga/bin:/usr/bin")
   caso("childEnv: FOLGA_APP=1 e FOLGA_APP_PATH", env["FOLGA_APP"] == "1" && env["FOLGA_APP_PATH"] == "/A/Folga.app")

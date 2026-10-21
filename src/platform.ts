@@ -57,7 +57,7 @@ export function userFolders(
   platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env, home: string = homedir(),
 ): string[] {
   if (platform === 'darwin') {
-    return ['Downloads', 'Desktop', 'Documents', 'Pictures', 'Movies', 'Music', join('Library', 'Mobile Documents', 'com~apple~CloudDocs')]
+    return ['Downloads', 'Desktop', 'Documents', 'Pictures', 'Movies', 'Music']
       .map(n => join(home, n));
   }
   const bases = [home, env.OneDrive, env.OneDriveConsumer, env.OneDriveCommercial].filter((x): x is string => !!x);

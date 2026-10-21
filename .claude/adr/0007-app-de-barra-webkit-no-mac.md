@@ -35,8 +35,8 @@ de jeito nenhum (decisão 17, seção abaixo).
   `node` que já rodava. Atualizar o Node pede reinstalar o Folga (rebuild copia o novo).
 - **Conferência:** `scripts/mac-app.mjs check <app> [--previous <arquivo>]` valida o `Info.plist`, `--version`,
   `--selftest`, as assinaturas do bundle e da sonda de dentro, e recusa requisito designado fraco
-  (`requirementWeak`): requisito só com `identifier "local.folga.app"` manteria a permissão entre builds, mas
-  qualquer binário ad-hoc com esse id herdaria o Acesso Total ao Disco. Com `--previous`, roda a mesma conta
+  (`requirementWeak`): requisito só com `identifier "local.folga.app"` manteria as permissões entre builds, mas
+  qualquer binário ad-hoc com esse id as herdaria. Com `--previous`, roda a mesma conta
   que o TCC faz depois de reinstalar (`codesign --verify -R=<requisito do build anterior>`).
 
 ### Assinatura: ramo B (ad-hoc)
@@ -78,8 +78,13 @@ só, sem caminho nos Ajustes ("Não deu para ler: o macOS protege esta pasta e o
 pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `probe` e `mac` tenha
 `Privacy_AllFiles` nem "Ajustes do Sistema › Privacidade", e continua barrando texto que junte a permissão com
 `node`/Terminal.
-- **O que se perde:** o tamanho da Lixeira, o tamanho do cache do Safari e a busca no iCloud Drive aparecem como
-  "não deu para ler" (desconhecido, nunca 0).
+- **O que se perde:** o tamanho da Lixeira, o tamanho do cache do Safari e a busca no iCloud Drive (a pasta saiu
+  da lista do Mac em `userFolders`, para não gerar pedido de pasta à toa) aparecem como "não deu para ler"
+  (desconhecido, nunca 0).
+- **Pedidos de pasta que sobram (a medir ao vivo):** a busca de Arquivos varre Downloads, Desktop, Documents,
+  Pictures, Movies e Music, e o macOS pede acesso a cada uma, atribuído ao Folga.app. Com assinatura ad-hoc o macOS
+  pode perguntar de novo depois de reinstalar. Se isso incomodar, volta a opção de assinatura A (por isso o
+  `check --previous` continua).
 - **Rede de segurança:** se a permissão estiver ligada mesmo assim (o Vittorio ligou à mão, ou sobrou de um teste),
   o menu mostra "O Folga está com Acesso Total ao Disco — desligue em Ajustes (não é necessário)", só texto, sem
   link; e a linha R32 do `server.log` diz o mesmo depois de `servidor sim`. A checagem é abrir a `~/.Trash`: só
@@ -115,9 +120,11 @@ pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `
   nem a janela, nunca toca o supervisor. Título e corpo vão só pelo ambiente (`FOLGA_TOAST_TITLE/BODY`), nunca em
   argumento. Saídas: 0 postado · 3 sem resposta em 10 s · 4 recusado · 5 erro. Clique no aviso → a instância
   principal (delegate) abre a janela.
-- Qualquer saída ≠ 0 marca o app como `broken` **só para o app** e o aviso daquela vez já sai pelo `osascript`
-  (script fixo que lê `system attribute`; testado ao vivo com título `"; do shell script …`: nada executou).
-  Fora do app, o `osascript` direto. Windows continua no PowerShell.
+- Qualquer saída ≠ 0 faz o aviso daquela vez sair pelo `osascript` (script fixo que lê `system attribute`; testado
+  ao vivo com título `"; do shell script …`: nada executou). Saída 4 (recusado), 126, 127 ou falha de spawn
+  ENOENT/EACCES trava o app como quebrado para sempre; as outras (3 sem resposta, 5 erro, outras falhas) só
+  recuam 10 minutos e o app é tentado de novo. Fora do app, o `osascript` direto; clicar no aviso do `osascript`
+  abre o Editor de Scripts, não o Folga (limite do reserva). Windows continua no PowerShell.
 - **Ao vivo (21/10, build ad-hoc em build/):** `--notify` saiu **3** (sem resposta em 10 s): autorização do
   macOS pendente/sem resposta; ninguém clicou. **Pendente (controlador):** o Vittorio responder o pedido de
   autorização do Folga em Ajustes > Notificações e repetir; se continuar 3 ou 4 com app ad-hoc, o `osascript`
