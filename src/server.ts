@@ -205,6 +205,7 @@ const emit: Emit = (event, data) => {
 const warnings = createWarnings({
   getState: () => state, getSettings: () => settings, probeAlive: () => probeUp,
   lastAutoCareRun: () => ac.lastRunAt, emit, settingsProblem: () => settingsProblem,
+  notify: (title, body) => notify.toast(title, body),   // só críticos chegam aqui; texto pelo caminho de sempre (R31)
 });
 /** Apps abertos, para apagar cache: só com sonda viva e leitura nova (3 intervalos, mín. 10 s). Senão null = tratar tudo como aberto. */
 const runningKeys = () => (state && probeUp && Date.now() - lastFreshAt <= freshWindowMs(settings.sampleSeconds)

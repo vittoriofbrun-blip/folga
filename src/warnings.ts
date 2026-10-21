@@ -21,6 +21,7 @@ export type WarningsDeps = {
   statfs?: (path: string) => Promise<{ bsize: number; blocks: number; bavail: number }>;
   startupFolder?: string;
   launchDirs?: { dir: string; source: StartupApp['source']; domain: 'gui' | 'system' }[];   // Mac: pastas de LaunchAgents/Daemons
+  notify?: (title: string, body: string) => void;   // decisão 20: só aviso crítico vira notificação
   crashDir?: string;   // Mac: padrão ~/Library/Logs/DiagnosticReports
 };
 
@@ -299,6 +300,7 @@ export function createWarnings(deps: WarningsDeps) {
   const busy = new Set<string>();
   const active = new Map<string, Warning>();
   let lastSig = '';
+  const notified = new Set<string>();   // críticos já notificados, até saírem da lista
   let downSince: number | null = null;
   let startupCache: { t: number; apps: StartupApp[] } | null = null;
 
@@ -341,6 +343,13 @@ export function createWarnings(deps: WarningsDeps) {
     for (const [id, w] of active) if (w.kind === kind && !keep.has(id)) active.delete(id);
     const sig = [...active.values()].map(w => `${w.id}|${w.severity}|${w.title}|${w.detail}`).sort().join('\n');
     if (sig !== lastSig) { lastSig = sig; deps.emit('warnings', list()); }
+    // decisão 20: crítico novo (ou que subiu de atenção) notifica uma vez; saiu da lista ou desceu = libera para a próxima vez
+    for (const id of notified) if (active.get(id)?.severity !== 'critico') notified.delete(id);
+    for (const w of active.values()) {
+      if (w.severity !== 'critico' || notified.has(w.id)) continue;
+      notified.add(w.id);
+      try { deps.notify?.(w.title, w.detail); } catch { /* avisar nunca atrapalha a lista de avisos */ }
+    }
   }
 
   // --volume é caro e o aviso roda a cada minuto: guarda 10 min

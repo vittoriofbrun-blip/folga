@@ -499,4 +499,43 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   ok('pino: nada de sfltool/sudo/verbos que mudam o launchd no código');
 }
 
+{
+  const sent: string[] = [];
+  const { env, w } = rig({ notify: (t, b) => { sent.push(`${t}|${b}`); } });
+  env.memLoad = 98; await w.run.fast();
+  assert.equal(sent.length, 1); assert.ok(sent[0]!.startsWith('Memória quase esgotada|'));
+  await w.run.fast(); await w.run.fast();
+  assert.equal(sent.length, 1, 'mesmo id: uma vez só');
+  env.memLoad = 40; await w.run.fast(); env.memLoad = 98; await w.run.fast();
+  assert.equal(sent.length, 2, 'saiu e voltou: de novo');
+  sent.length = 0; env.memLoad = 40; await w.run.fast();
+  env.memLoad = 92; env.disk.free = 40 * GB; await w.run.fast();   // atenção + disco com 8 % livre (atenção)
+  assert.equal(sent.length, 0, 'atenção não notifica');
+  env.memLoad = 98; await w.run.fast();
+  assert.equal(sent.length, 1, 'atenção -> crítico notifica uma vez');
+  env.lastRun = env.t - 60_000; await w.run.fast();
+  assert.equal(sent.length, 1, 'info não notifica');
+  env.alive = false; await w.run.probe(); env.t += 31_000; await w.run.probe();
+  assert.equal(sent.length, 2, 'sonda fora > 30 s (crítico)'); assert.ok(sent[1]!.startsWith('A sonda parou de responder|'));
+  w.stop(); env.memLoad = 40; await w.run.fast(); env.memLoad = 98; await w.run.fast();
+  assert.equal(sent.length, 2, 'depois de stop() nada notifica');
+  ok('notificação: só crítico, uma vez por id até sair, atenção->crítico conta, nada depois de stop()');
+}
+{
+  let boom = 0;
+  const { env, w } = rig({ notify: () => { boom++; throw new Error('toast quebrou'); } });
+  env.memLoad = 98; await w.run.fast();
+  assert.equal(boom, 1); assert.deepEqual(ids(w), ['memoria']);
+  assert.ok(env.emitted.some(l => l.some(x => x.id === 'memoria')), 'o emit saiu mesmo com notify que lança');
+  const { env: e2, w: w2 } = rig(); e2.memLoad = 98; await w2.run.fast();   // sem notify: igual a hoje
+  assert.deepEqual(ids(w2), ['memoria']);
+  for (const lvl of [['todos'], ['criticos']] as const) {
+    let n = 0;
+    const { env: e3, w: w3 } = rig({ getSettings: () => ({ ...DEFAULT_SETTINGS, autoCareThreshold: 92, warningsLevel: lvl[0] }), notify: () => { n++; } });
+    e3.memLoad = 98; await w3.run.fast(); await w3.run.fast();
+    assert.equal(n, 1, `warningsLevel ${lvl[0]}: mesmo resultado`);
+  }
+  ok('notificação: notify que lança não derruba o aviso nem o emit; sem notify nada muda');
+}
+
 console.log(`warnings: ${passed} casos ok`);
