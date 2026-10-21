@@ -489,9 +489,10 @@ try {
     });
     let preview = previewCom();
     const cleaned: string[][] = [];
+    let cleanAnswer = { bytes: 500 * MB, files: 10, skipped: 0 };
     const mkA = () => createSuggestions({
       dataDir: appDir, files, getState: () => state, release: async () => releaseAnswer, emit: () => {},
-      appData: { preview: async () => preview, clean: async ids => { cleaned.push(ids); return { bytes: 500 * MB, files: 10, skipped: 0 }; } },
+      appData: { preview: async () => preview, clean: async ids => { cleaned.push(ids); return cleanAnswer; } },
     });
     const sa = mkA();
     const errOf = (r: Suggestion | SuggestionError) => { assert.ok(isErr(r), 'devia recusar'); return (r as SuggestionError).erro; };
@@ -530,6 +531,28 @@ try {
     assert.equal(done.status, 'feita'); assert.deepEqual(cleaned, [['claude:Cache', 'claude:GPUCache']]);
     assert.match(done.result!, /10 arquivos apagados · 500 MB/);
     await sb.flush();
+
+    // arquivo adulterado: cartão dados_apps com origem vigia não executa; ids repetidos não escondem que nada saiu
+    const forjarCom = async (id: string, mut: (x: Suggestion) => void) => {
+      await sb.flush();
+      const f = join(appDir, 'suggestions.json');
+      const raw = JSON.parse(readFileSync(f, 'utf8')) as Suggestion[];
+      mut(raw.find(x => x.id === id)!);
+      writeFileSync(f, JSON.stringify(raw));
+      return mkA();
+    };
+    cleaned.length = 0;
+    const v = asSug(await sb.add(draft('dados_apps', ['claude:Cache']), 'folga'));
+    const sv = await forjarCom(v.id, x => { x.source = 'vigia'; });
+    assert.equal(asSug(await sv.approve(v.id)).status, 'falhou'); assert.equal(cleaned.length, 0, 'vigia nunca apaga dados de app');
+    await sv.flush();
+    const sd0 = mkA();
+    const dup = asSug(await sd0.add(draft('dados_apps', ['claude:Cache']), 'folga'));
+    const sd = await forjarCom(dup.id, x => { x.items = [x.items[0]!, x.items[0]!]; });
+    cleanAnswer = { bytes: 0, files: 0, skipped: 1 };   // o clean de verdade conta pulados sobre os ids sem repetição
+    assert.equal(asSug(await sd.approve(dup.id)).status, 'falhou', 'nada apagado não pode virar "feita"');
+    cleanAnswer = { bytes: 500 * MB, files: 10, skipped: 0 };
+    await sd.flush();
     ok('dados_apps: vigia não propõe, itens só do appData acionável, forjado/aberto antes do clique → falhou, clean recebe os ids');
   }
 

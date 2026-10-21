@@ -275,7 +275,9 @@ export function createSuggestions(deps: SuggestionsDeps) {
 
   async function runAppData(s: Suggestion): Promise<Outcome> {
     // R21, para qualquer origem: preview sem cache (dono fechado agora?) e o clean recalcula os alvos das regras
-    const ids = s.items.map(i => i.id);
+    // decisão 11 vale também para cartão vindo do arquivo (adulterado): o vigia nunca apaga dados de app
+    if (s.source === 'vigia') return { status: 'falhou', result: 'Nada foi apagado: o vigia não propõe limpeza de dados dos apps.' };
+    const ids = [...new Set(s.items.map(i => i.id))];   // o clean conta os pulados sobre ids sem repetição
     const check = await buildAppData(ids, { fresh: true });
     if (!Array.isArray(check) || !deps.appData) return { status: 'falhou', result: 'Nada foi apagado: um dos apps foi aberto ou o cache mudou.' };
     const r = await deps.appData.clean(ids);
