@@ -13,11 +13,24 @@ nunca para o `node` solto (decisão 10).
   já está em swap, e o Edge nem vem instalado no Mac.
 - **Um binário Swift (`mac/Folga.swift`), sem Xcode.** `scripts/mac-app.mjs build` compila com `swiftc -O` e
   monta o `.app`: `Info.plist` gerado pelo script (`local.folga.app`, `LSUIElement`, rede local liberada no ATS),
-  `Contents/MacOS/Folga` e `Contents/Resources/folga.json` com o `node` e o `PATH` de quem rodou o build.
+  `Contents/MacOS/Folga` e `Contents/Resources/folga.json` (`{ node, path }`, caminhos relativos a
+  `Contents/Resources`: `node` = `folga/bin/node`, `path` = `folga/bin:/usr/bin:/bin:/usr/sbin:/sbin`; o app
+  resolve as entradas sem `/` na frente, então mover o `.app` de `build/` para `~/Applications` não quebra nada).
 - **O servidor vai copiado no bundle** (`Contents/Resources/folga/`: `src/`, `dist/`, `probe/bin/probe-mac`,
-  `package.json`). Assim o app não depende do repositório, que outra sessão pode estar mexendo, e a assinatura
+  `package.json`) **junto com o próprio `node`** (`folga/bin/node`, cópia do Node ≥ 24 de quem rodou o build). Assim o app não depende do repositório, que outra sessão pode estar mexendo, e a assinatura
   sela o código que de fato roda. O Acesso Total ao Disco dado ao app vale para o `node` e a sonda que ele
   sobe (o app é o processo responsável) e para nenhum `node` de fora.
+- **Por que o `node` vai dentro:** o app é o processo responsável no TCC. Se ele subisse o `node` do `~/.nvm`
+  (gravável pelo usuário, fora do selo), qualquer programa rodando como o Vittorio poderia trocar esse arquivo e
+  ganhar o Acesso Total ao Disco do Folga — exatamente o que a decisão 10 proíbe. Dentro do bundle, trocar o
+  `node` quebra o selo do app. O `PATH` do filho também não tem nenhuma pasta do usuário.
+- **Hardened runtime em tudo** (app, sonda, `node`): sem ele, `DYLD_INSERT_LIBRARIES` ou um depurador entrariam
+  num processo que carrega a permissão. O `node` é reassinado só com `allow-jit` e
+  `allow-unsigned-executable-memory` (o V8 precisa); os direitos originais da Node.js Foundation incluem
+  `get-task-allow`, `allow-dyld-environment-variables` e `disable-library-validation`, que reabririam essa porta.
+  O `check` confere os três.
+- **Custo:** o app passa de ~1 MB para ~116 MB em disco (o `node` tem ~115 MB). Memória não muda: é o mesmo
+  `node` que já rodava. Atualizar o Node pede reinstalar o Folga (rebuild copia o novo).
 - **Conferência:** `scripts/mac-app.mjs check <app> [--previous <arquivo>]` valida o `Info.plist`, `--version`,
   `--selftest`, as assinaturas do bundle e da sonda de dentro, e recusa requisito designado fraco
   (`requirementWeak`): requisito só com `identifier "local.folga.app"` manteria a permissão entre builds, mas
@@ -35,10 +48,14 @@ Spike de 2026-10-21 (macOS 26.5.1, LibreSSL 3.3.6 do sistema):
   usuário; as duas coisas ficam fora do que quem constrói pode fazer. O chaveiro de teste foi apagado.
 - **Ramo B em uso:** ad-hoc puro. O requisito designado é `cdhash H"…"`, preso ao conteúdo exato do app.
   `--adhoc` é aceito (a CI passa) e dá no mesmo.
+- **"Sobrevive ao rebuild" só vale para rebuild idêntico** (o assunto do commit da Task 1 diz mais do que isso).
 - **Consequência:** um build idêntico (mesmos arquivos) dá o mesmo `cdhash` e o `check --previous` fica verde;
   qualquer mudança no app ou no servidor copiado muda o `cdhash`, o `check --previous` fica vermelho e
   **depois de cada reinstalação o Vittorio liga o Folga de novo no Acesso Total ao Disco** (Ajustes do Sistema →
   Privacidade e Segurança → Acesso Total ao Disco).
+- **Limite que fica:** a página continua pegando o token por `GET /api/token` (mesma origem, como hoje); quem
+  já roda como o Vittorio na máquina consegue falar com o servidor local. O Acesso Total ao Disco não aumenta isso:
+  as ferramentas expostas pela API são as mesmas, revalidadas pelo servidor.
 - **Limite honesto:** o ad-hoc não dá para imitar (o requisito é o hash do próprio app), mas também não prova
   autoria. Se um dia o ramo A voltar (por exemplo, o Vittorio dando confiança ao certificado ele mesmo), o limite
   dele é: um programa já rodando como você consegue assinar com essa chave, como aconteceria com um certificado

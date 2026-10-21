@@ -5,9 +5,14 @@
 // que o TCC faz para manter o Acesso Total ao Disco depois de reinstalar.
 // Assinatura: ad-hoc (ramo B do ADR 0007). O spike da identidade "Folga Local" autoassinada falhou: o codesign
 // não acha identidade sem confiança, e dar confiança abre janela de senha. `--adhoc` fica aceito (é o que a CI passa).
+// O node vai DENTRO do bundle (Resources/folga/bin/node), selado junto: o app é o processo responsável no TCC,
+// e um node fora do selo (~/.nvm, gravável pelo usuário) poderia ser trocado e herdar o Acesso Total ao Disco.
+// folga.json guarda caminhos RELATIVOS a Contents/Resources (`node`, e as entradas do `path` sem "/" na frente):
+// o app resolve na hora, então mover o .app (build/ -> ~/Applications) não quebra nada.
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve, sep } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
 const ID = 'local.folga.app';
@@ -32,12 +37,20 @@ function must(cmd, args) {
   if (!r.ok) { console.error(`falhou: ${cmd} ${args.join(' ')}\n${r.out}`); process.exit(1); }
   return r;
 }
+const NODE = 'bin/node';
+const APP_PATH = 'folga/bin:/usr/bin:/bin:/usr/sbin:/sbin'; // nenhuma pasta do usuário
+const NODE_ENTITLEMENTS = {
+  'com.apple.security.cs.allow-jit': true,
+  'com.apple.security.cs.allow-unsigned-executable-memory': true,
+};
+const nodeMajor = v => Number(/^v?(\d+)\./.exec(String(v))?.[1] ?? 0);
 const version = () => JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
 
 function build(outDir) {
   if (!existsSync(join(ROOT, 'dist', 'index.html'))) { console.error('falta a interface: rode npm run build'); process.exit(1); }
   const probe = join(ROOT, 'probe', 'bin', 'probe-mac');
   if (!existsSync(probe)) { console.error('falta a sonda: rode npm run build:probe'); process.exit(1); }
+  if (nodeMajor(process.version) < 24) { console.error(`o Folga precisa do Node 24 ou mais novo (este é ${process.version})`); process.exit(1); }
 
   const app = join(outDir, 'Folga.app');
   const res = join(app, 'Contents', 'Resources');
@@ -45,6 +58,7 @@ function build(outDir) {
   rmSync(app, { recursive: true, force: true });
   mkdirSync(macos, { recursive: true });
   mkdirSync(join(res, 'folga', 'probe', 'bin'), { recursive: true });
+  mkdirSync(join(res, 'folga', 'bin'), { recursive: true });
 
   must('/usr/bin/xcrun', ['swiftc', '-O', join(ROOT, 'mac', 'Folga.swift'), '-o', join(macos, 'Folga')]);
 
@@ -54,8 +68,9 @@ function build(outDir) {
   cpSync(join(ROOT, 'dist'), join(res, 'folga', 'dist'), { recursive: true });
   cpSync(probe, join(res, 'folga', 'probe', 'bin', 'probe-mac'));
   cpSync(join(ROOT, 'package.json'), join(res, 'folga', 'package.json'));
-  // node de quem rodou o build: o app não depende do PATH nem do que outra sessão deixou no repositório
-  writeFileSync(join(res, 'folga.json'), JSON.stringify({ node: process.execPath, path: process.env.PATH ?? '' }, null, 2) + '\n');
+  // o node de quem rodou o build, copiado para dentro do selo (ver cabeçalho)
+  cpSync(process.execPath, join(res, 'folga', NODE));
+  writeFileSync(join(res, 'folga.json'), JSON.stringify({ node: `folga/${NODE}`, path: APP_PATH }, null, 2) + '\n');
 
   const v = version();
   const plist = join(app, 'Contents', 'Info.plist');
@@ -67,8 +82,18 @@ function build(outDir) {
   must('/usr/bin/plutil', ['-convert', 'xml1', plist]);
 
   // a sonda de dentro antes do bundle (o selo do bundle cobre o binário já assinado), mesma identidade
-  must('/usr/bin/codesign', ['--force', '-s', '-', join(res, 'folga', 'probe', 'bin', 'probe-mac')]);
-  must('/usr/bin/codesign', ['--force', '-s', '-', app]);
+  // Tudo com hardened runtime: sem ele, DYLD_INSERT_LIBRARIES ou um depurador entrariam num processo que
+  // carrega o Acesso Total ao Disco do app.
+  const sign = (...a) => must('/usr/bin/codesign', ['--force', '-s', '-', '--options', 'runtime', ...a]);
+  sign(join(res, 'folga', 'probe', 'bin', 'probe-mac'));
+  // node: só os direitos de que o V8 precisa (JIT). Os da Node.js Foundation incluem get-task-allow,
+  // allow-dyld-environment-variables e disable-library-validation, que reabririam a porta acima.
+  const ent = join(mkdtempSync(join(tmpdir(), 'folga-ent-')), 'node.plist');
+  writeFileSync(ent, JSON.stringify(NODE_ENTITLEMENTS));
+  must('/usr/bin/plutil', ['-convert', 'xml1', ent]);
+  sign('--entitlements', ent, join(res, 'folga', NODE));
+  rmSync(dirname(ent), { recursive: true, force: true });
+  sign(app);
   console.log(`ok: ${app}`);
 }
 
@@ -95,6 +120,18 @@ function check(app, previous) {
   r = run(exe, ['--selftest']); caso('Folga --selftest', r.ok, r.out);
   r = run('/usr/bin/codesign', ['--verify', '--strict', app]); caso('assinatura do bundle', r.ok, r.out);
   r = run('/usr/bin/codesign', ['--verify', '--strict', probe]); caso('assinatura da sonda de dentro', r.ok, r.out);
+  const node = join(app, 'Contents', 'Resources', 'folga', NODE);
+  r = run(node, ['--version']); caso(`node de dentro roda e é ≥ 24 (${r.stdout || 'não rodou'})`, r.ok && nodeMajor(r.stdout) >= 24, r.out);
+  r = run('/usr/bin/codesign', ['--verify', '--strict', node]); caso('assinatura do node de dentro', r.ok, r.out);
+  for (const [nome, alvo] of [['app', app], ['sonda', probe], ['node', node]]) {
+    r = run('/usr/bin/codesign', ['-dv', alvo]);
+    caso(`hardened runtime no ${nome}`, /flags=0x[0-9a-f]*\([^)]*runtime/.test(r.out), r.out);
+  }
+  r = run('/usr/bin/codesign', ['-d', '--entitlements', '-', '--xml', node]);
+  const ents = [...r.stdout.matchAll(/<key>([^<]+)<\/key>/g)].map(m => m[1]).sort();
+  caso(`node de dentro só com os direitos do JIT (${ents.join(', ')})`, ents.join() === Object.keys(NODE_ENTITLEMENTS).sort().join(), r.out);
+  let cfg = {}; try { cfg = JSON.parse(readFileSync(join(app, 'Contents', 'Resources', 'folga.json'), 'utf8')); } catch {}
+  caso('folga.json aponta para o node e o PATH de dentro', cfg.node === `folga/${NODE}` && cfg.path === APP_PATH, JSON.stringify(cfg));
   r = run('/usr/bin/codesign', ['-d', '-r-', app]);
   const dr = designated(r.stdout);
   caso(`requisito designado preso a hash (${dr || 'vazio'})`, r.ok && !requirementWeak(dr), r.out);
@@ -108,7 +145,13 @@ function check(app, previous) {
 
 if (import.meta.main) {
   const [cmd, ...rest] = process.argv.slice(2);
-  const opt = name => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : undefined; };
+  const opt = name => {
+    const i = rest.indexOf(name);
+    if (i < 0) return undefined;
+    const v = rest[i + 1];
+    if (!v || v.startsWith('--')) { console.error(`${name} precisa de um valor`); process.exit(1); }
+    return v;
+  };
   if (process.platform !== 'darwin') { console.error('o Folga.app só existe no Mac'); process.exit(1); }
   if (cmd === 'build') build(resolve(opt('--out') ?? join(ROOT, 'build'))); // --adhoc: aceito, é o único ramo
   else if (cmd === 'check' && rest[0]) process.exitCode = check(resolve(rest[0]), opt('--previous'));
