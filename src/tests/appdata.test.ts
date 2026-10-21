@@ -135,7 +135,7 @@ try {
   // I1: FOLGA_APPDATA_BASES torto não cai nas pastas reais nem em '/': o servidor não sobe
   const abs = process.platform === 'win32' ? 'C:\\tmp\\a' : '/tmp/a';
   for (const raw of ['null', '"/"', '/', '["/"]', '{"x":"/"}', '{"caches":1}', '{"caches":""}', '{"caches":"rel/a"}', '{"__proto__":"/tmp/a"}', '[]'])
-    assert.throws(() => parseAppDataBases(raw), undefined, raw);
+    assert.throws(() => parseAppDataBases(raw), Error, raw);
   assert.deepEqual(parseAppDataBases(JSON.stringify({ caches: abs })), { caches: abs });
   console.log('ok  parseAppDataBases: só objeto com bases conhecidas e caminho absoluto');
 
