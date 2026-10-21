@@ -36,12 +36,12 @@ export function notifyCommand(platform: string, vars: Record<string, string | un
 }
 const osa = () => ({ cmd: OSA, args: ['-e', 'display notification (system attribute "FOLGA_TOAST_BODY") with title (system attribute "FOLGA_TOAST_TITLE")'] });
 
-type SpawnCmd = (cmd: string, args: string[], extra: Record<string, string>, done: (code: number | null) => void) => void;
+type SpawnCmd = (cmd: string, args: string[], extra: Record<string, string>, done: (code: number | null, err?: NodeJS.ErrnoException) => void) => void;
 const spawnCmd: SpawnCmd = (cmd, args, extra, done) => {
   const child = spawn(cmd, args, { shell: false, windowsHide: true, stdio: 'ignore', env: { ...process.env, ...extra } });
   const kill = setTimeout(() => child.kill(), 15_000);
   kill.unref();
-  child.on('error', () => { clearTimeout(kill); done(null); });
+  child.on('error', err => { clearTimeout(kill); done(null, err); });
   child.on('exit', code => { clearTimeout(kill); done(code); });
   child.unref();
 };
@@ -52,6 +52,7 @@ export type NotifyDeps = {
   platform?: string;
   vars?: Record<string, string | undefined>;
   spawnCmd?: SpawnCmd;
+  now?: () => number;
   /** só para testes: o que de fato dispara o processo */
   run?: (title: string, body: string, url: string) => void;
 };
@@ -60,7 +61,12 @@ export function createNotify(deps: NotifyDeps) {
   let broken = false;   // se o Windows recusar uma vez, não insiste a cada proposta
   const url = `http://127.0.0.1:${deps.port}`;
 
-  let appBroken = false;   // o app do Mac recusou: daqui em diante só o osascript
+  // app do Mac: recusado (4) ou ausente (ENOENT/126/127) = só osascript para sempre; 3 (autorização pendente), 5 e
+  // falha de spawn = osascript só desta vez e o app volta a ser tentado depois do recuo (o Vittorio pode liberar depois)
+  let appBroken = false;
+  let appRetryAt = 0;
+  const now = deps.now ?? Date.now;
+  const APP_BACKOFF_MS = 10 * 60_000;
   const sp = deps.spawnCmd ?? spawnCmd;
   const platform = deps.platform ?? process.platform;
   const vars = deps.vars ?? process.env;
@@ -69,9 +75,15 @@ export function createNotify(deps: NotifyDeps) {
     const extra = { FOLGA_TOAST_TITLE: title, FOLGA_TOAST_BODY: body, FOLGA_TOAST_URL: u };
     const mac = notifyCommand(platform, vars);
     if (!mac) return sp(PS(), ['-NoProfile', '-NonInteractive', '-STA', '-Command', SCRIPT], extra, code => { if (code !== 0) broken = true; });
+    // broken do osascript: mesma regra do Windows (se falhou uma vez, não insiste)
     const viaOsascript = () => sp(OSA, osa().args, extra, code => { if (code !== 0) broken = true; });
-    if (mac.cmd === OSA || appBroken) return viaOsascript();
-    sp(mac.cmd, mac.args, extra, code => { if (code !== 0) { appBroken = true; viaOsascript(); } });
+    if (mac.cmd === OSA || appBroken || now() < appRetryAt) return viaOsascript();
+    sp(mac.cmd, mac.args, extra, (code, err) => {
+      if (code === 0) return;
+      if (code === 4 || code === 126 || code === 127 || err?.code === 'ENOENT' || err?.code === 'EACCES') appBroken = true;
+      else appRetryAt = now() + APP_BACKOFF_MS;
+      viaOsascript();
+    });
   });
 
   return {

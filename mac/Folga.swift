@@ -703,7 +703,8 @@ case .selftest: exit(selftest())
 case .notificar: notificar()
 case .rodar(let login):
   let me = ProcessInfo.processInfo.processIdentifier
-  if NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).contains(where: { $0.processIdentifier != me }) {
+  // um `--notify` vivo (≤ 10 s) não conta como instância (só `.accessory` conta)
+  if NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).contains(where: { $0.processIdentifier != me && $0.activationPolicy == .accessory }) {
     // no login (--login) já estar rodando é normal: sai quieto, sem mandar abrir janela
     if !login { DistributedNotificationCenter.default().postNotificationName(Notification.Name("\(bundleId).open"), object: nil, userInfo: nil, deliverImmediately: true) }
     exit(0)

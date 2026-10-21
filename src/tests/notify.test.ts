@@ -66,12 +66,49 @@ caso('Windows segue o PowerShell de hoje (null)', () => {
   assert.equal(notifyCommand('win32', {}), null);
 });
 
-caso('no Mac o app que falha cai para o osascript, e o app não é tentado de novo', () => {
+const macApp = { FOLGA_APP: '1', FOLGA_APP_PATH: '/A/Folga.app' };
+const APP = '/A/Folga.app/Contents/MacOS/Folga';
+/** app responde com os códigos de `appCodes` (um por tentativa); o osascript sempre 0 */
+function cenario(appCodes: (number | null)[], toques: number[]) {
   const vistos: string[] = [];
-  const n = createNotify({ port: 1, platform: 'darwin', vars: { FOLGA_APP: '1', FOLGA_APP_PATH: '/A/Folga.app' },
-    spawnCmd: (cmd, _args, _extra, done) => { vistos.push(cmd); done(cmd.endsWith('Folga') ? 1 : 0); } });
-  n.toast('a', 'b'); n.toast('c', 'd');
-  assert.deepEqual(vistos, ['/A/Folga.app/Contents/MacOS/Folga', '/usr/bin/osascript', '/usr/bin/osascript']);
+  let t = 0;
+  const n = createNotify({ port: 1, platform: 'darwin', vars: macApp, now: () => t,
+    spawnCmd: (cmd, _a, _x, done) => { vistos.push(cmd === APP ? 'app' : 'osa'); done(cmd === APP ? appCodes.shift() ?? 0 : 0); } });
+  for (const quando of toques) { t = quando; n.toast('a', 'b'); }
+  return vistos;
+}
+
+caso('app com autorização pendente (3): osascript desta vez; o app volta depois do recuo de 10 min', () => {
+  assert.deepEqual(cenario([3, 0], [0, 1000, 10 * 60_000 + 1, 10 * 60_000 + 2]),
+    ['app', 'osa', 'osa', 'app', 'app']);
+});
+
+caso('app recusado (4) ou ausente (127): nunca mais é tentado', () => {
+  assert.deepEqual(cenario([4], [0, 99 * 60_000, 200 * 60_000]), ['app', 'osa', 'osa', 'osa']);
+  assert.deepEqual(cenario([127], [0, 99 * 60_000]), ['app', 'osa', 'osa']);
+});
+
+caso('falha ao lançar o app (ENOENT) é permanente; outro erro de spawn só recua', () => {
+  for (const [codigo, depois] of [['ENOENT', 'osa'], ['EAGAIN', 'app']] as const) {
+    const vistos: string[] = [];
+    let t = 0;
+    const n = createNotify({ port: 1, platform: 'darwin', vars: macApp, now: () => t,
+      spawnCmd: (cmd, _a, _x, done) => { vistos.push(cmd === APP ? 'app' : 'osa'); cmd === APP ? done(null, Object.assign(new Error(codigo), { code: codigo })) : done(0); } });
+    n.toast('a', 'b'); t = 11 * 60_000; n.toast('a', 'b');
+    assert.equal(vistos[2], depois, codigo);
+  }
+});
+
+caso('o texto nunca vai nos argumentos: só no ambiente extra', () => {
+  const mau = '"; do shell script "rm -rf ~"';
+  for (const vars of [{}, macApp]) {
+    const vistos: { args: string[]; extra: Record<string, string> }[] = [];
+    createNotify({ port: 1, platform: 'darwin', vars, spawnCmd: (_c, args, extra, done) => { vistos.push({ args, extra }); done(0); } }).toast(mau, 'corpo-secreto');
+    assert.equal(vistos.length, 1);
+    assert.ok(!vistos[0]!.args.join(' ').includes('rm -rf') && !vistos[0]!.args.join(' ').includes('corpo-secreto'));
+    assert.equal(vistos[0]!.extra.FOLGA_TOAST_TITLE, mau);
+    assert.equal(vistos[0]!.extra.FOLGA_TOAST_BODY, 'corpo-secreto');
+  }
 });
 
 console.log(casos.map(c => 'ok  ' + c).join('\n'));
