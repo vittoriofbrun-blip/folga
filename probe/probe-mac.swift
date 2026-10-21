@@ -330,7 +330,7 @@ func handle(_ line: String) {
     }
 }
 
-// ---------- modos de uma vez só (--meta, --trash, --size, --volume) ----------
+// ---------- modos de uma vez só (--meta, --trash, --size, --volume, --responsible, --disclaim) ----------
 // JSON no stdin, JSON no stdout, sai com 0; entrada inválida → null e sai com 1. Não tocam o laço da sonda
 // contínua (um comando longo de Lixeira no RunLoop.main atrasaria as leituras de memória).
 func oneShotOut(_ obj: Any) -> Never {
@@ -418,6 +418,36 @@ func oneShot(_ mode: String) -> Never {
               let total = v.volumeTotalCapacity else { oneShotInvalid() }
         oneShotOut(["name": v.volumeLocalizedName ?? "", "total": Int64(total), "available": Int64(v.volumeAvailableCapacity ?? 0),
                     "important": v.volumeAvailableCapacityForImportantUsage ?? 0])
+
+    case "--responsible":
+        // Quem o macOS (TCC) cobra pelas leituras deste processo: dentro do app, o próprio Folga.app.
+        let me = getpid()
+        let r = responsible(me) ?? 0
+        oneShotOut(["pid": Int(me), "responsible": Int(r), "path": r > 0 ? path(of: r) : ""])
+
+    case "--disclaim":
+        // Executa `cmd args…` responsável por si mesmo: o assistente não herda o Acesso Total ao Disco do Folga.app.
+        // Só TIRA a herança (o programa passa a responder pelas próprias permissões); nunca dá nada a ninguém.
+        // ponytail: API privada (a mesma do Chromium para os processos filhos); sem o símbolo, sai 126 sem
+        // executar nada (melhor o assistente não rodar no app do que rodar com o acesso dele). Some num macOS
+        // futuro → o assistente para dentro do app até trocar por outra forma (ex.: lançar pelo launchd).
+        let rest = Array(CommandLine.arguments.dropFirst(2))
+        guard let cmd = rest.first else { fputs("uso: probe-mac --disclaim <cmd> [args…]\n", stderr); exit(126) }
+        typealias SetDisclaim = @convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, Int32) -> Int32
+        guard let sym = dlsym(dlopen(nil, RTLD_NOW), "responsibility_spawnattrs_setdisclaim") else {
+            fputs("probe-mac: responsibility_spawnattrs_setdisclaim ausente; nada executado\n", stderr); exit(126)
+        }
+        var attr: posix_spawnattr_t?
+        posix_spawnattr_init(&attr)
+        // SETEXEC: troca a imagem deste processo (mesmo pid, mesmo stdio): o kill do Node acerta no programa final
+        guard unsafeBitCast(sym, to: SetDisclaim.self)(&attr, 1) == 0,
+              posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETEXEC)) == 0 else {
+            fputs("probe-mac: não deu para preparar o disclaim; nada executado\n", stderr); exit(126)
+        }
+        let argv = rest.map { strdup($0) } + [nil]
+        let rc = posix_spawnp(nil, cmd, nil, &attr, argv, environ)
+        fputs("probe-mac: não deu para executar \(cmd): \(String(cString: strerror(rc)))\n", stderr)
+        exit(127)
 
     default:
         oneShotInvalid()

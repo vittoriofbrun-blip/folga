@@ -6,7 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } fr
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentCwd, createAgent, extractSuggestions, feed, killTree, newAcc, realLaunch, type Launch } from '../agent.ts';
+import { agentCwd, createAgent, disclaimed, DISCLAIM_FAIL, extractSuggestions, feed, killTree, newAcc, realLaunch, type Launch } from '../agent.ts';
 import type { AgentEvent, AgentProvider, Suggestion, SuggestionDraft } from '../types.ts';
 
 let n = 0;
@@ -222,7 +222,7 @@ const fakeLaunch = (t: { provider: AgentProvider; prompt: string; sessionId: str
 
 const CLAUDE_SID = '11111111-2222-4333-8444-555555555555';
 const made: string[] = [];   // pastas de dados criadas por setup(), apagadas no fim
-function setup(opts: { timeout?: number; slowAdd?: number } = {}) {
+function setup(opts: { timeout?: number; slowAdd?: number; disclaim?: (l: Launch) => Launch } = {}) {
   const kills: number[] = [];
   const dataDir = mkdtempSync(join(tmpdir(), 'folga-agentdata-'));
   made.push(dataDir);
@@ -230,7 +230,7 @@ function setup(opts: { timeout?: number; slowAdd?: number } = {}) {
   const selfPids = new Set<number>();
   const added: SuggestionDraft[] = [];
   const agent = createAgent({
-    dataDir, port: 4799, selfPids, launch: fakeLaunch, turnTimeoutMs: opts.timeout,
+    dataDir, port: 4799, selfPids, launch: fakeLaunch, turnTimeoutMs: opts.timeout, disclaim: opts.disclaim,
     killTree: pid => { kills.push(pid); killTree(pid); },
     emit: (ev, data) => { if (ev === 'agent') events.push(data as AgentEvent); },
     addSuggestion: async d => {
@@ -467,6 +467,36 @@ await caso('B7: sessionId fora do formato (do stream ou do agent.json) é descar
   assert.equal(a.conversation().sessionId, null);
   assert.equal(a.conversation().messages.length, 1);
   assert.ok(!('cwd' in a.conversation()), 'o caminho não vai para a API (R17)');
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Dentro do Folga.app o CLI não herda o Acesso Total ao Disco (Task 6): probe-mac --disclaim
+// ---------------------------------------------------------------------------------------------------
+await caso('disclaimed: só no Mac dentro do app; probe-mac --disclaim na frente, env e cwd preservados', () => {
+  const l: Launch = { cmd: '/opt/claude', args: ['-p', 'oi'], env: { A: '1' }, cwd: '/tmp/c' };
+  assert.equal(disclaimed(l, 'win32', true, '/x/probe-mac'), l);
+  assert.equal(disclaimed(l, 'darwin', false, '/x/probe-mac'), l);
+  const d = disclaimed(l, 'darwin', true, '/x/probe-mac');
+  assert.equal(d.cmd, '/x/probe-mac');
+  assert.deepEqual(d.args, ['--disclaim', '/opt/claude', '-p', 'oi']);
+  assert.equal(d.env, l.env);
+  assert.equal(d.cwd, l.cwd);
+});
+
+await caso('disclaim sem a API privada (sai 126): mensagem clara, nada roda com o acesso do app', async () => {
+  const s = setup({ disclaim: () => ({ cmd: process.execPath, args: ['-e', 'process.exit(126)'] }) });
+  await s.agent.send('claude', 'oi');
+  const ev = await s.fim();
+  assert.equal(ev.at(-1)?.type, 'error');
+  assert.equal((ev.at(-1) as { error: string }).error, DISCLAIM_FAIL);
+  assert.match(DISCLAIM_FAIL, /não roda dentro do app Folga/);
+  // 126 de um CLI que não passou pelo disclaim continua a mensagem comum
+  const s2 = setup({ disclaim: l => l });
+  const fake126 = createAgent({ dataDir: s2.dataDir, port: 1, selfPids: new Set(), emit: () => {}, addSuggestion: async () => ({ erro: 'x', status: 500 }),
+    launch: () => ({ cmd: process.execPath, args: ['-e', 'process.exit(126)'] }), disclaim: l => l });
+  await fake126.send('claude', 'oi');
+  for (let i = 0; i < 50 && fake126.conversation().busy; i++) await sleep(100);
+  assert.equal(fake126.conversation().messages.at(-1)?.text, 'O Claude não respondeu agora. Tente de novo.');
 });
 
 await rm(dir, { recursive: true, force: true, maxRetries: 5 });

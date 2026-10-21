@@ -24,6 +24,7 @@ export type AgentDeps = {
   turnTimeoutMs?: number;                       // padrão 120 s (R25)
   launch?: (t: TurnInput) => Launch;            // troca o comando do provedor (script fake)
   killTree?: (pid: number) => void;             // troca o taskkill (teste confere quando ele é chamado)
+  disclaim?: (l: Launch) => Launch;             // troca o embrulho do --disclaim (teste do código 126)
 };
 export type SendResult = { ok: true } | { erro: string; status: number };
 
@@ -54,6 +55,18 @@ const fwd = (p: string) => p.replaceAll('\\', '/');
 const toml = (s: string) => JSON.stringify(s);   // string TOML básica = string JSON
 const CODEX_DISABLE = ['shell_tool', 'plugins', 'apps', 'browser_use', 'browser_use_external', 'computer_use', 'image_generation',
   'in_app_browser', 'hooks', 'tool_suggest', 'skill_search', 'goals', 'view_image'];
+
+/**
+ * Dentro do Folga.app (Mac) o CLI roda por `probe-mac --disclaim`: responde pelas próprias permissões e não herda o
+ * Acesso Total ao Disco do app. Fora do app (ou no Windows) não há o que herdar: volta o mesmo Launch.
+ */
+export function disclaimed(l: Launch, platform: NodeJS.Platform, insideApp: boolean, helper: string): Launch {
+  if (platform !== 'darwin' || !insideApp) return l;
+  return { ...l, cmd: helper, args: ['--disclaim', l.cmd, ...l.args] };
+}
+const PROBE_MAC = join(import.meta.dirname, '..', 'probe', 'bin', 'probe-mac');
+/** probe-mac --disclaim sai 126 sem executar quando o macOS não tem a API: o assistente não roda no app (fail closed). */
+export const DISCLAIM_FAIL = 'O assistente não roda dentro do app Folga neste macOS: não deu para separar o acesso ao disco do app. Nada foi executado.';
 
 /** Comando real de cada provedor, com as flags exatas do spike (ADR 0006). */
 export function realLaunch(t: TurnInput, dataDir: string, port: number): Launch {
@@ -257,6 +270,7 @@ export function createAgent(deps: AgentDeps) {
       const nome = provider === 'claude' ? 'O Claude' : 'O GPT';
       const motivo = why === 'timeout' ? 'Tempo esgotado: parei a resposta.'
         : why === 'stop' ? 'Resposta interrompida.'
+        : acc.error === DISCLAIM_FAIL ? DISCLAIM_FAIL   // texto fixo nosso, não do CLI
         : `${nome} não respondeu agora. Tente de novo.`;
       if (!why) console.error('[agente] turno sem resposta:', provider, `código ${exitCode}:`, (acc.error ?? acc.softError ?? stderr.trim().split(/\r?\n/).slice(-2).join(' ')).slice(0, 400));
       msg = { id: randomUUID(), role: 'assistant', text: motivo, t: Date.now(), provider, tools: acc.tools.length ? [...new Set(acc.tools)] : undefined, error: true };
@@ -300,7 +314,8 @@ export function createAgent(deps: AgentDeps) {
     const convId = conv.id;
     const acc = newAcc();
     const input: TurnInput = { provider, prompt, sessionId: conv.sessionId, system: systemPrompt(), mcpFile };
-    const l = deps.launch ? deps.launch(input) : realLaunch(input, deps.dataDir, deps.port);
+    const raw = deps.launch ? deps.launch(input) : realLaunch(input, deps.dataDir, deps.port);
+    const l = deps.disclaim ? deps.disclaim(raw) : disclaimed(raw, process.platform, process.env.FOLGA_APP === '1', PROBE_MAC);
     const turn: Turn = { pid: null, convId, killed: null, live: false };
     const killLive = () => { if (turn.live && turn.pid) kill(turn.pid); };
     current = turn;
@@ -329,7 +344,11 @@ export function createAgent(deps: AgentDeps) {
     child.stderr.on('data', d => { if (stderr.length < 4000) stderr += String(d); });
     child.on('error', e => { acc.error = acc.error ?? `não consegui iniciar o ${provider === 'claude' ? 'Claude' : 'Codex'}: ${(e as NodeJS.ErrnoException).code ?? 'erro'}`; done(null); });
     // espera o stdout esvaziar um instante depois da saída (o readline pode ter linhas pendentes)
-    child.on('exit', code => { turn.live = false; setTimeout(() => done(code), 300); });
+    child.on('exit', code => {
+      turn.live = false;
+      if (code === 126 && l !== raw) acc.error = acc.error ?? DISCLAIM_FAIL;
+      setTimeout(() => done(code), 300);
+    });
   }
 
   function stop(): void {

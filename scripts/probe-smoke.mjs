@@ -144,7 +144,7 @@ try {
   if (code === 'timeout') { child.kill(); fail('a sonda nao saiu em 3 s depois de fechar o stdin'); }
   console.log(`sonda saiu sozinha (exitCode ${code})`);
   load.kill();
-  if (isMac) await storage();
+  if (isMac) { await storage(); await disclaim(); }
   console.log('OK');
 } catch (e) {
   child.kill();
@@ -207,4 +207,29 @@ async function storage() {
     if (!(v?.total > 0 && v.available >= 0 && v.important >= 0 && typeof v.name === 'string')) fail(`--volume fora do formato: ${short(v)}`);
     console.log(`armazenamento: volume "${v.name}" total=${(v.total / GB).toFixed(1)} GB livre=${(v.available / GB).toFixed(1)} GB importante=${(v.important / GB).toFixed(1)} GB; size=${sz.bytes} B/${sz.files} arq`);
   }
+}
+
+// Responsabilidade (Mac): --responsible e --disclaim (o assistente não herda o Acesso Total ao Disco do app).
+function disclaim() {
+  const once = (args) => {
+    const r = spawnSync(exe, args, { encoding: 'utf8', timeout: 10000 });
+    let j = null; try { j = JSON.parse(r.stdout); } catch { /* fica null */ }
+    return { j, status: r.status };
+  };
+  const a = once(['--responsible']).j;
+  if (!(a?.pid > 0 && a.responsible > 0 && typeof a.path === 'string')) fail(`--responsible fora do formato: ${JSON.stringify(a)}`);
+  const b = once(['--disclaim', exe, '--responsible']);
+  if (!(b.status === 0 && b.j?.pid > 0 && b.j.responsible === b.j.pid)) fail(`--disclaim não cortou a responsabilidade: ${JSON.stringify(b)}`);
+  // mesmo pid (POSIX_SPAWN_SETEXEC): o pid lançado é o do programa final, então o kill do Node acerta nele
+  const c = spawn(exe, ['--disclaim', exe, '--responsible'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  let out = '';
+  c.stdout.on('data', (d) => { out += d; });
+  return new Promise((res) => c.on('close', () => {
+    let j = null; try { j = JSON.parse(out); } catch { /* null */ }
+    if (j?.pid !== c.pid) fail(`--disclaim trocou de pid: lançado ${c.pid}, rodou ${j?.pid}`);
+    const f = once(['--disclaim', '/usr/bin/false']);
+    if (f.status !== 1) fail(`--disclaim não repassou o código de saída: ${f.status}`);
+    console.log(`responsabilidade: sonda → ${a.responsible} (${a.path.split('/').pop()}); --disclaim → ela mesma, pid igual, código repassado`);
+    res();
+  }));
 }

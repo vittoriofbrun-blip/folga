@@ -73,6 +73,25 @@ Spike de 2026-10-21 (macOS 26.5.1, LibreSSL 3.3.6 do sistema):
 - A nota das telas (`fdaNote`) só ensina o caminho dos Ajustes quando o servidor roda dentro do app (`FOLGA_APP=1`);
   fora dele, manda abrir pelo app Folga. O pino em `files.test.ts` varre `src`, `web/src`, `scripts`, `probe` e `mac`.
 
+### O assistente fica fora do acesso ao disco (Task 6)
+- O servidor (o `node` filho do app) **continua** responsável pelo Folga.app: é ele que mede a Lixeira e o
+  Safari. Só os CLIs do assistente (claude/codex) lançados por `agent.ts` rodam por `probe-mac --disclaim`, que
+  os torna responsáveis por si mesmos. Fora do app (ou no Windows) o `Launch` não muda.
+- **Spike (2026-10-21, macOS 26.5.1):** `responsibility_spawnattrs_setdisclaim` + `posix_spawnp` com
+  `POSIX_SPAWN_SETEXEC` corta a responsabilidade: `--disclaim probe-mac --responsible` devolve
+  `responsible == pid`, com o mesmo pid lançado pelo Node (o `kill` do turno acerta no CLI) e o código de saída
+  repassado (`/usr/bin/false` → 1). O plano B (spawn + `waitpid` + repasse de sinais) não foi preciso.
+- **Fail closed:** sem o símbolo privado, `--disclaim` sai 126 sem executar; o chat mostra "O assistente não roda
+  dentro do app Folga neste macOS…" em vez de rodar o CLI com o acesso do app. Comando inexistente sai 127.
+- **O que um chamador local consegue com `--disclaim`:** nada que já não tivesse. O modo só **retira** a herança
+  de responsabilidade: o programa executado responde pelas próprias permissões do TCC, nunca pelas do Folga.app.
+  Quem roda `probe-mac` de fora do app já é o responsável por ele; com `--disclaim`, o alvo passa a ser responsável
+  por si — de novo sem nenhuma permissão do Folga. Não é um "rodar qualquer coisa com o acesso do app".
+- **Log de início (R32), só dentro do app:** `responsável <executável do --responsible> · acesso ao disco:
+  servidor sim|não · assistente não|SIM` (lê a Lixeira direto e via `--disclaim`; nenhum caminho do usuário).
+  "assistente SIM" é bug. Antes de o Vittorio liberar: `servidor não · assistente não` (visto ao vivo em 21/10).
+  **Pendente (controlador):** depois de liberar, o esperado é `servidor sim · assistente não`.
+
 ## Consequências
 - A CI do macOS monta o app ad-hoc e roda o `check` (sem segredo).
 - O `node` gravado no `folga.json` é o do build; trocar de Node pede rebuild.
