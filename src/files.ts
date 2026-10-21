@@ -48,8 +48,13 @@ function macUsage(mtime: number, m: FileMeta | null): { lastUsed: number; basis:
   return { lastUsed, basis };
 }
 
-/** Nota do que o macOS guarda atrás do Acesso Total ao Disco. A permissão é do app, nunca do processo do servidor. */
-export const FDA_NOTE = 'Não deu para ler: o macOS guarda isto atrás do Acesso Total ao Disco, que será pedido pelo app Folga (próxima etapa).';
+/** Nota do que o macOS guarda atrás do Acesso Total ao Disco. A permissão é do Folga.app, nunca do processo do
+ *  servidor: o caminho dos Ajustes só aparece dentro do app (FOLGA_APP=1); fora dele, manda abrir pelo app (decisão 10). */
+export function fdaNote(insideApp = process.platform === 'darwin' && process.env.FOLGA_APP === '1'): string {
+  return insideApp
+    ? 'Não deu para ler: falta liberar o Acesso Total ao Disco para o Folga. No ícone do Folga na barra, clique em "Liberar acesso ao disco…" (fica em Ajustes do Sistema › Privacidade e Segurança › Acesso Total ao Disco).'
+    : 'Não deu para ler: o macOS guarda isto atrás do Acesso Total ao Disco. Abra o Folga pelo app Folga, na barra de menus, para liberar.';
+}
 const DAY = 86_400_000;
 const MAX_ENTRIES = 100_000;
 const MAX_MS = 20_000;
@@ -598,8 +603,8 @@ export function createFiles(deps: FilesDeps) {
     const and = (l: string[]) => (l.length > 1 ? `${l.slice(0, -1).join(', ')} e ${l.at(-1)}` : l[0]!);
     const notes = [
       ...(opened.length ? [`${and(opened.map(b => BROWSER_NAME[b]))} ${opened.length > 1 ? 'abertos' : 'aberto'}: feche para limpar o cache`] : []),
-      // Safari protegido: nunca acionável; sem permissão = desconhecido (FDA_NOTE), com o tamanho só informativo
-      ...(safari ? [safari.denied ? `Safari: ${FDA_NOTE}` : `Safari: ${Math.round(safari.bytes / 1048576)} MB que o Folga não apaga (pasta protegida pelo macOS)`] : []),
+      // Safari protegido: nunca acionável; sem permissão = desconhecido (fdaNote), com o tamanho só informativo
+      ...(safari ? [safari.denied ? `Safari: ${fdaNote()}` : `Safari: ${Math.round(safari.bytes / 1048576)} MB que o Folga não apaga (pasta protegida pelo macOS)`] : []),
     ];
     items.push({
       category: 'cache_navegador', label: 'Cache dos navegadores', bytes: sum(list), files: list.length, actionable: closed.length > 0,
@@ -608,7 +613,7 @@ export function createFiles(deps: FilesDeps) {
     if (!MAC) items.push({
       category: 'lixeira', label: 'Lixeira do Windows', bytes: t.bytes, files: t.files, actionable: false, note: 'Esvazie pela Lixeira do Windows',
     });
-    else if (t.denied) items.push({ category: 'lixeira', label: 'Lixeira', bytes: 0, files: 0, actionable: false, unknown: true, note: FDA_NOTE });
+    else if (t.denied) items.push({ category: 'lixeira', label: 'Lixeira', bytes: 0, files: 0, actionable: false, unknown: true, note: fdaNote() });
     else items.push({ category: 'lixeira', label: 'Lixeira', bytes: t.bytes, files: t.files, actionable: false, note: 'Esvazie pelo Finder' });
     return items;
   }

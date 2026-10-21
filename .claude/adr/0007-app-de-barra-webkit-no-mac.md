@@ -61,6 +61,18 @@ Spike de 2026-10-21 (macOS 26.5.1, LibreSSL 3.3.6 do sistema):
   dele é: um programa já rodando como você consegue assinar com essa chave, como aconteceria com um certificado
   pago guardado no mesmo Mac.
 
+### Acesso Total ao Disco: pedido pelo menu (Task 5)
+- O menu do ícone mostra "Liberar acesso ao disco…" só enquanto o app não lê a `~/.Trash` (EPERM/EACCES);
+  é reavaliado toda vez que o menu abre. O clique explica em linguagem simples e "Abrir Ajustes" abre o painel.
+  Quem constrói nunca liga a chave: é passo do Vittorio.
+- **Spike do link (2026-10-21, macOS 26.5.1):** `x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles`
+  e `x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles` abriram os Ajustes (`open` rc=0) nos
+  dois casos. Não deu para ver qual painel ficou na tela (sem permissão de gravar a tela nem de acessibilidade
+  para quem constrói); fica o primeiro, o formato novo. **Pendente:** o controlador confere com o Vittorio se cai
+  direto na lista e se o Folga já aparece nela sozinho ou precisa do +.
+- A nota das telas (`fdaNote`) só ensina o caminho dos Ajustes quando o servidor roda dentro do app (`FOLGA_APP=1`);
+  fora dele, manda abrir pelo app Folga. O pino em `files.test.ts` varre `src`, `web/src`, `scripts`, `probe` e `mac`.
+
 ## Consequências
 - A CI do macOS monta o app ad-hoc e roda o `check` (sem segredo).
 - O `node` gravado no `folga.json` é o do build; trocar de Node pede rebuild.

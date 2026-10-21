@@ -151,6 +151,18 @@ func statusText(memLoad: Int?, freeBytes: Int64?) -> String {
   return "\(m)% · \(Int((Double(f) / 1e9).rounded())) GB"
 }
 
+/// Lixeira legível = o Folga.app já tem o acesso ao disco. Só EPERM/EACCES contam como "sem acesso";
+/// pasta que não existe (ou outro erro) não é motivo para pedir permissão.
+func hasFullDiskAccess(trash: String = NSHomeDirectory() + "/.Trash") -> Bool {
+  guard let d = opendir(trash) else { return errno != EPERM && errno != EACCES }
+  closedir(d)
+  return true
+}
+
+/// Painel da lista de acesso ao disco. Spike de 2026-10-21 (macOS 26.5.1): este e o
+/// `com.apple.preference.security?Privacy_AllFiles` abrem os Ajustes; fica o formato novo (ADR 0007).
+let painelDisco = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles")!
+
 func selftest() -> Int32 {
   var falhas = 0
   func caso(_ nome: String, _ ok: Bool) {
@@ -253,6 +265,15 @@ func selftest() -> Int32 {
   caso("resultado: nada voltou", resultadoLiberar(status: 200, corpo: ["availBefore": 5, "availAfter": 5]).titulo == "Nada voltou para a memória")
   caso("resultado: 409 mostra o erro do servidor", resultadoLiberar(status: 409, corpo: ["erro": "app protegido"]).texto == "app protegido")
   caso("statusText sem servidor → Folga", statusText(memLoad: nil, freeBytes: nil) == "Folga")
+  let semAcesso = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("folga-fda-\(getpid())")
+  try? FileManager.default.createDirectory(at: semAcesso, withIntermediateDirectories: true)
+  caso("hasFullDiskAccess: pasta legível → true", hasFullDiskAccess(trash: semAcesso.path))
+  chmod(semAcesso.path, 0)
+  caso("hasFullDiskAccess: pasta negada → false", !hasFullDiskAccess(trash: semAcesso.path))
+  chmod(semAcesso.path, 0o700)
+  try? FileManager.default.removeItem(at: semAcesso)
+  caso("hasFullDiskAccess: pasta inexistente não pede permissão", hasFullDiskAccess(trash: semAcesso.path))
+  caso("painelDisco: link dos Ajustes", painelDisco.scheme == "x-apple.systempreferences" && painelDisco.query == "Privacy_AllFiles")
   caso("statusText 62% · 39 GB", statusText(memLoad: 62, freeBytes: 39_000_000_000) == "62% · 39 GB")
 
   print(falhas == 0 ? "selftest: ok" : "selftest: \(falhas) falha(s)")
@@ -278,7 +299,7 @@ func olharPorta() async -> Porta {
 }
 
 @MainActor
-final class Supervisor {
+final class Supervisor: NSObject, NSMenuDelegate {
   private var server: Process?
   private var crashes: [Date] = []
   private var upSince = Date()
@@ -289,10 +310,12 @@ final class Supervisor {
 
   private let janela = Janela()
   private let liberar = NSMenuItem(title: "Liberar parados…", action: #selector(liberarParados), keyEquivalent: "")
+  private let disco = NSMenuItem(title: "Liberar acesso ao disco…", action: #selector(liberarDisco), keyEquivalent: "")
   private var relogio: Timer?
   private let sessao = URLSession(configuration: .ephemeral)
 
-  init() {
+  override init() {
+    super.init()
     item.button?.image = NSImage(systemSymbolName: "memorychip", accessibilityDescription: "Folga")
     item.button?.image?.isTemplate = true
     item.button?.imagePosition = .imageLeading
@@ -307,13 +330,30 @@ final class Supervisor {
     let abrir = NSMenuItem(title: "Abrir Folga", action: #selector(abrirJanela), keyEquivalent: "o")
     abrir.target = self
     liberar.target = self
-    for i in [abrir, liberar, .separator(), estado, tentar, .separator(), sair] { menu.addItem(i) }
+    disco.target = self
+    disco.isHidden = hasFullDiskAccess()
+    menu.delegate = self
+    for i in [abrir, liberar, disco, .separator(), estado, tentar, .separator(), sair] { menu.addItem(i) }
     item.menu = menu
     relogio = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in Task { @MainActor in await self.atualizarTexto() } }
     Task { await atualizarTexto() }
   }
 
   @objc func abrirJanela() { janela.abrir() }
+
+  /// Reavaliado a cada abertura do menu: depois de liberado, o item some sozinho.
+  func menuNeedsUpdate(_ menu: NSMenu) { disco.isHidden = hasFullDiskAccess() }
+
+  /// Só abre o painel; quem liga a chave é a pessoa.
+  @objc private func liberarDisco() {
+    let a = NSAlert()
+    a.messageText = "Liberar acesso ao disco"
+    a.informativeText = "Para o Folga medir a Lixeira, o cache do Safari e o iCloud Drive, ligue o Folga na lista que vai abrir. Se ele não estiver lá, clique em + e escolha Folga em Aplicativos."
+    a.addButton(withTitle: "Abrir Ajustes")
+    a.addButton(withTitle: "Cancelar")
+    NSApp.activate(ignoringOtherApps: true)
+    if a.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(painelDisco) }
+  }
 
   @objc private func liberarParados() {
     guard liberar.isEnabled else { return }

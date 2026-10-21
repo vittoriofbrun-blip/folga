@@ -157,7 +157,7 @@ export function mockRead(path: string): unknown {
     return [
       { category: 'temp_usuario', label: 'Temporários', bytes: 640 * MB, files: 1_820, actionable: true },
       // como o servidor: Chrome medido e acionável; o Safari sem permissão só aparece na nota (nunca unknown no item)
-      { category: 'cache_navegador', label: 'Cache dos navegadores', bytes: 820 * MB, files: 2_400, actionable: true, note: 'Safari: Não deu para ler: o macOS guarda isto atrás do Acesso Total ao Disco, que será pedido pelo app Folga (próxima etapa).' },
+      { category: 'cache_navegador', label: 'Cache dos navegadores', bytes: 820 * MB, files: 2_400, actionable: true, note: 'Safari: Não deu para ler: falta liberar o Acesso Total ao Disco para o Folga. No ícone do Folga na barra, clique em "Liberar acesso ao disco…" (fica em Ajustes do Sistema › Privacidade e Segurança › Acesso Total ao Disco).' },
       { category: 'lixeira', label: 'Lixeira', bytes: 1.2 * GB, files: 96, actionable: false, note: 'o Folga não esvazia' },
     ] as QuickCleanItem[];
   }

@@ -6,7 +6,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
-import { createFiles, FDA_NOTE, isPackageDir, lsofName, pathKey, pathShapeError, type FileMeta, type FilesDeps, type Inspected } from '../files.ts';
+import { createFiles, fdaNote, isPackageDir, lsofName, pathKey, pathShapeError, type FileMeta, type FilesDeps, type Inspected } from '../files.ts';
 import { DEFAULT_SETTINGS } from '../types.ts';
 
 const WIN = process.platform === 'win32';
@@ -421,11 +421,11 @@ try {
       assert.deepEqual([c3.actionable, c3.bytes, c3.files], [false, 0, 0]);
       assert.equal((await f3.quickClean({ categories: ['cache_navegador'] })).files, 0);
       assert.ok(existsSync(join(safari, 'fsCachedData')), 'cache do Safari fica, mesmo legível e com o Safari fechado');
-      // pasta que o node não abre (no Mac de verdade: Acesso Total ao Disco): nada contado nem acionável, nota FDA_NOTE
+      // pasta que o node não abre (no Mac de verdade: Acesso Total ao Disco): nada contado nem acionável, nota fdaNote()
       const trancado = dir('Cache', 'safari-trancado'); file(join(trancado, 'fsCachedData'), 4000, 0); chmodSync(trancado, 0o000);
       try {
         const c4 = (await mk({ cacheDirs: { safari: [trancado] }, runningKeys: () => new Set() }).quickCleanPreview()).find(i => i.category === 'cache_navegador')!;
-        assert.deepEqual([c4.actionable, c4.bytes, c4.files, c4.note], [false, 0, 0, `Safari: ${FDA_NOTE}`]);
+        assert.deepEqual([c4.actionable, c4.bytes, c4.files, c4.note], [false, 0, 0, `Safari: ${fdaNote()}`]);
         assert.equal((await mk({ cacheDirs: { safari: [trancado] }, runningKeys: () => new Set() }).quickClean({ categories: ['cache_navegador'] })).files, 0);
       } finally { chmodSync(trancado, 0o755); }
       ok('Mac: temporário com acesso recente fica; cache do Safari só com o Safari fechado (sonda sem leitura = aberto)');
@@ -502,17 +502,23 @@ try {
     if (MAC) {
       const items = await mk({ trash: async () => ({ bytes: 0, files: 0, denied: true }) }).quickCleanPreview();
       const lx = items.find(i => i.category === 'lixeira')!;
-      assert.deepEqual([lx.unknown, lx.bytes, lx.files, lx.note, lx.label], [true, 0, 0, FDA_NOTE, 'Lixeira']);
+      assert.deepEqual([lx.unknown, lx.bytes, lx.files, lx.note, lx.label], [true, 0, 0, fdaNote(), 'Lixeira']);
     }
-    assert.match(FDA_NOTE, /app Folga/); assert.doesNotMatch(FDA_NOTE, /node|Terminal/i);
+    // decisão 10: o caminho dos Ajustes só dentro do Folga.app; fora dele levaria a liberar o Terminal
+    assert.match(fdaNote(true), /Ajustes do Sistema › Privacidade e Segurança › Acesso Total ao Disco/);
+    assert.match(fdaNote(true), /Folga/);
+    assert.doesNotMatch(fdaNote(false), /Ajustes do Sistema|Privacy_AllFiles/);
+    for (const n of [fdaNote(true), fdaNote(false)]) assert.doesNotMatch(n, /\bnode\b|Terminal|execPath/i);
     const repo = join(import.meta.dirname, '..', '..');
-    const fontes = execFileSync('git', ['grep', '-l', '-i', '-E', 'Privacy_AllFiles|Acesso Total ao Disco', '--', 'src', 'web/src', 'scripts', 'probe', ':!src/tests/files.test.ts'], { encoding: 'utf8', cwd: repo }).trim().split('\n').filter(Boolean);
+    const fontes = execFileSync('git', ['grep', '-l', '-i', '-E', 'Privacy_AllFiles|Acesso Total ao Disco', '--', 'src', 'web/src', 'scripts', 'probe', 'mac', ':!src/tests/files.test.ts'], { encoding: 'utf8', cwd: repo }).trim().split('\n').filter(Boolean);
     assert.ok(fontes.length > 0, 'a busca não achou fonte nenhuma: o pino não está olhando nada');
+    assert.ok(fontes.includes('mac/Folga.swift'), 'o pino precisa olhar o app (mac/)');
+    // só a nota de dentro do app (files.ts e o mock que a copia) ensina o caminho nos Ajustes
+    const comCaminho = new Set(['src/files.ts', 'web/src/mock.ts']);
     for (const f of fontes) {
       const txt = readFileSync(join(repo, f), 'utf8');
       assert.doesNotMatch(txt, /(Privacy_AllFiles|Acesso Total ao Disco)[^\n]{0,160}(\bnode\b|Terminal|execPath)/i, f);
-      // M3: até o Folga.app existir (plano 3), nenhuma tela ensina o caminho nos Ajustes: o usuário daria ao Terminal/node
-      assert.doesNotMatch(txt, /Ajustes do Sistema[^\n]{0,160}Acesso Total ao Disco/i, f);
+      if (!comCaminho.has(f)) assert.doesNotMatch(txt, /Ajustes do Sistema[^\n]{0,160}Acesso Total ao Disco/i, f);
     }
     ok(`Lixeira ilegível = desconhecida (não 0); nenhum texto manda dar Acesso Total ao Disco ao node (${fontes.length} fontes)`);
   }
