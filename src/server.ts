@@ -25,6 +25,8 @@ const PORT = Number(process.env.FOLGA_PORT ?? 4780);
 const DATA_DIR = dataDir();
 const DEFAULTS = defaultSettings();
 const DIST = join(ROOT, 'dist');
+// Dentro do Folga.app (plano 3, ADR 0007): o app é o dono deste processo
+const IN_APP = process.platform === 'darwin' && process.env.FOLGA_APP === '1';
 const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 
 mkdirSync(DATA_DIR, { recursive: true });
@@ -127,6 +129,8 @@ function selfPids(snap: ProbeSnapshot): number[] {
   const out = new Set<number>();
   const walk = (pid: number) => { if (out.has(pid)) return; out.add(pid); for (const c of children.get(pid) ?? []) walk(c); };
   for (const r of roots) walk(r);
+  // o app e os processos do WebKit dele, que a sonda já agrupa pelo .app responsável
+  if (IN_APP) for (const p of snap.processes) if (p.name.toLowerCase() === 'local.folga.app') out.add(p.pid);
   return [...out];
 }
 
@@ -438,3 +442,5 @@ const shutdown = () => {
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+// o app segura o outro lado do stdin; caiu (até por kill -9) → o pipe fecha → sem servidor órfão na porta
+if (IN_APP) process.stdin.on('end', shutdown).resume();
