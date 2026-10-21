@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFiles, type Files } from '../files.ts';
 import { createSuggestions, type SuggestionError } from '../suggestions.ts';
-import { DEFAULT_SETTINGS, type AppGroup, type MemoryState, type QuickCleanItem, type Suggestion, type SuggestionDraft } from '../types.ts';
+import { DEFAULT_SETTINGS, type AppDataItem, type AppDataScan, type AppGroup, type MemoryState, type QuickCleanItem, type Suggestion, type SuggestionDraft } from '../types.ts';
 import type { ReleaseResponse } from '../types.ts';
 import type { ReleaseError } from '../release.ts';
 
@@ -473,6 +473,63 @@ try {
     const nothing = await s.add(draft('limpeza_rapida', []), 'agente');
     assert.ok(isErr(nothing) && nothing.status === 409);
     ok('limpeza_rapida: monta das categorias acionáveis, ignora o rascunho, aprova só o que o cartão mostrava, revalida');
+  }
+
+  // ---------- dados_apps: itens do appData do servidor, revalidados no clique ----------
+  {
+    const appDir = dir('dados-apps');
+    const it = (id: string, bytes: number, actionable: boolean): AppDataItem =>
+      ({ id, label: id, path: `/Users/v/Library/Application Support/${id.replace(':', '/')}`, bytes, files: 10, actionable });
+    const previewCom = (over: Record<string, Partial<AppDataItem>> = {}): AppDataScan => ({
+      t: 0, durationMs: 1, truncated: false, totalBytes: 0,
+      entries: [{ id: 'appSupport:Claude', name: 'Claude', where: 'Suporte a Aplicativos', bytes: 0, notes: [],
+        items: [it('claude:Cache', 500 * MB, true), it('claude:GPUCache', 5 * MB, true), it('caches:com.google.chrome', 9 * MB, false)]
+          .map(i => ({ ...i, ...over[i.id] })) }],
+    });
+    let preview = previewCom();
+    const cleaned: string[][] = [];
+    const mkA = () => createSuggestions({
+      dataDir: appDir, files, getState: () => state, release: async () => releaseAnswer, emit: () => {},
+      appData: { preview: async () => preview, clean: async ids => { cleaned.push(ids); return { bytes: 500 * MB, files: 10, skipped: 0 }; } },
+    });
+    const sa = mkA();
+    const errOf = (r: Suggestion | SuggestionError) => { assert.ok(isErr(r), 'devia recusar'); return (r as SuggestionError).erro; };
+    const forjar = async (id: string, item: string) => {
+      await sa.flush();
+      const f = join(appDir, 'suggestions.json');
+      const raw = JSON.parse(readFileSync(f, 'utf8')) as Suggestion[];
+      raw.find(x => x.id === id)!.items[0]!.id = item;
+      writeFileSync(f, JSON.stringify(raw));
+      return mkA();
+    };
+
+    // decisão 11: o assistente propõe, o clique decide; o vigia não propõe este tipo
+    assert.match(errOf(await sa.add(draft('dados_apps', ['claude:Cache']), 'vigia')), /vigia/);
+    for (const forjado of ['claude:../../Documents', 'claude:vm_bundles', '/Users/v/Documents', 'caches:com.apple.Safari'])
+      assert.match(errOf(await sa.add(draft('dados_apps', [forjado]), 'agente')), /item 1/);       // fora da allowlist: nem vira cartão
+    const ag = asSug(await sa.add(draft('dados_apps', ['claude:GPUCache']), 'agente'));
+    const sf = await forjar(ag.id, 'claude:../../Documents');
+    assert.equal(asSug(await sf.approve(ag.id)).status, 'falhou'); assert.equal(cleaned.length, 0);
+    await sf.flush();
+    const sb = mkA();
+    assert.match(errOf(await sb.add(draft('dados_apps', ['claude:../../Documents']), 'folga')), /item 1/);
+    assert.match(errOf(await sb.add(draft('dados_apps', ['claude:Cache', 'caches:com.google.chrome']), 'folga')), /item 2/);   // não acionável: recusa tudo
+    const c = asSug(await sb.add(draft('dados_apps', ['claude:Cache']), 'folga'));
+    assert.deepEqual(c.items.map(i => [i.id, i.bytes]), [['claude:Cache', 500 * MB]]);   // bytes do servidor, não do pedido
+    assert.match(c.items[0]!.detail, /Application Support/);                              // R23: caminho real no cartão
+    preview = previewCom({ 'claude:Cache': { actionable: false } });                      // Claude abriu antes do clique
+    const fail = asSug(await sb.approve(c.id));
+    assert.equal(fail.status, 'falhou'); assert.equal(cleaned.length, 0);
+    assert.equal(fail.result, 'Nada foi apagado: um dos apps foi aberto ou o cache mudou.');
+
+    preview = previewCom();
+    const d = asSug(await sb.add(draft('dados_apps', ['claude:Cache', 'claude:GPUCache', 'claude:Cache']), 'agente'));
+    assert.equal(d.items.length, 2);
+    const done = asSug(await sb.approve(d.id));
+    assert.equal(done.status, 'feita'); assert.deepEqual(cleaned, [['claude:Cache', 'claude:GPUCache']]);
+    assert.match(done.result!, /10 arquivos apagados · 500 MB/);
+    await sb.flush();
+    ok('dados_apps: vigia não propõe, itens só do appData acionável, forjado/aberto antes do clique → falhou, clean recebe os ids');
   }
 
   console.log(`suggestions: ${passed} casos ok`);

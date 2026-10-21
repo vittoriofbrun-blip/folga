@@ -141,6 +141,21 @@ export const TOOLS: Tool[] = [
     },
   },
   {
+    name: 'ver_dados_dos_apps',
+    description: 'Use para ver quanto cada app guarda no disco (Suporte a Aplicativos, Caches, AppData) e quais caches o Folga pode limpar agora (podeLimpar). Para propor limpeza, use os ids de cache com podeLimpar.',
+    inputSchema: nada,
+    readOnly: true,
+    run: async () => {
+      type It = { id: string; bytes: number; actionable: boolean; note?: string };
+      const r = await get('/api/appdata') as { entries: { name: string; where: string; bytes: number; items: It[]; notes: { text: string; bytes: number }[] }[] };
+      return r.entries.slice(0, 20).map(e => ({
+        app: texto(e.name, 80), onde: e.where, MB: mb(e.bytes),
+        caches: e.items.map(i => ({ id: texto(i.id, 160), MB: mb(i.bytes), podeLimpar: i.actionable, nota: i.note ? texto(i.note, 160) : undefined })),
+        notas: e.notes.map(n => `${texto(n.text, 160)} (${mb(n.bytes)} MB)`),
+      }));
+    },
+  },
+  {
     name: 'ver_inicializacao',
     description: 'Use para ver quais programas abrem junto com o Windows (e se estão ativos). Ajuda a explicar o que pesa logo depois de ligar o PC.',
     inputSchema: nada,

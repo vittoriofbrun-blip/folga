@@ -32,8 +32,8 @@ const MAX_MESSAGES = 200;
 const MAX_SUGGESTIONS_PER_MESSAGE = 5;
 const TOOL_PREFIX = 'mcp__folga__';
 const FENCE = /```folga-sugestao[ \t]*\r?\n([\s\S]*?)```/g;
-const KINDS: readonly SuggestionKind[] = ['lixeira', 'limpeza_rapida', 'liberar_memoria'];
-const KIND_BY_TIPO: Record<string, SuggestionKind> = { lixeira: 'lixeira', limpeza_rapida: 'limpeza_rapida', liberar_memoria: 'liberar_memoria' };
+const KINDS: readonly SuggestionKind[] = ['lixeira', 'limpeza_rapida', 'liberar_memoria', 'dados_apps'];
+const KIND_BY_TIPO: Record<string, SuggestionKind> = { lixeira: 'lixeira', limpeza_rapida: 'limpeza_rapida', liberar_memoria: 'liberar_memoria', dados_apps: 'dados_apps' };
 
 // ---------------------------------------------------------------------------------------------------
 // Binários dos CLIs (ADR 0006): caminho absoluto, shell:false

@@ -133,7 +133,7 @@ export type AppDataEntry = { id: string; name: string; where: string; bytes: num
 export type AppDataScan = { t: number; durationMs: number; truncated: boolean; totalBytes: number; entries: AppDataEntry[] };
 
 // Sugestões: o agente (ou a tela) propõe, o usuário aprova (R20–R24)
-export type SuggestionKind = 'lixeira' | 'limpeza_rapida' | 'liberar_memoria';
+export type SuggestionKind = 'lixeira' | 'limpeza_rapida' | 'liberar_memoria' | 'dados_apps';
 export type SuggestionStatus = 'pendente' | 'feita' | 'ignorada' | 'falhou';
 export type SuggestionItem = {
   id: string; label: string; detail: string; bytes: number;   // id = caminho, chave de app ou categoria

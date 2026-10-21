@@ -98,6 +98,7 @@ await caso('bloco válido vira SuggestionDraft (tipo→kind, titulo→title, mot
 await caso('vários blocos: cada um é separado; passando do limite, o resto é recusado', () => {
   const dois = extractSuggestions(`${bloco(valido)}\n${bloco({ ...valido, tipo: 'liberar_memoria', itens: ['chrome'] })}`);
   assert.deepEqual(dois.drafts.map(d => d.kind), ['lixeira', 'liberar_memoria']);
+  assert.deepEqual(extractSuggestions(bloco({ ...valido, tipo: 'dados_apps', itens: ['claude:Cache'] })).drafts.map(d => [d.kind, d.items]), [['dados_apps', ['claude:Cache']]]);
   const muitos = extractSuggestions(Array.from({ length: 7 }, () => bloco(valido)).join('\n'));
   assert.equal(muitos.drafts.length, 5);
   assert.equal(muitos.rejected.length, 1);

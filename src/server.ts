@@ -12,6 +12,7 @@ import { createReleaser } from './release.ts';
 import { openWindow, setStartup, startupInstalled } from './window.ts';
 import { createWarnings } from './warnings.ts';
 import { createFiles } from './files.ts';
+import { createAppData } from './appdata.ts';
 import { createSuggestions } from './suggestions.ts';
 import { createWatch } from './watch.ts';
 import { createNotify } from './notify.ts';
@@ -205,8 +206,14 @@ const files = createFiles({
   getSettings: () => settings, roots: process.env.FOLGA_FILES_ROOTS?.split(';'),   // testes: pastas no lugar das do usuário
   runningKeys: () => (state ? new Set(state.apps.map(a => a.key)) : null),        // Mac: navegador aberto pela sonda
 });
+// FOLGA_APPDATA_BASES (testes e verificação ao vivo): JSON { "appSupport": "/tmp/…", … }. Ele SUBSTITUI as bases
+// padrão (não mescla): a base que o teste não listar não é lida. JSON quebrado → não sobe (nunca cai nas pastas reais).
+const appData = createAppData({
+  runningKeys: () => (state ? new Set(state.apps.map(a => a.key)) : null),
+  bases: process.env.FOLGA_APPDATA_BASES ? JSON.parse(process.env.FOLGA_APPDATA_BASES) : undefined,
+});
 const suggestions = createSuggestions({
-  dataDir: DATA_DIR, files, getState: () => state, emit,
+  dataDir: DATA_DIR, files, getState: () => state, emit, appData,
   release: async keys => { const r = await releaser.release(keys, 'manual'); if (lastSnap) onSnapshot(lastSnap); return r; },
 });
 const agent = createAgent({
@@ -361,6 +368,7 @@ const server = createServer(async (req, res) => {
       return send(res, 200, await files.scan({ olderThanDays: num(body.olderThanDays, 7, 3650), minMB: num(body.minMB, 1, 100_000) }));
     }
     if (method === 'GET' && path === '/api/quickclean') return send(res, 200, await files.quickCleanPreview());
+    if (method === 'GET' && path === '/api/appdata') return send(res, 200, await appData.preview());
     if (method === 'GET' && path === '/api/suggestions') return send(res, 200, suggestions.list());
     if (method === 'POST' && path === '/api/suggestions') {
       const r = await suggestions.add(await readJson(req) as SuggestionDraft, 'folga');

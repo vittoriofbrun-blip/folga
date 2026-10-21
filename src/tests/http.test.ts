@@ -1,7 +1,7 @@
 // Servidor real numa porta alta, com pasta de dados temporária e sonda falsa (R15–R17, R07–R09, R14).
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -13,6 +13,9 @@ const PORT = 18000 + Math.floor(Math.random() * 1000);
 const dataDir = mkdtempSync(join(tmpdir(), 'folga-http-'));
 const startupDir = mkdtempSync(join(tmpdir(), 'folga-início-'));   // nunca a pasta Inicializar real; acento como em C:\Users\Antônio
 const filesRoot = mkdtempSync(join(tmpdir(), 'folga-files-'));   // varredura de teste: pasta vazia, nunca as pastas reais do usuário
+const appBase = mkdtempSync(join(tmpdir(), 'folga-appdata-'));   // dados dos apps de teste: nunca o ~/Library real
+mkdirSync(join(appBase, 'Claude', 'Cache'), { recursive: true });
+writeFileSync(join(appBase, 'Claude', 'Cache', 'f'), 'x'.repeat(4096));
 const root = join(import.meta.dirname, '..', '..');
 // já no disco antes de subir: ui-token curto demais (B5) e settings.json com valor que iria para o comando da sonda (B7)
 writeFileSync(join(dataDir, 'ui-token'), 'curto');
@@ -23,6 +26,7 @@ const server = spawn(process.execPath, ['--no-warnings', join(root, 'src', 'serv
     ...process.env, FOLGA_PORT: String(PORT), FOLGA_DATA_DIR: dataDir,
     FOLGA_FAKE_PROBE: join(root, 'src', 'tests', 'fake-probe.mjs'),
     FOLGA_FILES_ROOTS: filesRoot, FOLGA_CLOSE_WAIT_MS: '300', FOLGA_MEASURE_WAIT_MS: '300', FOLGA_STARTUP_DIR: startupDir,
+    FOLGA_APPDATA_BASES: JSON.stringify({ appSupport: appBase, roamingAppData: appBase }),
   },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
@@ -190,6 +194,13 @@ try {
   assert.ok([200, 404].includes(seguras[0]!.status));
   ok('M1: X-Frame-Options, nosniff e CSP em resposta estática, JSON e de erro');
 
+  // dados dos apps: medição pelas bases de teste; cartão de limpeza sem token é recusado
+  const ad = await call('GET', '/api/appdata');
+  assert.equal(ad.status, 200);
+  assert.ok(Array.isArray(ad.body.entries) && ad.body.entries.some((e: any) => e.name === 'Claude'));
+  assert.equal((await call('POST', '/api/suggestions', { body: { kind: 'dados_apps', title: 'x', reason: '', items: ['claude:Cache'] } })).status, 403);
+  ok('GET /api/appdata mede as bases de teste; POST dados_apps sem token → 403');
+
   // B5b: requisição que outro site dispara (ex.: uma imagem embutida noutro site) é recusada em /api/*
   for (const p of ['/api/state', '/api/disk', '/api/quickclean', '/api/token']) {
     assert.equal((await call('GET', p, { headers: { 'sec-fetch-site': 'cross-site' } })).status, 403, p);
@@ -205,4 +216,5 @@ try {
   await rm(dataDir, { recursive: true, force: true, maxRetries: 5 });
   await rm(startupDir, { recursive: true, force: true, maxRetries: 5 });
   await rm(filesRoot, { recursive: true, force: true, maxRetries: 5 });
+  await rm(appBase, { recursive: true, force: true, maxRetries: 5 });
 }
