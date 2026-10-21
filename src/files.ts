@@ -24,6 +24,7 @@ export type FilesDeps = {
   // testes: Lixeira falsa no lugar do PowerShell/trashItem. Número = quantos entraram (aí a contagem antes/depois não roda)
   sendToTrash?: (paths: string[], roots: string[], appRoot: string | null) => Promise<void | number>;
   meta?: (paths: string[]) => Promise<FileMeta[] | null>;   // testes: Spotlight falso no lugar do `probe-mac --meta`
+  openFiles?: () => Promise<ReadonlySet<string> | null>;      // testes: lsof falso (caminhos abertos; null = não deu para ler)
   appRoot?: string | null;   // pasta onde um .app velho vira item (padrão: ~/Downloads no Mac; null = nenhum .app)
   maxEntries?: number; maxMs?: number; now?: () => number;
 };
@@ -116,13 +117,48 @@ const runPS = (script: string, input: unknown, timeoutMs: number) =>
 const lc = (s: string) => s.toLowerCase();
 // M3: arquivo extraído de zip ou copiado mantém o mtime antigo; criação e mudança de metadados contam como "chegou agora"
 const ageOf = (st: Stats) => Math.max(st.mtimeMs, st.birthtimeMs, st.ctimeMs);
-// ponytail: atime em vez de lsof por arquivo; teto: app que segura um temporário aberto sem ler há 7 dias perde o arquivo
+// O APFS só atualiza o atime quando ele é mais velho que o mtime: um temporário lido todo dia pode parecer parado
+// há 7 dias. Por isso, antes de apagar, um lsof só (openFilesMac) tira da lista o que algum processo nosso segura aberto.
+// ponytail: teto: arquivo aberto por processo de outro usuário (root) não aparece no lsof -u e pode ir embora
 /** Idade de um temporário. No Mac o unlink não respeita arquivo aberto, então leitura recente também segura. */
 const tempAge = (st: Stats) => (MAC ? Math.max(ageOf(st), st.atimeMs) : ageOf(st));
 const BROWSERS = ['chrome', 'edge', 'safari'] as const;
 const BROWSER_NAME: Record<Browser, string> = { chrome: 'Chrome', edge: 'Edge', safari: 'Safari' };
 const BROWSER_KEY: Record<Browser, string> = { chrome: 'com.google.chrome', edge: 'com.microsoft.edgemac', safari: 'com.apple.safari' };
 const exists = (p: string) => lstat(p).then(() => true, () => false);
+
+const LSOF_ESC: Record<string, number> = { '\\': 92, t: 9, n: 10, r: 13, b: 8, f: 12 };
+/**
+ * Desfaz o escape do lsof (visto ao vivo em 21/10/2026): byte fora do ASCII vira \xNN, barra invertida vira \\,
+ * tab/quebra de linha viram \t/\n. ponytail: outro controle (^X) não é desfeito; nome assim não casa e pode sair.
+ */
+export function lsofName(s: string): string {
+  const out: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    const hex = s[i] === '\\' ? /^x([0-9a-f]{2})/i.exec(s.slice(i + 1, i + 4)) : null;
+    if (hex) { out.push(parseInt(hex[1]!, 16)); i += 3; }
+    else if (s[i] === '\\' && LSOF_ESC[s[i + 1]!] !== undefined) { out.push(LSOF_ESC[s[i + 1]!]!); i++; }
+    else out.push(...Buffer.from(s[i]!, 'utf8'));
+  }
+  return Buffer.from(out).toString('utf8');
+}
+/** Caminhos abertos pelos processos deste usuário: um lsof só. Falhou, demorou ou saiu torto → null (nada se apaga). */
+function openFilesMac(): Promise<ReadonlySet<string> | null> {
+  return new Promise(res => {
+    // -Fn: uma linha por campo; as de nome começam com 'n' (p = processo, f = descritor)
+    const c = spawn('/usr/sbin/lsof', ['-nP', '-Fn', '-u', String(process.getuid?.() ?? -1)], { shell: false, stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    const timer = setTimeout(() => { c.kill(); res(null); }, 10_000);
+    c.stdout.setEncoding('utf8');
+    c.stdout.on('data', d => { out += d; });
+    c.on('error', () => { clearTimeout(timer); res(null); });
+    c.on('close', code => {
+      clearTimeout(timer);
+      if (code !== 0 || !out.startsWith('p')) return res(null);
+      res(new Set(out.split('\n').filter(l => l.startsWith('n/')).map(l => lsofName(l.slice(1)))));
+    });
+  });
+}
 
 /** `child` está estritamente dentro de `root`? (relative do win32 ignora maiúsculas; outra unidade vira caminho absoluto) */
 function inside(root: string, child: string) {
@@ -513,7 +549,8 @@ export function createFiles(deps: FilesDeps) {
     // temporários, caches e a consulta de processos andam juntos: o preview aparece quando o mais lento termina
     const [open] = await Promise.all([
       browsersOpen(),
-      (async () => { const b = budget(); for (const d of tempDirs()) await walk(d, 32, null, b, (p, st) => { if (tempAge(st) < limit) temp.push([p, st]); }); })(),
+      // caminho real (/var → /private/var): é como o lsof devolve os abertos
+      (async () => { const b = budget(); for (const d of tempDirs()) await walk(await realOrNull(d) ?? d, 32, null, b, (p, st) => { if (tempAge(st) < limit) temp.push([p, st]); }); })(),
       ...BROWSERS.map(async br => {
         // Safari: pasta protegida; nunca acionável, legível ou não (o Folga não apaga esse cache). Só o preview mede, pelo Swift.
         if (br === 'safari') {
@@ -594,9 +631,16 @@ export function createFiles(deps: FilesDeps) {
     const { temp, cache, open } = await collect({ size: false });   // só o preview mede o Safari
     const limit = now() - TEMP_DAYS * DAY;
     const todo: Array<[string, Stats, boolean]> = [];   // [caminho, stat, exige mtime antigo]
-    if (want.has('temp_usuario')) for (const [p, st] of temp) todo.push([p, st, true]);
+    let skipped = 0;
+    if (want.has('temp_usuario') && temp.length) {
+      // I2: no Mac o unlink não respeita arquivo aberto; o que está aberto fica, e sem a lista nenhum temporário sai
+      const held = deps.openFiles ? await deps.openFiles() : MAC ? await openFilesMac() : undefined;
+      const keys = held && new Set([...held].map(k => pathKey(k)));
+      if (keys === null) skipped += temp.length;
+      else for (const [p, st] of temp) if (keys?.has(pathKey(p))) skipped++; else todo.push([p, st, true]);
+    }
     if (want.has('cache_navegador')) for (const b of BROWSERS) if (!open[b]) for (const [p, st] of cache[b]) todo.push([p, st, false]);
-    let bytes = 0, files = 0, skipped = 0;
+    let bytes = 0, files = 0;
     for (let i = 0; i < todo.length; i += 32) {
       await Promise.all(todo.slice(i, i + 32).map(async ([p, , old]) => {
         try {

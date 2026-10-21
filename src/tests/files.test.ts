@@ -6,7 +6,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
-import { createFiles, FDA_NOTE, isPackageDir, pathKey, pathShapeError, type FileMeta, type FilesDeps, type Inspected } from '../files.ts';
+import { createFiles, FDA_NOTE, isPackageDir, lsofName, pathKey, pathShapeError, type FileMeta, type FilesDeps, type Inspected } from '../files.ts';
 import { DEFAULT_SETTINGS } from '../types.ts';
 
 const WIN = process.platform === 'win32';
@@ -36,7 +36,7 @@ try {
   const mk = (over: Partial<FilesDeps> = {}) => createFiles({
     getSettings: () => DEFAULT_SETTINGS, roots: [downloads, docs], recentDir: recent, accessTracking: true,
     tempDirs: [join(base, 'sem-temp')], cacheDirs: {}, browsersOpen: async () => ({ chrome: false, edge: false }),
-    trash: async () => ({ bytes: 0, files: 0 }), meta: noMeta, ...over,
+    trash: async () => ({ bytes: 0, files: 0 }), meta: noMeta, openFiles: async () => new Set(), ...over,
   });
 
   // ---------- allowedRoots ----------
@@ -424,6 +424,26 @@ try {
 
     if (holder) { holder.kill(); await new Promise(r => holder.once('exit', r)); }   // solta o arquivo antes da limpeza
     else chmodSync(join(tmp, 'trava'), 0o755);
+
+    // I2: o APFS só atualiza o atime se ele for mais velho que o mtime; arquivo aberto agora pode parecer parado há
+    // 7 dias. Quem está na lista de abertos (lsof) fica; lista ilegível = nenhum temporário apagado nesta rodada
+    const abertos = dir('Temp-abertos');
+    const segurado = file(join(abertos, 'segurado.db'), 1000, 30);
+    const solto = file(join(abertos, 'solto.tmp'), 1000, 30);
+    const outro = file(join(abertos, 'outro.tmp'), 1000, 30);
+    const comAbertos = (set: ReadonlySet<string> | null) => mk({ tempDirs: [abertos], openFiles: async () => set, now: () => Date.now() + 8 * DAY })   // ctime = agora: o relógio anda 8 dias;
+    const rl = await comAbertos(new Set([realpathSync(segurado)])).quickClean({ categories: ['temp_usuario'] });
+    assert.ok(existsSync(segurado), 'arquivo aberto por um processo fica');
+    assert.ok(!existsSync(solto) && !existsSync(outro));
+    assert.deepEqual([rl.files, rl.skipped], [2, 1]);
+    const outro2 = file(join(abertos, 'outro2.tmp'), 1000, 30);
+    const rn = await comAbertos(null).quickClean({ categories: ['temp_usuario'] });
+    assert.equal(rn.files, 0);
+    assert.ok(existsSync(segurado) && existsSync(outro2), 'sem lista de abertos: nenhum temporário apagado');
+    // saída do `lsof -Fn` capturada ao vivo (21/10/2026) para 'é-nfc', 'a\b', 't<tab>ab', 'nl<quebra>x', 'car^et'
+    assert.deepEqual(['/T/\\xc3\\xa9-nfc', '/T/a\\\\b', '/T/t\\tab', '/T/nl\\nx', '/T/car^et', '/T/\\\\x41'].map(lsofName),
+      ['/T/é-nfc', '/T/a\\b', '/T/t\tab', '/T/nl\nx', '/T/car^et', '/T/\\x41']);
+    ok('I2: temporário aberto (lsof) fica; sem a lista de abertos nenhum temporário é apagado');
 
     // M3: arquivo extraído de zip/copiado: mtime de 30 dias, mas criado agora → NÃO é apagado
     const chegou = dir('Temp-chegou');
