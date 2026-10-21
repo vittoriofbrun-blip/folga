@@ -46,6 +46,12 @@ try {
     assert.ok(!item('com.onevcat.Kingfisher.ImageCache.default').actionable && /sem app identificado/.test(item('com.onevcat.Kingfisher.ImageCache.default').note ?? ''));
     assert.ok(s.entries.find(e => e.name === 'pip')!.notes.some(n => /Sem cache reconhecido/.test(n.text)));
     assert.equal(s.totalBytes, s.entries.reduce((a, e) => a + e.bytes, 0));
+    // fechar o app destrava o item sem medir de novo: o cache guarda tamanhos, o veredito sai a cada preview
+    running = new Set(['notion.id']);
+    const chrome2 = (await ad.preview()).entries.find(e => e.name === 'com.google.chrome')!.items[0]!;
+    assert.ok(chrome2.actionable && chrome2.note === undefined && chrome2.bytes === chrome.items[0]!.bytes, 'Chrome fechado: acionável no cache');
+    running = new Set(['com.google.chrome', 'notion.id']);
+    assert.ok(!(await ad.preview()).entries.find(e => e.name === 'com.google.chrome')!.items[0]!.actionable, 'reabriu: trava de novo');
 
     const r = await ad.clean(['claude:Cache', 'claude:../../Documents', 'caches:com.google.chrome', 'claude:claude-code/2.0.14', 'claude:claude-code/2.0.9']);
     assert.equal(r.skipped, 3);

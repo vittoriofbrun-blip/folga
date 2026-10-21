@@ -187,17 +187,10 @@ export function createAppData(deps: {
     return out;
   }
 
-  async function collect(): Promise<{ scan: AppDataScan }> {
+  async function collect(): Promise<{ scan: AppDataScan; all: Target[] }> {
     const t0 = now();
     const bases = new Map(await realBases());
     const all = await targets(bases);
-    const keys = deps.runningKeys();
-    const apps = all.some(t => t.needsApp) ? await installed() : null;
-    for (const t of all) {
-      const note = judge(t, keys, apps);
-      t.actionable = note === null;
-      if (note) t.note = note;
-    }
     const budget = newBudget(maxEntries, maxMs, now);
     const entries: AppDataEntry[] = [];
     for (const [base, b] of bases) {
@@ -221,6 +214,7 @@ export function createAppData(deps: {
     }
     entries.sort((a, b) => b.bytes - a.bytes);
     return {
+      all,
       scan: {
         t: now(), durationMs: now() - t0, truncated: budget.stopped,
         totalBytes: entries.reduce((a, e) => a + e.bytes, 0), entries: entries.slice(0, 40),
@@ -228,14 +222,31 @@ export function createAppData(deps: {
     };
   }
 
-  // single-flight + cache de 5 min; `fresh` coleta de novo; clean invalida
-  let cached: { p: Promise<AppDataScan>; at: number | null } | null = null;
+  /** Veredito na hora (aberto/fechado, app instalado) sobre a medição guardada: fechar o app destrava sem medir de novo. */
+  async function judged({ scan, all }: { scan: AppDataScan; all: Target[] }): Promise<AppDataScan> {
+    const keys = deps.runningKeys();
+    const apps = all.some(t => t.needsApp) ? await installed() : null;
+    const byId = new Map(all.map(t => [t.id, t]));
+    return {
+      ...scan,
+      entries: scan.entries.map(e => ({
+        ...e,
+        items: e.items.map(({ note: _old, ...i }) => {
+          const note = judge(byId.get(i.id)!, keys, apps);
+          return note === null ? { ...i, actionable: true } : { ...i, actionable: false, note };
+        }),
+      })),
+    };
+  }
+
+  // single-flight + cache de 5 min das MEDIDAS; `fresh` coleta de novo; clean invalida
+  let cached: { p: Promise<{ scan: AppDataScan; all: Target[] }>; at: number | null } | null = null;
   function preview(opts: { fresh?: boolean } = {}): Promise<AppDataScan> {
-    if (cached && !opts.fresh && (cached.at === null || now() - cached.at < 5 * 60_000)) return cached.p;
-    const c: { p: Promise<AppDataScan>; at: number | null } = { p: collect().then(r => r.scan), at: null };
+    if (cached && !opts.fresh && (cached.at === null || now() - cached.at < 5 * 60_000)) return cached.p.then(judged);
+    const c: NonNullable<typeof cached> = { p: collect(), at: null };
     c.p.then(() => { c.at = now(); }, () => { if (cached === c) cached = null; });
     cached = c;
-    return c.p;
+    return c.p.then(judged);
   }
 
   // clean: alvos recalculados das regras (o id que chega só escolhe entre eles); mede SÓ os pedidos, cada um com o
