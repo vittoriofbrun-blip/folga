@@ -479,6 +479,10 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   assert.deepEqual(apps.map(a => a.name).sort(), ['$(rm -rf ~)', 'a', 'b', 'c', 'd'].sort(), 'bak, _aposentados e .DS_Store fora; nome estranho vira texto');
   assert.deepEqual(calls, [['/bin/launchctl', 'print', `gui/${(process.getuid?.() ?? 501)}`], ['/bin/launchctl', 'print', 'system']]);
   await assert.rejects(mkRig(true).startupApps(), 'launchctl falhou: não inventa estado');
+  for (const out of ['', 'lixo sem formato\n']) {
+    const { w } = rig({ platform: 'darwin', launchDirs: [{ dir: ua, source: 'launchagent_usuario', domain: 'gui' }], exec: async () => out });
+    await assert.rejects(w.startupApps(), 'saída vazia/desconhecida com exit 0: não inventa "tudo desativado"');
+  }
   await rm(base, { recursive: true });
   ok('itens do Mac: launchctl print (só leitura, sem nome de plist em argv), ativo/desativado, lixo fora, falha rejeita');
 }
@@ -489,7 +493,7 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   try {
     hits = execFileSync('git', ['grep', '-nE', 'sfltool|\\bsudo\\b|launchctl.*(load|unload|bootstrap|bootout|enable|disable|kickstart)', '--', 'src/*.ts', 'mac'],
       { cwd: join(import.meta.dirname, '..', '..'), encoding: 'utf8' });
-  } catch { /* status 1 = sem ocorrência */ }
+  } catch (e) { assert.equal((e as { status?: number }).status, 1, 'git grep falhou de verdade'); }   // status 1 = sem ocorrência
   const real = hits.split('\n').filter(l => l && !/^\S+:\d+:\s*(\/\/|\*|\/\*)/.test(l) && !l.startsWith('src/tests/'));
   assert.deepEqual(real, []);
   ok('pino: nada de sfltool/sudo/verbos que mudam o launchd no código');

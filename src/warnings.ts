@@ -432,13 +432,16 @@ export function createWarnings(deps: WarningsDeps) {
     const state = new Map<string, ReturnType<typeof parseLaunchctlPrint>>();
     for (const d of new Set(dirs.map(x => x.domain))) {
       // falha aqui rejeita: o estado não é inventado
-      state.set(d, parseLaunchctlPrint(await exec('/bin/launchctl', ['print', d === 'gui' ? `gui/${uid}` : 'system'])));
+      const parsed = parseLaunchctlPrint(await exec('/bin/launchctl', ['print', d === 'gui' ? `gui/${uid}` : 'system']));
+      if (!parsed.loaded.size) throw new Error('launchctl print sem serviços carregados');   // formato desconhecido: não vira "tudo desativado"
+      state.set(d, parsed);
     }
     const apps: StartupApp[] = [];
     for (const d of dirs) {
       const st = state.get(d.domain)!;
       for (const f of await readdir(d.dir).catch(() => [] as string[])) {
         if (!f.endsWith('.plist')) continue;
+        // ponytail: rótulo = nome do arquivo; o launchctl usa o Label de dentro do plist (quase sempre igual). Teto conhecido: ler o Label exigiria abrir o plist.
         const label = f.slice(0, -'.plist'.length);
         const name = cleanName(label);
         if (!name) continue;
