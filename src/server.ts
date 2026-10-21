@@ -11,7 +11,7 @@ import { startProbe } from './probe.ts';
 import { pushSample, freshWindowMs } from './samples.ts';
 import { createReleaser } from './release.ts';
 import { appBundlePath, openWindow, setStartup, startupAvailable, startupInstalled } from './window.ts';
-import { createWarnings } from './warnings.ts';
+import { createWarnings, defaultCrashDir, readCrashEntries } from './warnings.ts';
 import { createFiles } from './files.ts';
 import { createAppData, parseAppDataBases } from './appdata.ts';
 import { createSuggestions } from './suggestions.ts';
@@ -434,6 +434,10 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`[${new Date().toISOString()}] Folga em http://127.0.0.1:${PORT} | dados em ${DATA_DIR} | ajustes de ${settingsFrom} | Auto Care ${settings.autoCareEnabled ? `em ${settings.autoCareThreshold} %` : 'desligado'}`);
   if (process.env.FOLGA_OPEN_WINDOW === '1') showWindow();
   if (IN_APP) void accessLine().then(l => console.log(`[${new Date().toISOString()}] ${l}`));
+  // R32: o que o app lê de dentro (a pasta de relatórios é protegida? o código do erro, se for)
+  if (IN_APP) void readCrashEntries(defaultCrashDir(), Date.now())
+    .then(r => `travamentos: ${r.length} relatórios lidos`, (e: NodeJS.ErrnoException) => `travamentos: sem acesso (${e.code ?? 'erro'})`)
+    .then(l => console.log(`[${new Date().toISOString()}] ${l}`));
 });
 
 /** R32, dentro do app: quem o macOS cobra e quem lê a Lixeira (decisão 17: nenhum dos dois deveria). "assistente SIM" é bug. */

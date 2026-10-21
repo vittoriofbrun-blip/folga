@@ -1,12 +1,12 @@
 // Avisos (D15, R26): limiares, dedupe, remoção, sonda, Auto Care, antivírus, travamentos, apps de inicialização.
 // Sem processos reais: o exec, o relógio e o statfs são injetados.
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  approvedEnabled, avWarning, macDiskInfo, createWarnings, decodeAvState, parseAv, parseCrashes, parseRegQuery, settingsWarning,
+  approvedEnabled, avWarning, cleanName, macCrashes, macDiskInfo, parseCrashText, parseIpsHeader, createWarnings, decodeAvState, parseAv, parseCrashes, parseRegQuery, settingsWarning,
   type WarningsDeps,
 } from '../warnings.ts';
 import { DEFAULT_SETTINGS, type MemoryState, type Warning } from '../types.ts';
@@ -333,6 +333,49 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   const { w: w2 } = rig({ platform: 'darwin', macVolume: async () => null, statfs: async () => { throw new Error('x'); } });
   assert.deepEqual(await w2.disk(), [], 'statfs falhou: sem disco, sem rejeição');
   ok('disco do Mac: cache de 10 min, falha da sonda mantém o último valor, statfs que falha não derruba');
+}
+
+{
+  const fx = (n: string) => readFileSync(join(import.meta.dirname, 'fixtures', 'mac', n), 'utf8');
+  const hdr = fx('ips-header.txt').split('\n')[0]!;
+  assert.deepEqual(parseIpsHeader(hdr), { app: 'node', bugType: '309' });
+  assert.equal(parseIpsHeader('{"app_name":'), null);
+  assert.equal(parseIpsHeader('{"bug_type":"309"}'), null);
+  assert.equal(parseIpsHeader(''), null);
+  assert.equal(parseCrashText(fx('old.crash')), 'ExemploApp');
+  assert.equal(parseCrashText('sem a linha'), null);
+  const now = Date.UTC(2026, 9, 21, 15, 0, 0), H = 3600_000;
+  const e = (file: string, ago: number, head = hdr) => ({ file, mtimeMs: now - ago * H, head });
+  const one = macCrashes([e('node-1.ips', 1)], now);
+  assert.equal(one[0]?.id, 'travamento:node');
+  assert.equal(one[0]?.title, 'node travou');
+  assert.equal(one[0]?.detail, 'Travou 1 vez nas últimas 24 h.');
+  assert.equal(macCrashes([e('a.ips', 1), e('b.ips', 2)], now)[0]?.detail, 'Travou 2 vezes nas últimas 24 h.');
+  assert.equal(macCrashes([e('x.crash', 1, fx('old.crash'))], now)[0]?.id, 'travamento:exemploapp');
+  assert.deepEqual(macCrashes([e('a.diag', 1), e('Retired/a.ips', 1), e('old.ips', 25), e('b.ips', 1, hdr.replace('"309"', '"999"'))], now), []);
+  const dirty = cleanName('Evil\u0007\nApp' + 'x'.repeat(200));
+  assert.ok(!/[\u0000-\u001f\u007f]/.test(dirty) && dirty.length <= 80 && dirty.startsWith('Evil'));
+  ok('Mac: cabeçalho .ips, .crash antigo, 24 h, Retired/.diag/tipo desconhecido fora, cleanName');
+}
+{
+  const dir = mkdtempSync(join(tmpdir(), 'folga-crash-'));
+  const hdr = readFileSync(join(import.meta.dirname, 'fixtures', 'mac', 'ips-header.txt'), 'utf8');
+  writeFileSync(join(dir, 'node-1.ips'), hdr + '{"corpo":1}\n');
+  mkdirSync(join(dir, 'Retired')); writeFileSync(join(dir, 'Retired', 'velho.ips'), hdr);
+  const { env, w } = rig({ platform: 'darwin', crashDir: dir });
+  const nowS = env.t / 1000;
+  utimesSync(join(dir, 'node-1.ips'), nowS - 3600, nowS - 3600);
+  await w.run.crashes();
+  assert.deepEqual(ids(w), ['travamento:node']);
+  await rm(join(dir, 'node-1.ips'));
+  await w.run.crashes();
+  assert.deepEqual(ids(w), [], 'relatório some: o aviso sai');
+  writeFileSync(join(dir, 'node-2.ips'), hdr); utimesSync(join(dir, 'node-2.ips'), nowS - 3600, nowS - 3600);
+  await w.run.crashes();
+  await rm(dir, { recursive: true });
+  await w.run.crashes();   // pasta ilegível: mantém
+  assert.deepEqual(ids(w), ['travamento:node']);
+  ok('travamentos do Mac: lê a pasta, aviso sai quando o arquivo some, pasta ilegível mantém');
 }
 
 console.log(`warnings: ${passed} casos ok`);

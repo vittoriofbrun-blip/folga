@@ -1,6 +1,6 @@
 // F-15: monitor de avisos (D15, R26), discos e apps de inicialização. Só leitura.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { readdir, statfs as fsStatfs } from 'node:fs/promises';
+import { open, readdir, stat, statfs as fsStatfs } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, parse } from 'node:path';
 import { macHelper } from './platform.ts';
@@ -20,6 +20,7 @@ export type WarningsDeps = {
   macVolume?: () => Promise<unknown | null>;   // sonda --volume; injetável nos testes
   statfs?: (path: string) => Promise<{ bsize: number; blocks: number; bavail: number }>;
   startupFolder?: string;
+  crashDir?: string;   // Mac: padrão ~/Library/Logs/DiagnosticReports
 };
 
 const FAST_MS = 30_000;            // memória, disco, Auto Care
@@ -79,14 +80,15 @@ export function avWarning(products: AvProduct[]): Candidate | null {
   return null;
 }
 
-/** Saída do Get-WinEvent → um aviso por app (nome sem .exe, minúsculo no id). */
-export function parseCrashes(json: string): Candidate[] {
-  const raw: unknown = json.trim() ? JSON.parse(json) : [];
+/** Nome vindo de arquivo/log: sem controle nem quebra de linha, até 80 caracteres. */
+export function cleanName(s: string): string {
+  return s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+}
+
+/** Um aviso por app (id com o nome em minúsculo), com a contagem de travamentos. */
+export function crashCandidates(names: string[]): Candidate[] {
   const byApp = new Map<string, { name: string; n: number }>();
-  for (const e of Array.isArray(raw) ? raw : [raw]) {
-    const app = (e as { app?: unknown } | null)?.app;
-    if (typeof app !== 'string') continue;
-    const name = app.trim().replace(/\.exe$/i, '');
+  for (const name of names) {
     if (!name) continue;
     const cur = byApp.get(name.toLowerCase());
     if (cur) cur.n++; else byApp.set(name.toLowerCase(), { name, n: 1 });
@@ -95,6 +97,83 @@ export function parseCrashes(json: string): Candidate[] {
     cand('travamento', `travamento:${key}`, 'atencao', `${name} travou`,
       `Travou ${n === 1 ? '1 vez' : `${n} vezes`} nas últimas 24 h.`));
 }
+
+/** Saída do Get-WinEvent → um aviso por app (nome sem .exe, minúsculo no id). */
+export function parseCrashes(json: string): Candidate[] {
+  const raw: unknown = json.trim() ? JSON.parse(json) : [];
+  const names: string[] = [];
+  for (const e of Array.isArray(raw) ? raw : [raw]) {
+    const app = (e as { app?: unknown } | null)?.app;
+    if (typeof app === 'string') names.push(app.trim().replace(/\.exe$/i, ''));
+  }
+  return crashCandidates(names);
+}
+
+// bug_type de travamento nos .ips: só os vistos em relatório real deste Mac. 309 = crash de processo (node, 21/10/2026).
+// Outro tipo só entra aqui com fixture real ao lado.
+const MAC_CRASH_TYPES = new Set(['309']);
+const DAY_MS = 24 * 60 * 60_000;
+const CRASH_FILES = 50;
+const CRASH_HEAD = 4096;
+
+/** Primeira linha de um .ips: um JSON com app_name e bug_type. Qualquer outra coisa = null. */
+export function parseIpsHeader(firstLine: string): { app: string; bugType: string } | null {
+  try {
+    const o = JSON.parse(firstLine) as { app_name?: unknown; name?: unknown; bug_type?: unknown } | null;
+    const app = typeof o?.app_name === 'string' && o.app_name ? o.app_name : o?.name;
+    if (typeof app !== 'string' || !app || typeof o?.bug_type !== 'string') return null;
+    return { app, bugType: o.bug_type };
+  } catch { return null; }
+}
+
+/** Formato antigo (.crash): linha "Process:   Nome [pid]". */
+export function parseCrashText(text: string): string | null {
+  const m = /^Process:\s+(.+?)\s+\[\d+\]\s*$/m.exec(text);
+  return m ? m[1]! : null;
+}
+
+/** Relatórios de até 24 h → um aviso por app. `file` com "/" (Retired/…) e extensões fora de .ips/.crash ficam de fora. */
+export function macCrashes(entries: { file: string; mtimeMs: number; head: string }[], now: number): Candidate[] {
+  const names: string[] = [];
+  for (const e of entries) {
+    if (e.file.includes('/') || now - e.mtimeMs > DAY_MS) continue;
+    let app: string | null = null;
+    if (e.file.endsWith('.ips')) {
+      const h = parseIpsHeader(e.head.split('\n')[0] ?? '');
+      if (h && MAC_CRASH_TYPES.has(h.bugType)) app = h.app;
+    } else if (e.file.endsWith('.crash')) app = parseCrashText(e.head);
+    const name = app === null ? '' : cleanName(app);
+    if (name) names.push(name);
+  }
+  return crashCandidates(names);
+}
+
+/** Lê os relatórios mais novos da pasta (só o nível de cima, sem `Retired`). Pasta ilegível = lança: os avisos ficam. */
+export async function readCrashEntries(dir: string, now: number): Promise<{ file: string; mtimeMs: number; head: string }[]> {
+  const found: { file: string; mtimeMs: number }[] = [];
+  for (const file of await readdir(dir)) {
+    if (!/\.(ips|crash)$/.test(file)) continue;
+    try {
+      const st = await stat(join(dir, file));
+      if (st.isFile() && now - st.mtimeMs <= DAY_MS) found.push({ file, mtimeMs: st.mtimeMs });
+    } catch { /* sumiu entre o readdir e o stat */ }
+  }
+  found.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const out: { file: string; mtimeMs: number; head: string }[] = [];
+  for (const f of found.slice(0, CRASH_FILES)) {
+    try {
+      const fh = await open(join(dir, f.file), 'r');
+      try {
+        const buf = Buffer.alloc(CRASH_HEAD);
+        const { bytesRead } = await fh.read(buf, 0, CRASH_HEAD, 0);
+        out.push({ ...f, head: buf.toString('utf8', 0, bytesRead) });
+      } finally { await fh.close(); }
+    } catch { /* arquivo ilegível: pula só ele */ }
+  }
+  return out;
+}
+
+export const defaultCrashDir = () => join(homedir(), 'Library', 'Logs', 'DiagnosticReports');
 
 const nf1 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
@@ -270,7 +349,13 @@ export function createWarnings(deps: WarningsDeps) {
       const disks = await disk();
       if (disks.length) apply('disco', disks.map(diskWarning));
     }),
-    crashes: job('crashes', async () => apply('travamento', parseCrashes(await ps(PS_CRASHES)))),
+    crashes: job('crashes', async () => {
+      if ((deps.platform ?? process.platform) === 'darwin') {
+        const t = now();
+        return apply('travamento', macCrashes(await readCrashEntries(deps.crashDir ?? defaultCrashDir(), t), t));
+      }
+      apply('travamento', parseCrashes(await ps(PS_CRASHES)));
+    }),
     antivirus: job('antivirus', async () => apply('antivirus', [avWarning(parseAv(await ps(PS_AV)))])),
   };
 
