@@ -426,23 +426,24 @@ func oneShot(_ mode: String) -> Never {
         oneShotOut(["pid": Int(me), "responsible": Int(r), "path": r > 0 ? path(of: r) : ""])
 
     case "--disclaim":
+        // 125 = disclaim indisponível (nada executado; distinto do 126/127 que um CLI pode devolver).
         // Executa `cmd args…` responsável por si mesmo: o assistente não herda o Acesso Total ao Disco do Folga.app.
         // Só TIRA a herança (o programa passa a responder pelas próprias permissões); nunca dá nada a ninguém.
-        // ponytail: API privada (a mesma do Chromium para os processos filhos); sem o símbolo, sai 126 sem
+        // ponytail: API privada (a mesma do Chromium para os processos filhos); sem o símbolo, sai 125 sem
         // executar nada (melhor o assistente não rodar no app do que rodar com o acesso dele). Some num macOS
         // futuro → o assistente para dentro do app até trocar por outra forma (ex.: lançar pelo launchd).
         let rest = Array(CommandLine.arguments.dropFirst(2))
-        guard let cmd = rest.first else { fputs("uso: probe-mac --disclaim <cmd> [args…]\n", stderr); exit(126) }
+        guard let cmd = rest.first else { fputs("uso: probe-mac --disclaim <cmd> [args…]\n", stderr); exit(125) }
         typealias SetDisclaim = @convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, Int32) -> Int32
         guard let sym = dlsym(dlopen(nil, RTLD_NOW), "responsibility_spawnattrs_setdisclaim") else {
-            fputs("probe-mac: responsibility_spawnattrs_setdisclaim ausente; nada executado\n", stderr); exit(126)
+            fputs("probe-mac: responsibility_spawnattrs_setdisclaim ausente; nada executado\n", stderr); exit(125)
         }
         var attr: posix_spawnattr_t?
         posix_spawnattr_init(&attr)
         // SETEXEC: troca a imagem deste processo (mesmo pid, mesmo stdio): o kill do Node acerta no programa final
         guard unsafeBitCast(sym, to: SetDisclaim.self)(&attr, 1) == 0,
               posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETEXEC)) == 0 else {
-            fputs("probe-mac: não deu para preparar o disclaim; nada executado\n", stderr); exit(126)
+            fputs("probe-mac: não deu para preparar o disclaim; nada executado\n", stderr); exit(125)
         }
         let argv = rest.map { strdup($0) } + [nil]
         let rc = posix_spawnp(nil, cmd, nil, &attr, argv, environ)

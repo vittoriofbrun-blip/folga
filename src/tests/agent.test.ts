@@ -6,7 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } fr
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentCwd, createAgent, disclaimed, DISCLAIM_FAIL, extractSuggestions, feed, killTree, newAcc, realLaunch, type Launch } from '../agent.ts';
+import { agentCwd, createAgent, disclaimed, DISCLAIM_FAIL, DISCLAIM_UNAVAILABLE, extractSuggestions, feed, killTree, newAcc, realLaunch, type Launch } from '../agent.ts';
 import type { AgentEvent, AgentProvider, Suggestion, SuggestionDraft } from '../types.ts';
 
 let n = 0;
@@ -483,20 +483,26 @@ await caso('disclaimed: só no Mac dentro do app; probe-mac --disclaim na frente
   assert.equal(d.cwd, l.cwd);
 });
 
-await caso('disclaim sem a API privada (sai 126): mensagem clara, nada roda com o acesso do app', async () => {
-  const s = setup({ disclaim: () => ({ cmd: process.execPath, args: ['-e', 'process.exit(126)'] }) });
-  await s.agent.send('claude', 'oi');
-  const ev = await s.fim();
-  assert.equal(ev.at(-1)?.type, 'error');
-  assert.equal((ev.at(-1) as { error: string }).error, DISCLAIM_FAIL);
+await caso('disclaim indisponível (sai 125) ou probe-mac ausente: mensagem fixa clara; 126 do próprio CLI não', async () => {
+  const via = (cmd: string, args: string[]) => () => ({ cmd, args });
+  const ultimo = async (disclaim: (l: Launch) => Launch) => {
+    const s = setup({ disclaim });
+    await s.agent.send('claude', 'oi');
+    const ev = await s.fim();
+    assert.equal(ev.at(-1)?.type, 'error');
+    return (ev.at(-1) as { error: string }).error;
+  };
   assert.match(DISCLAIM_FAIL, /não roda dentro do app Folga/);
-  // 126 de um CLI que não passou pelo disclaim continua a mensagem comum
-  const s2 = setup({ disclaim: l => l });
-  const fake126 = createAgent({ dataDir: s2.dataDir, port: 1, selfPids: new Set(), emit: () => {}, addSuggestion: async () => ({ erro: 'x', status: 500 }),
-    launch: () => ({ cmd: process.execPath, args: ['-e', 'process.exit(126)'] }), disclaim: l => l });
-  await fake126.send('claude', 'oi');
-  for (let i = 0; i < 50 && fake126.conversation().busy; i++) await sleep(100);
-  assert.equal(fake126.conversation().messages.at(-1)?.text, 'O Claude não respondeu agora. Tente de novo.');
+  assert.equal(DISCLAIM_UNAVAILABLE, 125);
+  assert.equal(await ultimo(via(process.execPath, ['-e', 'process.exit(125)'])), DISCLAIM_FAIL);
+  assert.equal(await ultimo(via(join(dir, 'nao-existe', 'probe-mac'), ['--disclaim', 'x'])), DISCLAIM_FAIL, 'ENOENT do probe-mac');
+  assert.equal(await ultimo(via(process.execPath, ['-e', 'process.exit(126)'])), 'O Claude não respondeu agora. Tente de novo.', '126 é do CLI');
+  // 125 de um CLI que não passou pelo disclaim continua a mensagem comum
+  const cru = createAgent({ dataDir: mkdtempSync(join(dir, 'cru-')), port: 1, selfPids: new Set(), emit: () => {}, addSuggestion: async () => ({ erro: 'x', status: 500 }),
+    launch: () => ({ cmd: process.execPath, args: ['-e', 'process.exit(125)'] }), disclaim: l => l });
+  await cru.send('claude', 'oi');
+  for (let i = 0; i < 50 && cru.conversation().busy; i++) await sleep(100);
+  assert.equal(cru.conversation().messages.at(-1)?.text, 'O Claude não respondeu agora. Tente de novo.');
 });
 
 await rm(dir, { recursive: true, force: true, maxRetries: 5 });

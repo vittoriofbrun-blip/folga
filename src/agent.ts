@@ -65,7 +65,9 @@ export function disclaimed(l: Launch, platform: NodeJS.Platform, insideApp: bool
   return { ...l, cmd: helper, args: ['--disclaim', l.cmd, ...l.args] };
 }
 const PROBE_MAC = join(import.meta.dirname, '..', 'probe', 'bin', 'probe-mac');
-/** probe-mac --disclaim sai 126 sem executar quando o macOS não tem a API: o assistente não roda no app (fail closed). */
+/** probe-mac --disclaim sai 125 sem executar quando o macOS não tem a API (e o probe-mac pode faltar no bundle): o assistente
+ *  não roda no app (fail closed). 125 é só do disclaim; um 126 do próprio CLI continua a mensagem comum. */
+export const DISCLAIM_UNAVAILABLE = 125;
 export const DISCLAIM_FAIL = 'O assistente não roda dentro do app Folga neste macOS: não deu para separar o acesso ao disco do app. Nada foi executado.';
 
 /** Comando real de cada provedor, com as flags exatas do spike (ADR 0006). */
@@ -342,11 +344,15 @@ export function createAgent(deps: AgentDeps) {
       if (acc.done && !closed) setTimeout(() => done(0), 200);   // resposta completa: fecha já
     });
     child.stderr.on('data', d => { if (stderr.length < 4000) stderr += String(d); });
-    child.on('error', e => { acc.error = acc.error ?? `não consegui iniciar o ${provider === 'claude' ? 'Claude' : 'Codex'}: ${(e as NodeJS.ErrnoException).code ?? 'erro'}`; done(null); });
+    child.on('error', e => {
+      if (l !== raw) acc.error = acc.error ?? DISCLAIM_FAIL;   // probe-mac fora do bundle: mesma mensagem fixa, não o ENOENT cru
+      acc.error = acc.error ?? `não consegui iniciar o ${provider === 'claude' ? 'Claude' : 'Codex'}: ${(e as NodeJS.ErrnoException).code ?? 'erro'}`;
+      done(null);
+    });
     // espera o stdout esvaziar um instante depois da saída (o readline pode ter linhas pendentes)
     child.on('exit', code => {
       turn.live = false;
-      if (code === 126 && l !== raw) acc.error = acc.error ?? DISCLAIM_FAIL;
+      if (code === DISCLAIM_UNAVAILABLE && l !== raw) acc.error = acc.error ?? DISCLAIM_FAIL;
       setTimeout(() => done(code), 300);
     });
   }

@@ -43,7 +43,7 @@ function writeAtomic(file: string, content: string) {
 const tokenFile = join(DATA_DIR, 'ui-token');
 let TOKEN = existsSync(tokenFile) ? readFileSync(tokenFile, 'utf8').trim() : '';
 if (TOKEN.length < 32) { TOKEN = randomBytes(32).toString('hex'); writeAtomic(tokenFile, TOKEN); }
-// agent-token: só do processo MCP do agente, novo a cada início, aceito apenas na varredura de arquivos (que só le).
+// agent-token: só do processo MCP do agente, novo a cada início, aceito apenas na varredura de arquivos (que só lê).
 // O ui-token também aprova sugestões; o agente nunca o vê.
 const AGENT_TOKEN = randomBytes(32).toString('hex');
 writeAtomic(join(DATA_DIR, 'agent-token'), AGENT_TOKEN);
@@ -56,7 +56,7 @@ let settingsProblem: string | null = null;    // R34: preenchido só quando havi
 function loadSettings(): Settings {
   try {
     // tira o BOM: editor ou PowerShell 5.1 gravando o arquivo o coloca, e aí o JSON.parse falha e os
-    // ajustes do usuário somem em silencio (visto num teste nosso em 2026-10-18)
+    // ajustes do usuário somem em silêncio (visto num teste nosso em 2026-10-18)
     // arquivo sem o campo é de antes do Mac: percentual, sem migração (spec)
     const r = mergeSettings({ ...DEFAULTS, autoCareTrigger: 'percent' }, JSON.parse(readFileSync(settingsFile, 'utf8').replace(/^﻿/, '')));
     if (typeof r === 'string') throw new Error(r);
@@ -311,7 +311,7 @@ const server = createServer(async (req, res) => {
       if (given !== TOKEN && !agentScan) return send(res, 403, { erro: 'token inválido' });
     }
 
-    if (method === 'GET' && path === '/api/token') return send(res, 200, { token: TOKEN });   // sem CORS: outro site não le
+    if (method === 'GET' && path === '/api/token') return send(res, 200, { token: TOKEN });   // sem CORS: outro site não lê
     if (method === 'GET' && path === '/api/state') return state ? send(res, 200, state) : send(res, 503, { erro: 'lendo…' });
     if (method === 'GET' && path === '/api/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
@@ -325,7 +325,7 @@ const server = createServer(async (req, res) => {
     if (method === 'PUT' && path === '/api/settings') {
       const merged = mergeSettings(settings, await readJson(req));
       if (typeof merged === 'string') return send(res, 400, { erro: merged });
-      // a sonda do Windows não le pressão de memória: o Auto Care por pressão nunca dispararia
+      // a sonda do Windows não lê pressão de memória: o Auto Care por pressão nunca dispararia
       if (process.platform === 'win32' && merged.autoCareTrigger === 'pressure') {
         return send(res, 400, { erro: 'Auto Care por pressão de memória só existe no Mac; no Windows use o percentual' });
       }
@@ -436,7 +436,7 @@ server.listen(PORT, '127.0.0.1', () => {
   if (IN_APP) void accessLine().then(l => console.log(`[${new Date().toISOString()}] ${l}`));
 });
 
-/** R32, dentro do app: quem o macOS cobra e quem le a Lixeira (o servidor sim, o assistente nunca). "assistente SIM" é bug. */
+/** R32, dentro do app: quem o macOS cobra e quem lê a Lixeira (o servidor sim, o assistente nunca). "assistente SIM" é bug. */
 async function accessLine(): Promise<string> {
   const probe = join(ROOT, 'probe', 'bin', 'probe-mac');
   const trash = join(homedir(), '.Trash');

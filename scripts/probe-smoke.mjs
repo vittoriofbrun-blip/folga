@@ -229,6 +229,9 @@ function disclaim() {
     if (j?.pid !== c.pid) fail(`--disclaim trocou de pid: lançado ${c.pid}, rodou ${j?.pid}`);
     const f = once(['--disclaim', '/usr/bin/false']);
     if (f.status !== 1) fail(`--disclaim não repassou o código de saída: ${f.status}`);
+    // 125 = disclaim indisponível/sem comando (nada executado); 127 = comando que não existe
+    if (once(['--disclaim']).status !== 125) fail('--disclaim sem comando não saiu 125');
+    if (once(['--disclaim', '/nao/existe/folga-x']).status !== 127) fail('--disclaim de comando inexistente não saiu 127');
     console.log(`responsabilidade: sonda → ${a.responsible} (${a.path.split('/').pop()}); --disclaim → ela mesma, pid igual, código repassado`);
     res();
   }));

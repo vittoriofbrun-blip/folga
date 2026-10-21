@@ -81,8 +81,10 @@ Spike de 2026-10-21 (macOS 26.5.1, LibreSSL 3.3.6 do sistema):
   `POSIX_SPAWN_SETEXEC` corta a responsabilidade: `--disclaim probe-mac --responsible` devolve
   `responsible == pid`, com o mesmo pid lançado pelo Node (o `kill` do turno acerta no CLI) e o código de saída
   repassado (`/usr/bin/false` → 1). O plano B (spawn + `waitpid` + repasse de sinais) não foi preciso.
-- **Fail closed:** sem o símbolo privado, `--disclaim` sai 126 sem executar; o chat mostra "O assistente não roda
-  dentro do app Folga neste macOS…" em vez de rodar o CLI com o acesso do app. Comando inexistente sai 127.
+- **Fail closed:** sem o símbolo privado (ou sem comando), `--disclaim` sai **125** sem executar; o chat mostra "O
+  assistente não roda dentro do app Folga neste macOS…" em vez de rodar o CLI com o acesso do app. O mesmo texto
+  fixo aparece se o `probe-mac` faltar no bundle (nunca o ENOENT cru). Comando inexistente sai 127. O 125 é só
+  do disclaim: um 126 devolvido pelo próprio CLI continua a mensagem comum.
 - **O que um chamador local consegue com `--disclaim`:** nada que já não tivesse. O modo só **retira** a herança
   de responsabilidade: o programa executado responde pelas próprias permissões do TCC, nunca pelas do Folga.app.
   Quem roda `probe-mac` de fora do app já é o responsável por ele; com `--disclaim`, o alvo passa a ser responsável
