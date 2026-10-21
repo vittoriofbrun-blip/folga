@@ -165,10 +165,10 @@ func resultadoLiberar(status: Int?, corpo: [String: Any]) -> (titulo: String, te
     : ("Nada voltou para a memória", "Os apps podem ter pedido para salvar ou continuam abertos.")
 }
 
-func statusText(memLoad: Int?, freeBytes: Int64?) -> String {
+/// Decisão 18: só a memória — "81% · 34 GB" ficava escondido atrás do notch.
+func statusText(memLoad: Int?) -> String {
   guard let m = memLoad else { return "Folga" }
-  guard let f = freeBytes else { return "\(m)%" }
-  return "\(m)% · \(Int((Double(f) / 1e9).rounded())) GB"
+  return "\(m)%"
 }
 
 /// Decisão 17: o Folga não pede Acesso Total ao Disco. Lixeira legível = alguém ligou a permissão mesmo assim, e o
@@ -306,7 +306,7 @@ func selftest() -> Int32 {
   caso("resultado: R08 depois − antes", resultadoLiberar(status: 200, corpo: ["availBefore": 1_000_000_000, "availAfter": 1_188_743_680]).titulo == "180\u{a0}MB liberados")
   caso("resultado: nada voltou", resultadoLiberar(status: 200, corpo: ["availBefore": 5, "availAfter": 5]).titulo == "Nada voltou para a memória")
   caso("resultado: 409 mostra o erro do servidor", resultadoLiberar(status: 409, corpo: ["erro": "app protegido"]).texto == "app protegido")
-  caso("statusText sem servidor → Folga", statusText(memLoad: nil, freeBytes: nil) == "Folga")
+  caso("statusText sem servidor → Folga", statusText(memLoad: nil) == "Folga")
   let semAcesso = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("folga-fda-\(getpid())")
   try? FileManager.default.createDirectory(at: semAcesso, withIntermediateDirectories: true)
   caso("hasFullDiskAccess: pasta legível → true (avisa)", hasFullDiskAccess(trash: semAcesso.path))
@@ -317,7 +317,7 @@ func selftest() -> Int32 {
   caso("hasFullDiskAccess: pasta inexistente → false (sem aviso)", !hasFullDiskAccess(trash: semAcesso.path))
   caso("aviso: manda desligar, sem link nem caminho dos Ajustes", avisoAcessoTotal.contains("desligue")
        && !avisoAcessoTotal.contains("Privacy") && !avisoAcessoTotal.contains("›") && !avisoAcessoTotal.contains("://"))
-  caso("statusText 62% · 39 GB", statusText(memLoad: 62, freeBytes: 39_000_000_000) == "62% · 39 GB")
+  caso("statusText só memória (decisão 18)", statusText(memLoad: 62) == "62%")
 
   print(falhas == 0 ? "selftest: ok" : "selftest: \(falhas) falha(s)")
   return falhas == 0 ? 0 : 1
@@ -359,6 +359,7 @@ final class Supervisor: NSObject, NSMenuDelegate {
 
   override init() {
     super.init()
+    item.autosaveName = "local.folga.app.status"   // decisão 18: posição do ⌘-arrastar lembrada
     item.button?.image = NSImage(systemSymbolName: "memorychip", accessibilityDescription: "Folga")
     item.button?.image?.isTemplate = true
     item.button?.imagePosition = .imageLeading
@@ -455,7 +456,7 @@ final class Supervisor: NSObject, NSMenuDelegate {
     item.button?.attributedTitle = NSAttributedString(string: " " + t, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)])
   }
 
-  /// memLoad do GET /api/state (o mesmo número da tela Início) e o disco livre do volume do HOME.
+  /// memLoad do GET /api/state (o mesmo número da tela Início).
   private func atualizarTexto() async {
     var mem: Int?
     var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/state")!)
@@ -464,9 +465,7 @@ final class Supervisor: NSObject, NSMenuDelegate {
        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
       mem = (obj["memLoad"] as? NSNumber)?.intValue
     }
-    let livre = (try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
-      .volumeAvailableCapacityForImportantUsage
-    titulo(statusText(memLoad: mem, freeBytes: livre))
+    titulo(statusText(memLoad: mem))
   }
 
   private func mostrar(_ texto: String) { estado.title = texto; logger.notice("\(texto, privacy: .public)") }   // o log do sistema guarda o que o menu mostrou

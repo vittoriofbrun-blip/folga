@@ -138,3 +138,4 @@ pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `
 - O `node` gravado no `folga.json` é o do build; trocar de Node pede rebuild.
 - As Tasks 5, 6 e 8 do plano 3 completam este ADR (Acesso Total ao Disco — desfeito pela decisão 17 —, assistente
   fora dele, avisos).
+- O texto da barra é só o ícone + memória (`81%`), sem disco: "81% · 34 GB" ficava atrás do notch (decisão 18); a posição do ícone persiste via `autosaveName`.
