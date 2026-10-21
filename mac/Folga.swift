@@ -98,6 +98,14 @@ func allowedURL(_ url: URL, port: Int) -> Bool {
 
 /// Texto da barra (decisão 13): memória usada · disco livre, "62% · 39 GB" (GB decimal, como o Finder).
 /// Sem servidor → "Folga".
+/// Falha de carga que é "servidor ainda subindo / caiu" (vale tentar de novo). Cancelamento pela nossa própria
+/// política (WebKitErrorDomain 102, NSURLErrorCancelled) e o resto não são: recarregar perderia a tela do usuário.
+func servidorFora(_ error: Error) -> Bool {
+  let e = error as NSError
+  return e.domain == NSURLErrorDomain
+    && [NSURLErrorCannotConnectToHost, NSURLErrorNetworkConnectionLost, NSURLErrorTimedOut, NSURLErrorCannotFindHost].contains(e.code)
+}
+
 func statusText(memLoad: Int?, freeBytes: Int64?) -> String {
   guard let m = memLoad else { return "Folga" }
   guard let f = freeBytes else { return "\(m)%" }
@@ -171,8 +179,15 @@ func selftest() -> Int32 {
     caso("allowedURL aceita \(ok)", allowedURL(URL(string: ok)!, port: porta))
   }
   for nao in ["http://localhost:4780/", "http://127.0.0.1:4781/", "https://127.0.0.1:4780/", "http://127.0.0.1.evil.com:4780/",
-              "http://evil.com/?h=127.0.0.1:4780", "file:///etc/hosts", "javascript:alert(1)", "about:blank", "data:text/html,x"] {
+              "http://evil.com/?h=127.0.0.1:4780", "file:///etc/hosts", "javascript:alert(1)", "about:blank", "data:text/html,x",
+              "http://127.0.0.1:4780@evil.com/", "http://u@127.0.0.1:4780/"] {
     caso("allowedURL recusa \(nao)", !allowedURL(URL(string: nao)!, port: porta))
+  }
+  for (dom, cod, esperado) in [(NSURLErrorDomain, NSURLErrorCannotConnectToHost, true), (NSURLErrorDomain, NSURLErrorNetworkConnectionLost, true),
+                                (NSURLErrorDomain, NSURLErrorTimedOut, true), (NSURLErrorDomain, NSURLErrorCannotFindHost, true),
+                                (NSURLErrorDomain, NSURLErrorCancelled, false), ("WebKitErrorDomain", 102, false),
+                                (NSURLErrorDomain, NSURLErrorBadURL, false)] {
+    caso("servidorFora(\(dom) \(cod)) = \(esperado)", servidorFora(NSError(domain: dom, code: cod)) == esperado)
   }
   caso("statusText sem servidor → Folga", statusText(memLoad: nil, freeBytes: nil) == "Folga")
   caso("statusText 62% · 39 GB", statusText(memLoad: 62, freeBytes: 39_000_000_000) == "62% · 39 GB")
@@ -333,6 +348,7 @@ final class Janela: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelega
   private var web: WKWebView?
   private var aviso: NSTextField?
   private var tentativas = 0
+  private var recargaAgendada = false
   private let inicio = URL(string: "http://127.0.0.1:\(port)/")!
 
   func abrir() {
@@ -385,7 +401,8 @@ final class Janela: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelega
   func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
     guard let url = action.request.url else { return .cancel }
     if allowedURL(url, port: port) { return .allow }
-    // link https clicado pelo usuário vai para o navegador padrão; redirecionamento ou script não abrem nada
+    // link https ativado vai para o navegador padrão; redirecionamento não abre nada. Limite conhecido: um
+    // `.click()` de script num link https também conta como linkActivated (abre o navegador, nunca a janela)
     if url.scheme == "https", action.navigationType == .linkActivated { NSWorkspace.shared.open(url) }
     return .cancel
   }
@@ -393,16 +410,23 @@ final class Janela: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelega
   func webView(_ webView: WKWebView, createWebViewWith c: WKWebViewConfiguration, for a: WKNavigationAction,
                windowFeatures f: WKWindowFeatures) -> WKWebView? { nil }
 
-  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { aviso?.isHidden = true }
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    aviso?.isHidden = true
+    tentativas = 0
+  }
 
-  // servidor ainda subindo: "Abrindo…" e nova tentativa a cada 1 s, por até 20 s
+  // servidor ainda subindo (ou caiu): "Abrindo…" e nova tentativa a cada 1 s, por até 20 s; uma recarga agendada por vez
   func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+    guard servidorFora(error), !recargaAgendada else { return }
+    aviso?.stringValue = "Abrindo…"
     aviso?.isHidden = false
     tentativas += 1
     guard tentativas <= 20 else { aviso?.stringValue = "O Folga não respondeu. Feche e abra de novo."; return }
+    recargaAgendada = true
     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-      guard let self, let web = self.web else { return }
-      web.load(URLRequest(url: self.inicio))
+      guard let self else { return }
+      self.recargaAgendada = false
+      self.web?.load(URLRequest(url: self.inicio))
     }
   }
 }
