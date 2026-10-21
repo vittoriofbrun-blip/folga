@@ -2,7 +2,7 @@
 // O texto NUNCA entra no script: vai por variável de ambiente, e o script o escapa para XML. Assim um nome
 // de app ou de arquivo não vira comando (mesma ideia da R24).
 import { spawn } from 'node:child_process';
-import { isAbsolute, join } from 'node:path';
+import { join, posix } from 'node:path';
 
 const PS = () => join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 // AppId do próprio PowerShell: é o único jeito de tocar um toast sem instalar/registrar um app.
@@ -31,7 +31,7 @@ const OSA = '/usr/bin/osascript';
 export function notifyCommand(platform: string, vars: Record<string, string | undefined>): { cmd: string; args: string[] } | null {
   if (platform !== 'darwin') return null;
   const app = vars.FOLGA_APP_PATH ?? '';
-  if (vars.FOLGA_APP === '1' && isAbsolute(app) && app.endsWith('.app')) return { cmd: join(app, 'Contents', 'MacOS', 'Folga'), args: ['--notify'] };
+  if (vars.FOLGA_APP === '1' && posix.isAbsolute(app) && app.endsWith('.app')) return { cmd: posix.join(app, 'Contents', 'MacOS', 'Folga'), args: ['--notify'] };
   return osa();
 }
 const osa = () => ({ cmd: OSA, args: ['-e', 'display notification (system attribute "FOLGA_TOAST_BODY") with title (system attribute "FOLGA_TOAST_TITLE")'] });
