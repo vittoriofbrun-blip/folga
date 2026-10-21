@@ -177,6 +177,16 @@ func discoLivreTexto(_ bytes: Int64?) -> String {
   return "Disco livre: \(Int((Double(b) / 1e9).rounded())) GB"
 }
 
+/// "2 avisos" do menu: só os ativos; em "só críticos" (R27, mesma regra do selo da tela) só os críticos.
+/// Item sem severity conhecida não conta. Zero → nil (o item some).
+func avisosTexto(_ lista: [[String: Any]], soCriticos: Bool) -> String? {
+  let n = lista.filter { w in
+    guard w["active"] as? Bool == true, let sev = w["severity"] as? String, ["critico", "atencao", "info"].contains(sev) else { return false }
+    return !soCriticos || sev == "critico"
+  }.count
+  return n == 0 ? nil : n == 1 ? "1 aviso" : "\(n) avisos"
+}
+
 /// Decisão 17: o Folga não pede Acesso Total ao Disco. Lixeira legível = alguém ligou a permissão mesmo assim, e o
 /// menu avisa para desligar. Só abrir de verdade conta: pasta negada, inexistente ou outro erro → false (sem aviso).
 func hasFullDiskAccess(trash: String = homeDir() + "/.Trash") -> Bool {
@@ -291,7 +301,16 @@ func selftest() -> Int32 {
   caso("childEnv: PATH resolvido dentro do bundle", env["PATH"] == "/A/Folga.app/Contents/Resources/folga/bin:/usr/bin")
   caso("childEnv: FOLGA_APP=1 e FOLGA_APP_PATH", env["FOLGA_APP"] == "1" && env["FOLGA_APP_PATH"] == "/A/Folga.app")
 
+  let ativo: (String?, Bool) -> [String: Any] = { sev, on in sev == nil ? ["active": on] : ["severity": sev!, "active": on] }
+  caso("avisosTexto: lista vazia → nil", avisosTexto([], soCriticos: false) == nil)
+  caso("avisosTexto: um atencao → 1 aviso", avisosTexto([ativo("atencao", true)], soCriticos: false) == "1 aviso")
+  caso("avisosTexto: dois ativos + um inativo → 2 avisos", avisosTexto([ativo("atencao", true), ativo("critico", true), ativo("critico", false)], soCriticos: false) == "2 avisos")
+  caso("avisosTexto: soCriticos e só atencao → nil", avisosTexto([ativo("atencao", true)], soCriticos: true) == nil)
+  caso("avisosTexto: soCriticos conta o critico", avisosTexto([ativo("atencao", true), ativo("critico", true)], soCriticos: true) == "1 aviso")
+  caso("avisosTexto: sem severity não conta", avisosTexto([ativo(nil, true)], soCriticos: false) == nil)
+
   let porta = 4780
+  caso("allowedURL aceita /#avisos", allowedURL(URL(string: "http://127.0.0.1:4780/#avisos")!, port: porta))
   for ok in ["http://127.0.0.1:4780/", "http://127.0.0.1:4780/#/arquivos", "http://127.0.0.1:4780/assets/x.js"] {
     caso("allowedURL aceita \(ok)", allowedURL(URL(string: ok)!, port: porta))
   }
@@ -392,6 +411,7 @@ final class Supervisor: NSObject, NSMenuDelegate {
   private let disco = NSMenuItem(title: "Disco livre: —", action: nil, keyEquivalent: "")
   private let acessoTotal = NSMenuItem(title: avisoAcessoTotal, action: nil, keyEquivalent: "")   // só texto, decisão 17
   private let notificacoes = NSMenuItem(title: avisoNotificacoes, action: nil, keyEquivalent: "")   // só texto
+  private let avisos = NSMenuItem(title: "", action: #selector(abrirAvisos), keyEquivalent: "")
   var aoAbrirJanela: (() -> Void)?
   private var relogio: Timer?
   private let sessao = URLSession(configuration: .ephemeral)
@@ -418,9 +438,11 @@ final class Supervisor: NSObject, NSMenuDelegate {
     acessoTotal.isHidden = !hasFullDiskAccess()
     notificacoes.isEnabled = false
     notificacoes.isHidden = true
+    avisos.target = self
+    avisos.isHidden = true
     atualizarNotificacoes()
     menu.delegate = self
-    for i in [disco, .separator(), abrir, liberar, .separator(), acessoTotal, notificacoes, estado, tentar, .separator(), sair] { menu.addItem(i) }
+    for i in [avisos, disco, .separator(), abrir, liberar, .separator(), acessoTotal, notificacoes, estado, tentar, .separator(), sair] { menu.addItem(i) }
     item.menu = menu
     relogio = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in Task { @MainActor in await self.atualizarTexto() } }
     Task { await atualizarTexto() }
@@ -441,6 +463,11 @@ final class Supervisor: NSObject, NSMenuDelegate {
 
   @objc func abrirJanela() {
     janela.abrir()
+    aoAbrirJanela?()
+  }
+
+  @objc private func abrirAvisos() {
+    janela.abrir(vista: "avisos")
     aoAbrirJanela?()
   }
 
@@ -523,13 +550,25 @@ final class Supervisor: NSObject, NSMenuDelegate {
   /// memLoad do GET /api/state (o mesmo número da tela Início).
   private func atualizarTexto() async {
     var mem: Int?
+    var soCriticos = false
     var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/state")!)
     req.timeoutInterval = 3
     if let (data, resp) = try? await sessao.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200,
        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
       mem = (obj["memLoad"] as? NSNumber)?.intValue
+      soCriticos = ((obj["settings"] as? [String: Any])?["warningsLevel"] as? String) == "criticos"
     }
     titulo(statusText(memLoad: mem))
+    // servidor fora ou resposta ruim → item escondido (não "0 avisos")
+    var rw = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/warnings")!)
+    rw.timeoutInterval = 3
+    var texto: String?
+    if let (data, resp) = try? await sessao.data(for: rw), (resp as? HTTPURLResponse)?.statusCode == 200,
+       let lista = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+      texto = avisosTexto(lista, soCriticos: soCriticos)
+    }
+    avisos.title = texto ?? ""
+    avisos.isHidden = texto == nil
   }
 
   private func mostrar(_ texto: String) { estado.title = texto; logger.notice("\(texto, privacy: .public)") }   // o log do sistema guarda o que o menu mostrou
@@ -614,14 +653,21 @@ final class Janela: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelega
   private var tentativas = 0
   private var recargaAgendada = false
   private let inicio = URL(string: "http://127.0.0.1:\(port)/")!
+  private var alvoAtual: URL?   // a recarga de "servidor subindo" volta para o mesmo alvo (#avisos incluído)
 
-  func abrir() {
-    if window == nil { criar() }
+  /// `vista` ("avisos") vira o fragmento `#avisos`; sem janela, ela nasce já nela; com janela aberta, só troca o fragmento
+  /// (a página escuta hashchange, sem recarregar nem passar por ponte).
+  func abrir(vista: String? = nil) {
+    let alvo = vista.flatMap { URL(string: "http://127.0.0.1:\(port)/#\($0)") } ?? inicio
+    if window == nil { criar(alvo) } else if vista != nil {
+      // passa por um hash neutro: a barra lateral troca de tela sem mexer no hash, e repetir o mesmo hash não dispara hashchange
+      web?.evaluateJavaScript("location.hash = '_'; location.hash = '\(vista!)'")
+    }
     NSApp.activate(ignoringOtherApps: true)
     window?.makeKeyAndOrderFront(nil)
   }
 
-  private func criar() {
+  private func criar(_ alvo: URL) {
     let cfg = WKWebViewConfiguration()
     cfg.websiteDataStore = .nonPersistent()   // nada de cache nem do token em disco
     cfg.userContentController = WKUserContentController()
@@ -647,7 +693,8 @@ final class Janela: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelega
     self.web = web
     self.aviso = aviso
     tentativas = 0
-    web.load(URLRequest(url: inicio))
+    alvoAtual = alvo
+    web.load(URLRequest(url: alvo))
   }
 
   // Fechar destrói a janela e o WKWebView: o processo de conteúdo do WebKit sai (pegada em segundo plano, Task 9).
@@ -690,7 +737,7 @@ final class Janela: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelega
     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
       guard let self else { return }
       self.recargaAgendada = false
-      self.web?.load(URLRequest(url: self.inicio))
+      self.web?.load(URLRequest(url: self.alvoAtual ?? self.inicio))
     }
   }
 }
