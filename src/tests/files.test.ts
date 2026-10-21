@@ -504,8 +504,15 @@ try {
       assert.deepEqual([lx.unknown, lx.bytes, lx.files, lx.note, lx.label], [true, 0, 0, FDA_NOTE, 'Lixeira']);
     }
     assert.match(FDA_NOTE, /app Folga/); assert.doesNotMatch(FDA_NOTE, /node|Terminal/i);
-    const fontes = execFileSync('git', ['grep', '-l', '-i', '-E', 'Privacy_AllFiles|Acesso Total ao Disco', '--', 'src', 'web/src', 'scripts', ':!src/tests/files.test.ts'], { encoding: 'utf8', cwd: join(import.meta.dirname, '..', '..') }).trim().split('\n').filter(Boolean);
-    for (const f of fontes) assert.doesNotMatch(readFileSync(f, 'utf8'), /(Privacy_AllFiles|Acesso Total ao Disco)[^\n]{0,160}(\bnode\b|Terminal|execPath)/i, f);
+    const repo = join(import.meta.dirname, '..', '..');
+    const fontes = execFileSync('git', ['grep', '-l', '-i', '-E', 'Privacy_AllFiles|Acesso Total ao Disco', '--', 'src', 'web/src', 'scripts', 'probe', ':!src/tests/files.test.ts'], { encoding: 'utf8', cwd: repo }).trim().split('\n').filter(Boolean);
+    assert.ok(fontes.length > 0, 'a busca não achou fonte nenhuma: o pino não está olhando nada');
+    for (const f of fontes) {
+      const txt = readFileSync(join(repo, f), 'utf8');
+      assert.doesNotMatch(txt, /(Privacy_AllFiles|Acesso Total ao Disco)[^\n]{0,160}(\bnode\b|Terminal|execPath)/i, f);
+      // M3: até o Folga.app existir (plano 3), nenhuma tela ensina o caminho nos Ajustes: o usuário daria ao Terminal/node
+      assert.doesNotMatch(txt, /Ajustes do Sistema[^\n]{0,160}Acesso Total ao Disco/i, f);
+    }
     ok(`Lixeira ilegível = desconhecida (não 0); nenhum texto manda dar Acesso Total ao Disco ao node (${fontes.length} fontes)`);
   }
 

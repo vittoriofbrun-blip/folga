@@ -327,7 +327,6 @@ export function Arquivos({ state }: { state: MemoryState | null }) {
                     <span className="arq-cat-note">
                       {i.unknown ? '' : plural(i.files, 'arquivo', 'arquivos')}
                       {i.note ? `${i.unknown ? '' : ' · '}${i.note}` : ''}
-                      {i.unknown && ' Fica em Ajustes do Sistema › Privacidade e Segurança › Acesso Total ao Disco.'}
                     </span>
                   </li>
                 ))}

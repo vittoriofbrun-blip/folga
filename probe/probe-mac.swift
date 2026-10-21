@@ -393,8 +393,8 @@ func oneShot(_ mode: String) -> Never {
 
     case "--size":
         // Soma alocada, sem seguir link. É por aqui que a Lixeira e o cache do Safari são medidos: quando o
-        // Folga.app (plano 3) tiver o Acesso Total ao Disco, o macOS atribui a leitura a ele, e o node nunca
-        // precisa da permissão.
+        // Folga.app (plano 3) tiver o Acesso Total ao Disco, o macOS atribui a leitura a ele; a permissão nunca
+        // vai para o processo do servidor.
         guard let root = readInput() as? String, !root.isEmpty else { oneShotInvalid() }
         guard let dir = opendir(root) else {
             if errno == EPERM || errno == EACCES { oneShotOut(["bytes": 0, "files": 0, "denied": true]) }
