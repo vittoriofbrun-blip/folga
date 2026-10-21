@@ -171,6 +171,12 @@ func statusText(memLoad: Int?) -> String {
   return "\(m)%"
 }
 
+/// Decisão 18: o disco livre mora no menu (aberto ao clicar), não no título.
+func discoLivreTexto(_ bytes: Int64?) -> String {
+  guard let b = bytes else { return "Disco livre: —" }
+  return "Disco livre: \(Int((Double(b) / 1e9).rounded())) GB"
+}
+
 /// Decisão 17: o Folga não pede Acesso Total ao Disco. Lixeira legível = alguém ligou a permissão mesmo assim, e o
 /// menu avisa para desligar. Só abrir de verdade conta: pasta negada, inexistente ou outro erro → false (sem aviso).
 func hasFullDiskAccess(trash: String = homeDir() + "/.Trash") -> Bool {
@@ -317,6 +323,8 @@ func selftest() -> Int32 {
   caso("hasFullDiskAccess: pasta inexistente → false (sem aviso)", !hasFullDiskAccess(trash: semAcesso.path))
   caso("aviso: manda desligar, sem link nem caminho dos Ajustes", avisoAcessoTotal.contains("desligue")
        && !avisoAcessoTotal.contains("Privacy") && !avisoAcessoTotal.contains("›") && !avisoAcessoTotal.contains("://"))
+  caso("disco livre: 39 GB", discoLivreTexto(39_000_000_000) == "Disco livre: 39 GB")
+  caso("disco livre: ilegível → —", discoLivreTexto(nil) == "Disco livre: —")
   caso("statusText só memória (decisão 18)", statusText(memLoad: 62) == "62%")
 
   print(falhas == 0 ? "selftest: ok" : "selftest: \(falhas) falha(s)")
@@ -353,6 +361,7 @@ final class Supervisor: NSObject, NSMenuDelegate {
 
   private let janela = Janela()
   private let liberar = NSMenuItem(title: "Liberar parados…", action: #selector(liberarParados), keyEquivalent: "")
+  private let disco = NSMenuItem(title: "Disco livre: —", action: nil, keyEquivalent: "")
   private let acessoTotal = NSMenuItem(title: avisoAcessoTotal, action: nil, keyEquivalent: "")   // só texto, decisão 17
   private var relogio: Timer?
   private let sessao = URLSession(configuration: .ephemeral)
@@ -367,6 +376,7 @@ final class Supervisor: NSObject, NSMenuDelegate {
     let menu = NSMenu()
     menu.autoenablesItems = false
     estado.isEnabled = false
+    disco.isEnabled = false
     tentar.target = self
     tentar.isHidden = true
     let sair = NSMenuItem(title: "Sair", action: #selector(sairDoApp), keyEquivalent: "q")
@@ -377,7 +387,7 @@ final class Supervisor: NSObject, NSMenuDelegate {
     acessoTotal.isEnabled = false
     acessoTotal.isHidden = !hasFullDiskAccess()
     menu.delegate = self
-    for i in [abrir, liberar, .separator(), acessoTotal, estado, tentar, .separator(), sair] { menu.addItem(i) }
+    for i in [disco, .separator(), abrir, liberar, .separator(), acessoTotal, estado, tentar, .separator(), sair] { menu.addItem(i) }
     item.menu = menu
     relogio = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in Task { @MainActor in await self.atualizarTexto() } }
     Task { await atualizarTexto() }
@@ -386,7 +396,11 @@ final class Supervisor: NSObject, NSMenuDelegate {
   @objc func abrirJanela() { janela.abrir() }
 
   /// Reavaliado a cada abertura do menu: desligada a permissão, o aviso some sozinho.
-  func menuNeedsUpdate(_ menu: NSMenu) { acessoTotal.isHidden = !hasFullDiskAccess() }
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    acessoTotal.isHidden = !hasFullDiskAccess()
+    disco.title = discoLivreTexto((try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
+      .volumeAvailableCapacityForImportantUsage)
+  }
 
   @objc private func liberarParados() {
     guard liberar.isEnabled else { return }
