@@ -477,7 +477,7 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   assert.equal(by.d?.enabled, true);
   assert.equal(by.a?.command, join(ua, 'a.plist'));
   assert.deepEqual(apps.map(a => a.name).sort(), ['$(rm -rf ~)', 'a', 'b', 'c', 'd'].sort(), 'bak, _aposentados e .DS_Store fora; nome estranho vira texto');
-  assert.deepEqual(calls, [['/bin/launchctl', 'print', `gui/${process.getuid!()}`], ['/bin/launchctl', 'print', 'system']]);
+  assert.deepEqual(calls, [['/bin/launchctl', 'print', `gui/${(process.getuid?.() ?? 501)}`], ['/bin/launchctl', 'print', 'system']]);
   await assert.rejects(mkRig(true).startupApps(), 'launchctl falhou: não inventa estado');
   await rm(base, { recursive: true });
   ok('itens do Mac: launchctl print (só leitura, sem nome de plist em argv), ativo/desativado, lixo fora, falha rejeita');
