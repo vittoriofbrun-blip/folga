@@ -24,13 +24,14 @@ try {
     file(join(claudeDir, 'claude-code', '2.0.9', 'claude'));
     file(join(claudeDir, 'claude-code', '2.0.14', 'claude'));
     file(join(claudeDir, 'Local Storage', 'leveldb', '000.log'));
-    for (const b of ['com.spotify.client', 'com.google.chrome', 'com.google.Chrome.ShipIt', 'com.apple.Safari', 'pip']) file(join(caches, b, 'x'));
+    for (const b of ['com.spotify.client', 'com.google.chrome', 'com.google.Chrome.ShipIt', 'notion.id.ShipIt', 'com.onevcat.Kingfisher.ImageCache.default', 'com.apple.Safari', 'pip']) file(join(caches, b, 'x'));
     mkdirSync(containers, { recursive: true }); mkdirSync(groupContainers, { recursive: true });
     const user = file(join(fora, 'conversa.json'), 10);
     const isca = tryLink(user, join(claudeDir, 'Cache', 'isca'));   // link dentro do cache para arquivo do usuário
 
-    let running: ReadonlySet<string> | null = new Set(['com.google.chrome']);
-    const ad = createAppData({ platform: 'darwin', bases: { appSupport, caches, containers, groupContainers }, runningKeys: () => running });
+    let running: ReadonlySet<string> | null = new Set(['com.google.chrome', 'notion.id']);
+    const installedIds = async () => new Set(['com.spotify.client', 'com.google.chrome', 'notion.id']);
+    const ad = createAppData({ platform: 'darwin', bases: { appSupport, caches, containers, groupContainers }, runningKeys: () => running, installedIds });
     const s = await ad.preview();
     const ids = s.entries.flatMap(e => e.items.filter(i => i.actionable).map(i => i.id)).sort();
     assert.deepEqual(ids, ['caches:com.spotify.client', 'claude:Cache', 'claude:GPUCache', 'claude:claude-code/2.0.9']);
@@ -40,6 +41,9 @@ try {
     assert.ok(!s.entries.some(e => e.items.some(i => /vm_bundles|Local Storage|com\.apple|pip|2\.0\.14/.test(i.id))));
     const chrome = s.entries.find(e => e.name === 'com.google.chrome')!;
     assert.ok(chrome.items.length === 1 && !chrome.items[0]!.actionable && /aberto/.test(chrome.items[0]!.note ?? ''));
+    const item = (n: string) => s.entries.find(e => e.name === n)!.items[0]!;
+    assert.ok(!item('notion.id.ShipIt').actionable && /aberto/.test(item('notion.id.ShipIt').note ?? ''), 'ShipIt de id de 2 partes é do notion.id');
+    assert.ok(!item('com.onevcat.Kingfisher.ImageCache.default').actionable && /sem app identificado/.test(item('com.onevcat.Kingfisher.ImageCache.default').note ?? ''));
     assert.ok(s.entries.find(e => e.name === 'pip')!.notes.some(n => /Sem cache reconhecido/.test(n.text)));
     assert.equal(s.totalBytes, s.entries.reduce((a, e) => a + e.bytes, 0));
 
@@ -82,10 +86,24 @@ try {
     const root4 = join(tmp, 'mac-corrida'), cs4 = join(root4, 'Caches');
     file(join(cs4, 'com.spotify.client', 'x'));
     let calls = 0;
-    const ad4 = createAppData({ platform: 'darwin', bases: { caches: cs4 }, runningKeys: () => (calls++ ? new Set(['com.spotify.client']) : new Set()) });
+    const ad4 = createAppData({ platform: 'darwin', bases: { caches: cs4 }, installedIds, runningKeys: () => (calls++ ? new Set(['com.spotify.client']) : new Set()) });
     assert.equal((await ad4.clean(['caches:com.spotify.client'])).skipped, 1);
     assert.ok(existsSync(join(cs4, 'com.spotify.client', 'x')));
     console.log('ok  dono aberto na hora do rm: nada some');
+
+    // sem lista de apps instalados: nada do Caches é limpável
+    const ad5 = createAppData({ platform: 'darwin', bases: { caches: cs4 }, installedIds: async () => null, runningKeys: () => new Set() });
+    assert.ok((await ad5.preview()).entries.every(e => e.items.every(i => !i.actionable)));
+    assert.equal((await ad5.clean(['caches:com.spotify.client'])).skipped, 1);
+
+    // medição do alvo cortada pelo orçamento: não apaga
+    for (const f of ['a', 'b', 'c']) file(join(cs4, 'com.spotify.client', f));
+    const ad6 = createAppData({ platform: 'darwin', bases: { caches: cs4 }, installedIds, runningKeys: () => new Set(), maxEntries: 1 });
+    assert.equal((await ad6.clean(['caches:com.spotify.client'])).skipped, 1);
+    assert.ok(existsSync(join(cs4, 'com.spotify.client', 'a')));
+    const ok7 = await createAppData({ platform: 'darwin', bases: { caches: cs4 }, installedIds, runningKeys: () => new Set() }).clean(['caches:com.spotify.client']);
+    assert.ok(ok7.files === 4 && ok7.bytes > 0 && !existsSync(join(cs4, 'com.spotify.client')));
+    console.log('ok  caches: só app instalado e fechado; medição cortada não apaga');
   }
 
   // --- Windows (plataforma injetada) ---
@@ -96,6 +114,8 @@ try {
     for (const d of ['Cache', 'Code Cache', 'GPUCache']) file(join(ud, 'Default', d, 'f'));
     file(join(ud, 'Profile 2', 'GPUCache', 'f'));
     file(join(ud, 'Estranho', 'GPUCache', 'f'));            // não é perfil
+    file(join(root, 'perfil-fora', 'GPUCache', 'f'));
+    tryLink(join(root, 'perfil-fora'), join(ud, 'Profile 3'), 'junction');   // perfil que é link: nada
     file(join(roamingAppData, 'Claude', 'Cache', 'f'));
     file(join(roamingAppData, 'Claude', 'claude-code', '1.0.0', 'x'));
     file(join(roamingAppData, 'Claude', 'claude-code', '1.0.1', 'x'));
@@ -113,7 +133,7 @@ try {
   }
 
   assert.equal(newestVersion(['2.0.9', '2.0.14', '2.0.10']), '2.0.14'); assert.equal(newestVersion(['2.0.9', 'latest']), null);
-  assert.equal(newestVersion([]), null);
+  assert.equal(newestVersion([]), null); assert.equal(newestVersion(['2.0', '2.0.0']), null);
   console.log('ok  newestVersion');
 } finally {
   await rm(tmp, { recursive: true, force: true });

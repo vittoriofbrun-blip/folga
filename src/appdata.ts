@@ -2,6 +2,7 @@
 // CACHE_RULES produz, de app fechado (allowlist, R22). O resto aparece com tamanho e "o Folga não limpa".
 // Segurança: o id que chega no clean nunca vira caminho; os alvos são recalculados das regras e de nomes lidos
 // do disco, link nunca é seguido (o rm do Node apaga o link, não o alvo) e o dono é reconferido antes de cada rm.
+import { spawn } from 'node:child_process';
 import type { Stats } from 'node:fs';
 import { lstat, readdir, realpath, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -42,8 +43,9 @@ const WHERE: Record<AppDataBase, string> = {
   localAppData: 'AppData Local', roamingAppData: 'AppData Roaming',
 };
 const PROFILE = /^(Default|Profile \d+|Guest Profile|System Profile)$/;
-const BUNDLE_ID = /^[a-z0-9-]+(\.[a-z0-9-]+){2,}$/i;
+const BUNDLE_ID = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;   // o que decide é casar com app instalado (installedIds)
 const NO_CACHE = 'Sem cache reconhecido: o Folga não limpa.';
+const NO_APP = 'Cache sem app identificado: o Folga não limpa.';
 
 /** Maior versão numérica (por parte); null se a lista for vazia ou algum nome não for versão. */
 export function newestVersion(names: readonly string[]): string | null {
@@ -53,7 +55,29 @@ export function newestVersion(names: readonly string[]): string | null {
     for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) - (y[i] ?? 0);
     return 0;
   };
-  return names.reduce((a, b) => (cmp(b, a) > 0 ? b : a));
+  const top = names.reduce((a, b) => (cmp(b, a) > 0 ? b : a));
+  return names.filter(n => cmp(n, top) === 0).length > 1 ? null : top;   // 2.0 e 2.0.0: empate, nada oferecido
+}
+
+/** Bundle ids (minúsculos) dos .app instalados, numa chamada só do mdls. Falha → null (nada do Caches é limpável). */
+async function mdlsInstalledIds(): Promise<ReadonlySet<string> | null> {
+  const dirs = ['/Applications', '/Applications/Utilities', join(homedir(), 'Applications')];
+  const apps = (await Promise.all(dirs.map(async d => (await childDirs(d)).filter(n => n.endsWith('.app')).map(n => join(d, n))))).flat();
+  if (!apps.length) return null;
+  return new Promise(res => {
+    // shell:false e caminho absoluto; com -raw e vários arquivos, a saída vem separada por NUL
+    const c = spawn('/usr/bin/mdls', ['-raw', '-name', 'kMDItemCFBundleIdentifier', ...apps], { shell: false, stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    const timer = setTimeout(() => c.kill(), 20_000);
+    c.stdout.setEncoding('utf8');
+    c.stdout.on('data', d => { out += d; });
+    c.on('error', () => { clearTimeout(timer); res(null); });
+    c.on('close', code => {
+      clearTimeout(timer);
+      if (code !== 0) return res(null);
+      res(new Set(out.split('\0').map(x => x.trim().toLowerCase()).filter(x => x && x !== '(null)')));
+    });
+  });
 }
 
 /** Pasta de verdade: não é link, e o caminho montado é o próprio caminho real (nenhum pedaço dele é link). */
@@ -65,14 +89,31 @@ async function childDirs(p: string) {
   try { return (await readdir(p, { withFileTypes: true })).filter(d => d.isDirectory()).map(d => d.name); } catch { return []; }
 }
 
-type Target = AppDataItem & { owners: string[]; app: string; entry: string };
+type Target = AppDataItem & { owners: string[]; app: string; entry: string; needsApp: boolean };
 
 export function createAppData(deps: {
   platform?: NodeJS.Platform; bases?: Partial<Record<AppDataBase, string>>;
   runningKeys: () => ReadonlySet<string> | null; now?: () => number; maxEntries?: number; maxMs?: number;
+  installedIds?: () => Promise<ReadonlySet<string> | null>;
 }) {
   const platform = deps.platform ?? process.platform;
   const now = deps.now ?? Date.now;
+  const maxEntries = deps.maxEntries ?? 500_000, maxMs = deps.maxMs ?? 60_000;
+  // cache de 10 min dos apps instalados (Caches no Mac só é limpável se a pasta casar com um deles)
+  let inst: { at: number; p: Promise<ReadonlySet<string> | null> } | null = null;
+  function installed() {
+    if (!inst || now() - inst.at > 10 * 60_000) {
+      inst = { at: now(), p: deps.installedIds ? deps.installedIds() : process.platform === 'darwin' ? mdlsInstalledIds() : Promise.resolve(null) };
+    }
+    return inst.p;
+  }
+  /** Acionável? Dono fechado e, no Caches, pasta (ou prefixo de 2+ partes) = bundle id de app instalado. Senão, a nota. */
+  function judge(t: Target, keys: ReadonlySet<string> | null, apps: ReadonlySet<string> | null): string | null {
+    if (t.needsApp && !t.owners.some(o => apps?.has(o))) return NO_APP;
+    if (keys === null) return 'Ainda lendo os apps abertos: tente de novo';
+    if (t.owners.some(o => keys.has(o))) return `${t.app} aberto: feche para limpar`;
+    return null;
+  }
   // ponytail: alocado, como o du; clone do APFS conta nas duas cópias
   const bytesOf = (st: Stats) => (process.platform === 'win32' ? st.size : st.blocks * 512);
 
@@ -97,12 +138,12 @@ export function createAppData(deps: {
   /** Alvos que as regras produzem nesta máquina. Caminho = base real + dir da regra + nomes lidos do disco. */
   async function targets(bases: Map<AppDataBase, string>): Promise<Target[]> {
     const out: Target[] = [];
-    const add = async (rule: CacheRule, b: string, rel: string[], owners: string[], app: string) => {
+    const add = async (rule: CacheRule, b: string, rel: string[], owners: string[], app: string, needsApp = false) => {
       const path = join(b, ...(rule.dir === '*' ? [] : rule.dir.split('/')), ...rel);
       if (!await isRealDir(path)) return;
       out.push({
         id: `${rule.id}:${rel.join('/')}`, label: `${app}: ${rel.join('/')}`, path, bytes: 0, files: 0, actionable: false,
-        owners, app, entry: `${rule.base}:${rule.dir === '*' ? rel[0] : rule.dir.split('/')[0]}`,
+        owners, app, needsApp, entry: `${rule.base}:${rule.dir === '*' ? rel[0] : rule.dir.split('/')[0]}`,
       });
     };
     for (const rule of CACHE_RULES) {
@@ -110,10 +151,10 @@ export function createAppData(deps: {
       if (rule.os !== platform || !b) continue;
       if (rule.dir === '*') {
         for (const n of await childDirs(b)) {
-          // dono = a pasta e cada prefixo de bundle id dela: com.x.app.ShipIt é do com.x.app
+          // dono = a pasta e cada prefixo de 2+ partes: com.x.app.ShipIt é do com.x.app, notion.id.ShipIt do notion.id
           const parts = n.toLowerCase().split('.');
-          const owners = parts.slice(2).map((_, i) => parts.slice(0, i + 3).join('.'));
-          if (BUNDLE_ID.test(n) && !/^com\.apple\./i.test(n)) await add(rule, b, [n], owners, n);
+          const owners = parts.slice(1).map((_, i) => parts.slice(0, i + 2).join('.'));
+          if (BUNDLE_ID.test(n) && !/^com\.apple\./i.test(n)) await add(rule, b, [n], owners, n, true);
         }
         continue;
       }
@@ -133,16 +174,18 @@ export function createAppData(deps: {
     return out;
   }
 
-  async function collect(): Promise<{ scan: AppDataScan; byId: Map<string, Target> }> {
+  async function collect(): Promise<{ scan: AppDataScan }> {
     const t0 = now();
     const bases = new Map(await realBases());
     const all = await targets(bases);
     const keys = deps.runningKeys();
+    const apps = all.some(t => t.needsApp) ? await installed() : null;
     for (const t of all) {
-      t.actionable = keys !== null && !t.owners.some(o => keys.has(o));
-      if (!t.actionable) t.note = keys === null ? 'Ainda lendo os apps abertos: tente de novo' : `${t.app} aberto: feche para limpar`;
+      const note = judge(t, keys, apps);
+      t.actionable = note === null;
+      if (note) t.note = note;
     }
-    const budget = newBudget(deps.maxEntries ?? 500_000, deps.maxMs ?? 60_000, now);
+    const budget = newBudget(maxEntries, maxMs, now);
     const entries: AppDataEntry[] = [];
     for (const [base, b] of bases) {
       for (const name of await childDirs(b)) {
@@ -157,7 +200,7 @@ export function createAppData(deps: {
           for (const t of items) if (p.startsWith(t.path + sep)) { t.bytes += n; t.files++; }
           for (const x of nots) if (p.startsWith(x.path + sep)) x.bytes += n;
         });
-        e.items = items.map(({ owners: _o, app: _a, entry: _e, ...i }) => i);
+        e.items = items.map(({ owners: _o, app: _a, entry: _e, needsApp: _n, ...i }) => i);
         e.notes = nots.filter(x => x.bytes > 0).map(({ text, bytes }) => ({ text, bytes }));
         if (!items.length) e.notes.push({ text: NO_CACHE, bytes: e.bytes });
         entries.push(e);
@@ -169,7 +212,6 @@ export function createAppData(deps: {
         t: now(), durationMs: now() - t0, truncated: budget.stopped,
         totalBytes: entries.reduce((a, e) => a + e.bytes, 0), entries: entries.slice(0, 40),
       },
-      byId: new Map(all.map(t => [t.id, t])),
     };
   }
 
@@ -183,16 +225,20 @@ export function createAppData(deps: {
     return c.p;
   }
 
+  // clean: alvos recalculados das regras (o id que chega só escolhe entre eles); mede SÓ os pedidos, cada um com o
+  // próprio orçamento; medição cortada = não apaga (skipped). Dono, app e caminho real reconferidos logo antes do rm.
   async function clean(ids: string[]) {
-    const { byId } = await collect();
     cached = null;
+    const byId = new Map((await targets(new Map(await realBases()))).map(t => [t.id, t]));
     let bytes = 0, files = 0, skipped = 0;
     for (const id of new Set(ids)) {
       const t = typeof id === 'string' ? byId.get(id) : undefined;
-      const keys = deps.runningKeys();
-      // reconfere logo antes: dono fechado, pasta de verdade no mesmo caminho real
-      if (!t || !t.actionable || keys === null || t.owners.some(o => keys.has(o)) || !await isRealDir(t.path)) { skipped++; continue; }
-      try { await rm(t.path, { recursive: true }); bytes += t.bytes; files += t.files; } catch { skipped++; }
+      if (!t || judge(t, deps.runningKeys(), t.needsApp ? await installed() : null) !== null) { skipped++; continue; }
+      const b = newBudget(maxEntries, maxMs, now);
+      let tb = 0, tf = 0;
+      await walk(t.path, 64, null, b, (_p, st) => { tb += bytesOf(st); tf++; });
+      if (b.stopped || judge(t, deps.runningKeys(), t.needsApp ? await installed() : null) !== null || !await isRealDir(t.path)) { skipped++; continue; }
+      try { await rm(t.path, { recursive: true }); bytes += tb; files += tf; } catch { skipped++; }
     }
     return { bytes, files, skipped };
   }
