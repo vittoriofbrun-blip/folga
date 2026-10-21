@@ -420,13 +420,25 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   const { w } = rig({ platform: 'darwin', exec: async (f, a) => { calls.push(`${f} ${a.join(' ')}`); const r = out[f]!; if (r instanceof Error) throw r; return r; } });
   await w.run.antivirus();
   assert.deepEqual(calls.sort(), ['/usr/bin/csrutil status', '/usr/bin/fdesetup status', '/usr/sbin/spctl --status']);
-  assert.deepEqual(ids(w), ['seguranca:filevault', 'seguranca:sip'], 'um comando que falha não derruba os outros');
+  assert.deepEqual(ids(w).sort(), ['seguranca:filevault', 'seguranca:sip'], 'um comando que falha não derruba os outros');
   out['/usr/bin/fdesetup'] = 'FileVault is On.\n';
   await w.run.antivirus();
   assert.deepEqual(ids(w), ['seguranca:sip'], 'ligou: o aviso sai');
+  out['/usr/bin/fdesetup'] = new Error('x');
+  await w.run.antivirus();
+  assert.deepEqual(ids(w), ['seguranca:sip'], 'ainda sem leitura do fdesetup, sip segue');
+  // leitura que falha mantém o aviso que estava na tela
+  out['/usr/bin/fdesetup'] = 'FileVault is Off.\n'; await w.run.antivirus();
+  assert.deepEqual(ids(w).sort(), ['seguranca:filevault', 'seguranca:sip']);
+  const first = w.list().find(x => x.id === 'seguranca:filevault')!.firstSeen;
   out['/usr/bin/fdesetup'] = new Error('x'); out['/usr/bin/csrutil'] = new Error('x');
   await w.run.antivirus();
-  assert.deepEqual(ids(w), ['seguranca:sip'], 'nenhum comando respondeu: mantém');
+  assert.deepEqual(ids(w).sort(), ['seguranca:filevault', 'seguranca:sip'], 'falha de leitura mantém os avisos');
+  assert.equal(w.list().find(x => x.id === 'seguranca:filevault')!.firstSeen, first);
+  // spctl sai 1 com Gatekeeper desligado, mas o texto vem em stdout
+  out['/usr/sbin/spctl'] = Object.assign(new Error('saiu com 1'), { stdout: 'assessments disabled\n' });
+  await w.run.antivirus();
+  assert.ok(ids(w).includes('seguranca:gatekeeper'), 'exit 1 com texto: Gatekeeper desligado aparece');
   ok('segurança do Mac: job chama só os três comandos fixos, sem PowerShell');
 }
 

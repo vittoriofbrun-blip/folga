@@ -294,7 +294,8 @@ export function createWarnings(deps: WarningsDeps) {
     c.on('close', code => {
       clearTimeout(timeout); children.delete(c);
       if (code === 0) resolve(Buffer.concat(chunks).toString('utf8').replace(/^\uFEFF/, ''));
-      else reject(new Error(`saiu com ${code}`));
+      // saída não zero: quem precisa do texto (spctl --status sai 1 com Gatekeeper desligado) lê e.stdout; morte por sinal/tempo não tem
+      else reject(Object.assign(new Error(`saiu com ${code}`), code === null ? {} : { stdout: Buffer.concat(chunks).toString('utf8') }));
     });
   }));
   const statfs = deps.statfs ?? ((p: string) => fsStatfs(p));
@@ -382,12 +383,19 @@ export function createWarnings(deps: WarningsDeps) {
     // No Mac este ciclo lê FileVault/Gatekeeper/SIP (comandos fixos, só leitura); comando que falha vira "não sei"
     antivirus: job('antivirus', async () => {
       if ((deps.platform ?? process.platform) === 'darwin') {
+        const read = (f: string, a: string[]) => exec(f, a).catch((e: { stdout?: unknown }) => typeof e?.stdout === 'string' ? e.stdout : '');
         const [fv, gk, sip] = await Promise.all([
-          exec('/usr/bin/fdesetup', ['status']), exec('/usr/sbin/spctl', ['--status']), exec('/usr/bin/csrutil', ['status']),
-        ].map(p => p.catch(() => '')));
-        const sec = parseMacSecurity({ fv: fv!, gk: gk!, sip: sip! });
-        if (Object.values(sec).every(v => v === null)) return;   // nada lido: o último valor bom fica
-        return apply('seguranca', macSecurityWarnings(sec));
+          read('/usr/bin/fdesetup', ['status']), read('/usr/sbin/spctl', ['--status']), read('/usr/bin/csrutil', ['status']),
+        ]);
+        const sec = parseMacSecurity({ fv, gk, sip });
+        const found = macSecurityWarnings(sec);
+        // item que não deu para ler (null) mantém o aviso que já estava na tela
+        const ids = { fileVault: 'seguranca:filevault', gatekeeper: 'seguranca:gatekeeper', sip: 'seguranca:sip' } as const;
+        for (const k of Object.keys(ids) as (keyof typeof ids)[]) {
+          const old = active.get(ids[k]);
+          if (sec[k] === null && old) { const { firstSeen, lastSeen: _l, active: _a, ...c } = old; found.push({ ...c, since: firstSeen }); }
+        }
+        return apply('seguranca', found);
       }
       apply('antivirus', [avWarning(parseAv(await ps(PS_AV)))]);
     }),
