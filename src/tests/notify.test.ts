@@ -68,12 +68,12 @@ caso('Windows segue o PowerShell de hoje (null)', () => {
 
 const macApp = { FOLGA_APP: '1', FOLGA_APP_PATH: '/A/Folga.app' };
 const APP = '/A/Folga.app/Contents/MacOS/Folga';
-/** app responde com os códigos de `appCodes` (um por tentativa); o osascript sempre 0 */
-function cenario(appCodes: (number | null)[], toques: number[]) {
+/** app responde com os códigos de `appCodes` (um por tentativa); o osascript com `osaCodes` (0 quando acabam) */
+function cenario(appCodes: (number | null)[], toques: number[], osaCodes: number[] = []) {
   const vistos: string[] = [];
   let t = 0;
   const n = createNotify({ port: 1, platform: 'darwin', vars: macApp, now: () => t,
-    spawnCmd: (cmd, _a, _x, done) => { vistos.push(cmd === APP ? 'app' : 'osa'); done(cmd === APP ? appCodes.shift() ?? 0 : 0); } });
+    spawnCmd: (cmd, _a, _x, done) => { vistos.push(cmd === APP ? 'app' : 'osa'); done(cmd === APP ? appCodes.shift() ?? 0 : osaCodes.shift() ?? 0); } });
   for (const quando of toques) { t = quando; n.toast('a', 'b'); }
   return vistos;
 }
@@ -85,6 +85,25 @@ caso('app com autorização pendente (3): osascript desta vez; o app volta depoi
 
 caso('app sem autorização (4): recua 10 min como o 3 (o Vittorio pode ligar depois em Ajustes)', () => {
   assert.deepEqual(cenario([4, 0], [0, 1000, 10 * 60_000 + 1]), ['app', 'osa', 'osa', 'app']);
+});
+
+caso('osascript de reserva falhando não cala o app: depois do recuo o aviso volta a sair pelo Folga', () => {
+  assert.deepEqual(cenario([4, 0], [0, 11 * 60_000], [1]), ['app', 'osa', 'app']);
+});
+
+caso('fora do app, osascript que falha uma vez não insiste (mesma regra do Windows)', () => {
+  const vistos: string[] = [];
+  const n = createNotify({ port: 1, platform: 'darwin', vars: {}, spawnCmd: (cmd, _a, _x, done) => { vistos.push(cmd); done(1); } });
+  n.toast('a', 'b'); n.toast('c', 'd');
+  assert.deepEqual(vistos, ['/usr/bin/osascript']);
+});
+
+caso('FOLGA_NOTIFY=0 (testes que sobem o servidor): nenhum processo é disparado', () => {
+  const vistos: string[] = [];
+  for (const platform of ['darwin', 'win32']) {
+    createNotify({ port: 1, platform, vars: { FOLGA_NOTIFY: '0' }, spawnCmd: (cmd, _a, _x, done) => { vistos.push(cmd); done(0); } }).toast('a', 'b');
+  }
+  assert.deepEqual(vistos, []);
 });
 
 caso('app ausente (126/127): nunca mais é tentado', () => {

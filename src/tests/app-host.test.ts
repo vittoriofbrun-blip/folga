@@ -26,7 +26,7 @@ async function subir(extra: Record<string, string>, stdin: 'pipe' | 'ignore') {
   const dataDir = mkdtempSync(join(tmpdir(), 'folga-app-'));
   const child = spawn(process.execPath, ['--no-warnings', join(root, 'src', 'server.ts')], {
     env: {
-      ...process.env, FOLGA_PORT: String(port), FOLGA_DATA_DIR: dataDir, FAKE_MAC: '1', FAKE_APP_PID: '9100',
+      ...process.env, FOLGA_NOTIFY: '0', FOLGA_PORT: String(port), FOLGA_DATA_DIR: dataDir, FAKE_MAC: '1', FAKE_APP_PID: '9100',
       FOLGA_FAKE_PROBE: join(root, 'src', 'tests', 'fake-probe.mjs'), FOLGA_APP: '', ...extra,
     },
     stdio: [stdin, 'ignore', 'inherit'],

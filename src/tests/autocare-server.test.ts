@@ -19,7 +19,7 @@ writeFileSync(join(dataDir, 'settings.json'), '﻿' + JSON.stringify({ ...legado
 
 const start = (port: number, dir: string, extra: Record<string, string> = {}) => spawn(process.execPath, ['--no-warnings', join(root, 'src', 'server.ts')], {
   env: {
-    ...process.env, FOLGA_PORT: String(port), FOLGA_DATA_DIR: dir,
+    ...process.env, FOLGA_NOTIFY: '0', FOLGA_PORT: String(port), FOLGA_DATA_DIR: dir,
     FOLGA_FAKE_PROBE: join(root, 'src', 'tests', 'fake-probe.mjs'),
     FOLGA_CLOSE_WAIT_MS: '300', FOLGA_MEASURE_WAIT_MS: '300',
     FOLGA_STARTED_AT: String(Date.now() - 2 * 3_600_000),   // há 2 h: o notepad nunca focado já está parado

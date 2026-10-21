@@ -160,6 +160,12 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
     nunca vira comando (mesma ideia da R24).
   - Se o Windows recusar uma vez, o Folga para de tentar até reiniciar. Avisar nunca derruba o que estava
     acontecendo.
+  - **No Mac** (emenda, plano 4): dentro do Folga.app quem avisa é o próprio `Folga --notify` (nome e clique do
+    app); fora dele, ou se o app recusar, o `osascript` de reserva. Título e corpo só pelo ambiente, nunca em
+    argumento. Falha do `osascript` de reserva não cala o app: ele volta a ser tentado depois do recuo de 10 min.
+    O menu da barra mostra a contagem de avisos e abre a tela Avisos. Além da proposta do vigia, **aviso crítico
+    também notifica** (decisão 20), uma vez por id até ele sair da lista; atenção e informação ficam só na tela.
+    Testes que sobem o servidor usam `FOLGA_NOTIFY=0`: nenhum processo de notificação é disparado.
 
 - **R33 O logon abre a janela** (pedido do Antônio, 2026-10-18) — O atalho da pasta Inicializar roda o
   `launch.mjs` **sem** `--no-window`: sobe o servidor e abre a janela. O `--no-window` continua existindo para
@@ -196,6 +202,9 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
   - **Travamento:** um aviso por app que travou nas últimas 24 h.
   - **Antivírus:** crítico se desligado ou desatualizado.
   - **Sonda:** crítico quando ela fica mais de 30 s fora do ar.
+  - **No Mac** (emenda, plano 4): travamento vem de `~/Library/Logs/DiagnosticReports` (`.ips`/`.crash` do nível
+    de cima, sem seguir link, só os primeiros 4 KB). No lugar do antivírus, **segurança** em nível `info`:
+    FileVault, Gatekeeper e SIP desligados, lidos por comando fixo e só leitura; saída fora do formato = sem aviso.
 - **R27** — Em "só críticos", os avisos de atenção e de informação não aparecem no ícone da barra
   lateral; continuam na tela Avisos.
 

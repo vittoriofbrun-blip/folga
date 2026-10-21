@@ -658,10 +658,12 @@ final class Janela: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelega
   /// `vista` ("avisos") vira o fragmento `#avisos`; sem janela, ela nasce já nela; com janela aberta, só troca o fragmento
   /// (a página escuta hashchange, sem recarregar nem passar por ponte).
   func abrir(vista: String? = nil) {
-    let alvo = vista.flatMap { URL(string: "http://127.0.0.1:\(port)/#\($0)") } ?? inicio
-    if window == nil { criar(alvo) } else if vista != nil {
+    // só [a-z]+: o nome vai para dentro de um JavaScript abaixo; qualquer outra coisa abre o início
+    let v = vista.flatMap { $0.range(of: "^[a-z]+$", options: .regularExpression) != nil ? $0 : nil }
+    let alvo = v.flatMap { URL(string: "http://127.0.0.1:\(port)/#\($0)") } ?? inicio
+    if window == nil { criar(alvo) } else if let v {
       // passa por um hash neutro: a barra lateral troca de tela sem mexer no hash, e repetir o mesmo hash não dispara hashchange
-      web?.evaluateJavaScript("location.hash = '_'; location.hash = '\(vista!)'")
+      web?.evaluateJavaScript("location.hash = '_'; location.hash = '\(v)'")
     }
     NSApp.activate(ignoringOtherApps: true)
     window?.makeKeyAndOrderFront(nil)

@@ -16,7 +16,7 @@ writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({ ...DEFAULT_SETTIN
 
 const server = spawn(process.execPath, ['--no-warnings', join(root, 'src', 'server.ts')], {
   env: {
-    ...process.env, FOLGA_PORT: String(PORT), FOLGA_DATA_DIR: dataDir,
+    ...process.env, FOLGA_NOTIFY: '0', FOLGA_PORT: String(PORT), FOLGA_DATA_DIR: dataDir,
     FOLGA_FAKE_PROBE: join(root, 'src', 'tests', 'fake-probe.mjs'),
     FAKE_AVAIL_GB: '1.5', FAKE_NOTEPAD_MB: '800',   // 16 GB no total: memLoad ~91 %, com 800 MB parados
     FOLGA_CLOSE_WAIT_MS: '300', FOLGA_MEASURE_WAIT_MS: '300', FOLGA_WATCH_MS: '400',

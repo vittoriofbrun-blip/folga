@@ -1,5 +1,6 @@
 // F-15: monitor de avisos (D15, R26), discos e apps de inicialização. Só leitura.
 import { spawn, type ChildProcess } from 'node:child_process';
+import { constants } from 'node:fs';
 import { open, readdir, lstat, statfs as fsStatfs } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, parse } from 'node:path';
@@ -82,10 +83,10 @@ export function avWarning(products: AvProduct[]): Candidate | null {
   return null;
 }
 
-/** Nome vindo de arquivo/log: sem controle nem quebra de linha, até 80 caracteres. */
-export function cleanName(s: string): string {
-  return [...s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '')
-    .replace(/\s+/g, ' ').trim()].slice(0, 80).join('');
+/** Nome vindo de arquivo/log: sem controle, quebra de linha nem invisível (bidi, U+2060–2064, tags), até `max` caracteres. */
+export function cleanName(s: string, max = 80): string {
+  return [...s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\u{e0000}-\u{e007f}]/gu, '')
+    .replace(/\s+/g, ' ').trim()].slice(0, max).join('');
 }
 
 /** Um aviso por app (id com o nome em minúsculo), com a contagem de travamentos. */
@@ -187,8 +188,10 @@ export async function readCrashEntries(dir: string, now: number): Promise<{ file
   const out: { file: string; mtimeMs: number; head: string }[] = [];
   for (const f of found.slice(0, CRASH_FILES)) {
     try {
-      const fh = await open(join(dir, f.file), 'r');
+      // O_NOFOLLOW + confere no descritor: um link ou FIFO trocado entre o lstat e o open não é lido nem trava
+      const fh = await open(join(dir, f.file), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       try {
+        if (!(await fh.stat()).isFile()) continue;
         const buf = Buffer.alloc(CRASH_HEAD);
         const { bytesRead } = await fh.read(buf, 0, CRASH_HEAD, 0);
         out.push({ ...f, head: buf.toString('utf8', 0, bytesRead) });
@@ -381,10 +384,17 @@ export function createWarnings(deps: WarningsDeps) {
     return out;
   }
 
+  // chamada que chega com o mesmo ciclo ocupado não se perde: vira UMA rodada a mais no fim (várias viram uma só)
+  const again = new Set<string>();
   const job = (name: string, fn: () => Promise<void> | void) => async () => {
-    if (busy.has(name)) return;
+    if (busy.has(name)) { again.add(name); return; }
     busy.add(name);
-    try { await fn(); } catch { /* falha de consulta não muda os avisos que já existem */ } finally { busy.delete(name); }
+    try {
+      do {
+        again.delete(name);
+        try { await fn(); } catch { /* falha de consulta não muda os avisos que já existem */ }
+      } while (again.has(name));
+    } finally { busy.delete(name); }
   };
 
   const run = {
@@ -449,7 +459,12 @@ export function createWarnings(deps: WarningsDeps) {
     const apps: StartupApp[] = [];
     for (const d of dirs) {
       const st = state.get(d.domain)!;
-      for (const f of await readdir(d.dir).catch(() => [] as string[])) {
+      // pasta que não existe = sem itens; outra falha (sem permissão, não é pasta) rejeita: não vira "nenhum item"
+      const files = await readdir(d.dir).catch((e: NodeJS.ErrnoException) => {
+        if (e.code === 'ENOENT') return [] as string[];
+        throw new Error(`não deu para ler ${d.dir} (${e.code ?? 'erro'})`);
+      });
+      for (const f of files) {
         if (!f.endsWith('.plist')) continue;
         // ponytail: rótulo = nome do arquivo; o launchctl usa o Label de dentro do plist (quase sempre igual). Teto conhecido: ler o Label exigiria abrir o plist.
         const label = f.slice(0, -'.plist'.length);
@@ -460,7 +475,7 @@ export function createWarnings(deps: WarningsDeps) {
           const l = await lstat(path);   // sem seguir link: só listamos, nunca abrimos
           if (!(l.isSymbolicLink() || (l.isFile() && l.size <= PLIST_MAX))) continue;
         } catch { continue; }
-        apps.push({ name, command: path, source: d.source, enabled: st.loaded.has(label) && !st.disabled.has(label) });
+        apps.push({ name, command: cleanName(path, 1024), source: d.source, enabled: st.loaded.has(label) && !st.disabled.has(label) });
       }
     }
     return apps.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));

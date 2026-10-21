@@ -437,7 +437,7 @@ server.listen(PORT, '127.0.0.1', () => {
   if (IN_APP) void accessLine().then(l => console.log(`[${new Date().toISOString()}] ${l}`));
   // R32: o que o app lê de dentro (a pasta de relatórios é protegida? o código do erro, se for)
   if (IN_APP) void readCrashEntries(defaultCrashDir(), Date.now())
-    .then(r => `travamentos: ${r.length} relatórios lidos`, (e: NodeJS.ErrnoException) => `travamentos: sem acesso (${e.code ?? 'erro'})`)
+    .then(r => `travamentos: ${r.length} relatórios lidos`, (e: NodeJS.ErrnoException) => e.code === 'ENOENT' ? 'travamentos: pasta não existe' : `travamentos: sem acesso (${e.code ?? 'erro'})`)
     .then(l => console.log(`[${new Date().toISOString()}] ${l}`));
 });
 

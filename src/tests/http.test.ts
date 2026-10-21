@@ -23,7 +23,7 @@ writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({ sampleSeconds: "2
 
 const server = spawn(process.execPath, ['--no-warnings', join(root, 'src', 'server.ts')], {
   env: {
-    ...process.env, FOLGA_PORT: String(PORT), FOLGA_DATA_DIR: dataDir,
+    ...process.env, FOLGA_NOTIFY: '0', FOLGA_PORT: String(PORT), FOLGA_DATA_DIR: dataDir,
     FOLGA_FAKE_PROBE: join(root, 'src', 'tests', 'fake-probe.mjs'),
     FOLGA_FILES_ROOTS: filesRoot, FOLGA_CLOSE_WAIT_MS: '300', FOLGA_MEASURE_WAIT_MS: '300', FOLGA_STARTUP_DIR: startupDir,
     FOLGA_APPDATA_BASES: JSON.stringify({ appSupport: appBase, roamingAppData: appBase }),
@@ -188,13 +188,16 @@ try {
     assert.equal((await call('PUT', '/api/startup', { body: { on: true }, token })).status, 409);
     assert.ok(!existsSync(plist), 'sem FOLGA_APP nada é criado');
 
-    const appStartup = async (appPath: string | undefined, fn: (c: (m: string, p: string, body?: unknown) => Promise<Res>, dir: string) => Promise<void>) => {
+    const appStartup = async (appPath: string | undefined, fn: (c: (m: string, p: string, body?: unknown) => Promise<Res>, dir: string) => Promise<void>,
+      opts: { env?: Record<string, string>; settings?: string } = {}) => {
       const port = PORT + 1001 + Math.floor(Math.random() * 500);
       const dir = mkdtempSync(join(tmpdir(), 'folga-launchagents-'));
       const data = mkdtempSync(join(tmpdir(), 'folga-http-app-'));
-      const env: Record<string, string | undefined> = { ...process.env, FOLGA_PORT: String(port), FOLGA_DATA_DIR: data, FOLGA_STARTUP_DIR: dir,
+      const env: Record<string, string | undefined> = { ...process.env, FOLGA_NOTIFY: '0', FOLGA_PORT: String(port), FOLGA_DATA_DIR: data, FOLGA_STARTUP_DIR: dir,
         FOLGA_FAKE_PROBE: join(root, 'src', 'tests', 'fake-probe.mjs'), FOLGA_APP: '1', FOLGA_APP_PATH: appPath };
       if (appPath === undefined) delete env.FOLGA_APP_PATH;
+      Object.assign(env, opts.env);
+      if (opts.settings !== undefined) writeFileSync(join(data, 'settings.json'), opts.settings);
       const child = spawn(process.execPath, ['--no-warnings', join(root, 'src', 'server.ts')], { env, stdio: ['pipe', 'ignore', 'inherit'] });   // stdin em pipe: FOLGA_APP=1 sai quando ele fecha
       try {
         let tk = '';
@@ -238,6 +241,28 @@ try {
       assert.deepEqual(j.ProgramArguments, [`/Users/x/A<b>"c'd.app/Contents/MacOS/Folga`, '--login']);
       assert.ok(readFileSync(file, 'utf8').includes('A&lt;b&gt;&quot;c&apos;d.app'), '< > " \' escapados no XML');
     });
+
+    // I2: aviso crítico ('ajustes' com settings.json torto) num servidor de teste não dispara processo de notificação.
+    // O Folga.app aqui é falso: só anota num arquivo que foi chamado. Controle positivo prova que o teste enxerga o disparo.
+    const fake = mkdtempSync(join(tmpdir(), 'folga-fakeapp-'));
+    try {
+      const app = join(fake, 'Folga.app'), bin = join(app, 'Contents', 'MacOS');
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(join(bin, 'Folga'), '#!/bin/sh\necho "$@" >> "$FOLGA_TEST_MARK"\n', { mode: 0o755 });
+      const disparos = async (notifyEnv: string) => {
+        const mark = join(fake, `mark-${notifyEnv || 'on'}`);
+        await appStartup(app, async c => {
+          for (let i = 0; i < 30 && !existsSync(mark); i++) {
+            if (notifyEnv === '0' && (await c('GET', '/api/warnings')).body.some((w: Warning) => w.kind === 'ajustes')) { await sleep(1500); break; }
+            await sleep(100);
+          }
+        }, { env: { FOLGA_NOTIFY: notifyEnv, FOLGA_TEST_MARK: mark }, settings: '{ torto' });
+        return existsSync(mark) ? readFileSync(mark, 'utf8') : '';
+      };
+      assert.equal(await disparos(''), '--notify\n', 'controle: sem FOLGA_NOTIFY=0 o aviso crítico chama o app (falso)');
+      assert.equal(await disparos('0'), '', 'FOLGA_NOTIFY=0: nenhum processo de notificação');
+    } finally { await rm(fake, { recursive: true, force: true }); }
+    ok('I2: servidor de teste com FOLGA_NOTIFY=0 não dispara notificação; sem ele, dispara (controle)');
     for (const ruim of ['relativo/Folga.app', '/Users/x/Folga', undefined, '/Users/x/F\x01.app', '/Users/x/F\n.app', '/Users/x/F\x1f.app']) {
       await appStartup(ruim, async (c, dir) => {
         assert.equal((await c('PUT', '/api/startup', { on: true })).status, 409, String(ruim));

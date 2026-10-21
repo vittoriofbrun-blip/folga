@@ -76,8 +76,9 @@ export function createNotify(deps: NotifyDeps) {
     const extra = { FOLGA_TOAST_TITLE: title, FOLGA_TOAST_BODY: body, FOLGA_TOAST_URL: u };
     const mac = notifyCommand(platform, vars);
     if (!mac) return sp(PS(), ['-NoProfile', '-NonInteractive', '-STA', '-Command', SCRIPT], extra, code => { if (code !== 0) broken = true; });
-    // broken do osascript: mesma regra do Windows (se falhou uma vez, não insiste)
-    const viaOsascript = () => sp(OSA, osa().args, extra, code => { if (code !== 0) broken = true; });
+    // osascript que falha só cala tudo quando ele é o único caminho (fora do app), mesma regra do Windows;
+    // como reserva do app, não: senão uma falha dele calaria o Folga.app para sempre
+    const viaOsascript = () => sp(OSA, osa().args, extra, code => { if (code !== 0 && mac.cmd === OSA) broken = true; });
     if (mac.cmd === OSA || appBroken || now() < appRetryAt) return viaOsascript();
     sp(mac.cmd, mac.args, extra, (code, err) => {
       if (code === 0) return;
@@ -90,7 +91,7 @@ export function createNotify(deps: NotifyDeps) {
   return {
     /** Fire-and-forget: avisar nunca pode atrapalhar o que o Folga estava fazendo. */
     toast(title: string, body: string): void {
-      if (broken) return;
+      if (broken || vars.FOLGA_NOTIFY === '0') return;   // FOLGA_NOTIFY=0: testes que sobem o servidor
       try { run(title, body, url); } catch { broken = true; }
     },
   };

@@ -16,7 +16,7 @@ writeFileSync(join(appBase, 'Claude', 'Cache', 'f'), 'x'.repeat(4096));
 const root = join(import.meta.dirname, '..', '..');
 const server = spawn(process.execPath, ['--no-warnings', join(root, 'src', 'server.ts')], {
   env: {
-    ...process.env, FOLGA_PORT: String(PORT), FOLGA_DATA_DIR: dataDir,
+    ...process.env, FOLGA_NOTIFY: '0', FOLGA_PORT: String(PORT), FOLGA_DATA_DIR: dataDir,
     FOLGA_FAKE_PROBE: join(root, 'src', 'tests', 'fake-probe.mjs'), FAKE_SILENT_AFTER_MS: '2500',
     FOLGA_FILES_ROOTS: appBase, FOLGA_APPDATA_BASES: JSON.stringify({ appSupport: appBase, roamingAppData: appBase }),
   },

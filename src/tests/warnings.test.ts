@@ -174,6 +174,22 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   ok('R34: o aviso aparece e some junto com o problema');
 }
 {
+  // um ciclo chamado enquanto o mesmo ciclo ainda espera o disco não se perde: roda de novo ao fim
+  let solta = () => {};
+  let segura: Promise<void> | null = new Promise<void>(r => { solta = r; });
+  const { env, w } = rig({ statfs: async () => { const h = segura; segura = null; if (h) await h; return { bsize: 4096, blocks: 1e6, bavail: 5e5 }; } });
+  env.settingsProblem = 'arquivo quebrado';
+  const primeiro = w.run.fast();
+  await new Promise(r => setImmediate(r));
+  assert.ok(w.list().some(x => x.kind === 'ajustes'), 'o 1º ciclo já pôs o aviso e está parado no disco');
+  env.settingsProblem = null;
+  await w.run.fast();   // chega com o 1º ocupado
+  solta();
+  await primeiro;
+  assert.equal(w.list().some(x => x.kind === 'ajustes'), false, 'a chamada do meio rodou de novo e tirou o aviso');
+  ok('job: chamada durante o mesmo ciclo vira uma rodada a mais no fim, não some');
+}
+{
   const real = '[{"displayName":"Windows Defender","productState":393472},{"displayName":"McAfee","productState":266240}]';
   assert.equal(avWarning(parseAv(real)), null);
   assert.equal(avWarning(parseAv('{"displayName":"McAfee","productState":266240}')), null, 'objeto único (PowerShell sem array)');
@@ -342,6 +358,7 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   assert.equal(parseIpsHeader('{"app_name":'), null);
   assert.equal(parseIpsHeader('{"bug_type":"309"}'), null);
   assert.equal(parseIpsHeader(''), null);
+  // old.crash é SINTÉTICO: este Mac não tem nenhum .crash real (formato antigo, anterior ao .ips); só as 4 linhas de cabeçalho que o parser lê
   assert.equal(parseCrashText(fx('old.crash')), 'ExemploApp');
   assert.equal(parseCrashText('sem a linha'), null);
   const now = Date.UTC(2026, 9, 21, 15, 0, 0), H = 3600_000;
@@ -357,6 +374,7 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   assert.ok(!/[\u0000-\u001f\u007f]/.test(dirty) && dirty.length <= 80 && dirty.startsWith('Evil'));
   const sneaky = cleanName('\u202eEvil\u200bApp\ufeff' + '😀'.repeat(100));
   assert.ok(!/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/.test(sneaky) && [...sneaky].length === 80 && sneaky.startsWith('EvilApp'));
+  assert.equal(cleanName('A\u2060\u2061\u2064B\u061cC\u{e0041}\u{e007f}'), 'ABC', 'invisíveis U+2060–2064, U+061C e tags U+E0000–E007F');
   ok('Mac: cabeçalho .ips, .crash antigo, 24 h, Retired/.diag/tipo desconhecido fora, cleanName');
 }
 {
@@ -483,6 +501,15 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
     const { w } = rig({ platform: 'darwin', launchDirs: [{ dir: ua, source: 'launchagent_usuario', domain: 'gui' }], exec: async () => out });
     await assert.rejects(w.startupApps(), 'saída vazia/desconhecida com exit 0: não inventa "tudo desativado"');
   }
+  // o caminho também vai para a tela (dica do nome): mesma limpeza do nome, sem cortar em 80
+  const odd = mk('odd', ['x\u202ey\u2060.plist']);
+  const oddApps = await rig({ platform: 'darwin', launchDirs: [{ dir: odd, source: 'launchagent_usuario', domain: 'gui' }], exec: async (_f, a) => text(a[1]!) }).w.startupApps();
+  assert.equal(oddApps[0]?.command, join(odd, 'xy.plist'));
+  // pasta que não existe = sem itens; pasta que existe e não se lê = falha (não vira "nenhum item")
+  const semPasta = rig({ platform: 'darwin', launchDirs: [{ dir: join(base, 'nao-existe'), source: 'launchagent_usuario', domain: 'gui' }], exec: async (_f, a) => text(a[1]!) }).w;
+  assert.deepEqual(await semPasta.startupApps(), []);
+  const naoPasta = rig({ platform: 'darwin', launchDirs: [{ dir: join(ua, 'a.plist'), source: 'launchagent_usuario', domain: 'gui' }], exec: async (_f, a) => text(a[1]!) }).w;
+  await assert.rejects(naoPasta.startupApps(), /não deu para ler/);
   await rm(base, { recursive: true });
   ok('itens do Mac: launchctl print (só leitura, sem nome de plist em argv), ativo/desativado, lixo fora, falha rejeita');
 }
