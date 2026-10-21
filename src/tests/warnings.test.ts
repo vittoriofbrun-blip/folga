@@ -6,7 +6,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  approvedEnabled, avWarning, cleanName, macCrashes, macDiskInfo, parseCrashText, parseIpsHeader, createWarnings, decodeAvState, parseAv, parseCrashes, parseRegQuery, settingsWarning,
+  approvedEnabled, avWarning, cleanName, macCrashes, macSecurityWarnings, parseMacSecurity, macDiskInfo, parseCrashText, parseIpsHeader, createWarnings, decodeAvState, parseAv, parseCrashes, parseRegQuery, settingsWarning,
   type WarningsDeps,
 } from '../warnings.ts';
 import { DEFAULT_SETTINGS, type MemoryState, type Warning } from '../types.ts';
@@ -389,6 +389,45 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
     await rm(d2, { recursive: true }); await rm(out, { recursive: true });
   }
   ok('travamentos do Mac: lê a pasta, aviso sai quando o arquivo some, pasta ilegível mantém');
+}
+
+{
+  const fx = (n: string) => readFileSync(join(import.meta.dirname, 'fixtures', 'mac', n), 'utf8');
+  const on = parseMacSecurity({ fv: fx('fdesetup-status.txt'), gk: fx('spctl-status.txt'), sip: fx('csrutil-status.txt') });
+  assert.deepEqual(on, { fileVault: true, gatekeeper: true, sip: true });
+  assert.deepEqual(parseMacSecurity({ fv: 'FileVault is Off.\n', gk: 'assessments disabled\n', sip: 'System Integrity Protection status: disabled.\n' }),
+    { fileVault: false, gatekeeper: false, sip: false });
+  for (const bad of ['', 'FileVault está ligado.', 'FileVault is Off, but will be enabled after the next restart.',
+    'System Integrity Protection status: unknown (Custom Configuration).', 'System Integrity Protection status: enabled (Custom Configuration).']) {
+    assert.deepEqual(parseMacSecurity({ fv: bad, gk: bad, sip: bad }), { fileVault: null, gatekeeper: null, sip: null }, bad);
+  }
+  assert.deepEqual(macSecurityWarnings(on), []);
+  assert.deepEqual(macSecurityWarnings({ fileVault: null, gatekeeper: null, sip: null }), []);
+  const off = macSecurityWarnings({ fileVault: false, gatekeeper: true, sip: true });
+  assert.equal(off.length, 1);
+  assert.equal(off[0]?.id, 'seguranca:filevault');
+  assert.equal(off[0]?.severity, 'info');
+  assert.equal(off[0]?.title, 'FileVault desligado');
+  assert.ok(!/sudo|fdesetup|\$ /.test(off[0]!.detail) && off[0]!.detail.length > 20);
+  assert.deepEqual(macSecurityWarnings({ fileVault: true, gatekeeper: false, sip: false }).map(c => c.id), ['seguranca:gatekeeper', 'seguranca:sip']);
+  ok('segurança do Mac: parse das saídas reais e desligadas, desconhecido = nada, um info por item');
+}
+{
+  const calls: string[] = [];
+  const out: Record<string, string | Error> = {
+    '/usr/bin/fdesetup': 'FileVault is Off.\n', '/usr/sbin/spctl': new Error('saiu com 1'), '/usr/bin/csrutil': 'System Integrity Protection status: disabled.\n',
+  };
+  const { w } = rig({ platform: 'darwin', exec: async (f, a) => { calls.push(`${f} ${a.join(' ')}`); const r = out[f]!; if (r instanceof Error) throw r; return r; } });
+  await w.run.antivirus();
+  assert.deepEqual(calls.sort(), ['/usr/bin/csrutil status', '/usr/bin/fdesetup status', '/usr/sbin/spctl --status']);
+  assert.deepEqual(ids(w), ['seguranca:filevault', 'seguranca:sip'], 'um comando que falha não derruba os outros');
+  out['/usr/bin/fdesetup'] = 'FileVault is On.\n';
+  await w.run.antivirus();
+  assert.deepEqual(ids(w), ['seguranca:sip'], 'ligou: o aviso sai');
+  out['/usr/bin/fdesetup'] = new Error('x'); out['/usr/bin/csrutil'] = new Error('x');
+  await w.run.antivirus();
+  assert.deepEqual(ids(w), ['seguranca:sip'], 'nenhum comando respondeu: mantém');
+  ok('segurança do Mac: job chama só os três comandos fixos, sem PowerShell');
 }
 
 console.log(`warnings: ${passed} casos ok`);

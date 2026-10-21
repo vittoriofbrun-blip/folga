@@ -99,6 +99,28 @@ export function crashCandidates(names: string[]): Candidate[] {
       `Travou ${n === 1 ? '1 vez' : `${n} vezes`} nas últimas 24 h.`));
 }
 
+/** Saídas de fdesetup/spctl/csrutil. Só a frase conhecida vale; vazio, outro idioma ou "unknown"/"Custom" = null (não sei, sem aviso). */
+export function parseMacSecurity(out: { fv: string; gk: string; sip: string }) {
+  const yn = (text: string, yes: RegExp, no: RegExp) => yes.test(text) ? true : no.test(text) ? false : null;
+  return {
+    fileVault: yn(out.fv, /^FileVault is On\.\s*$/m, /^FileVault is Off\.\s*$/m),
+    gatekeeper: yn(out.gk, /^assessments enabled\s*$/m, /^assessments disabled\s*$/m),
+    sip: yn(out.sip, /status: enabled\.\s*$/m, /status: disabled\.\s*$/m),
+  };
+}
+
+/** Um aviso `info` por proteção desligada; `null` não gera nada. */
+export function macSecurityWarnings(s: ReturnType<typeof parseMacSecurity>): Candidate[] {
+  const out: Candidate[] = [];
+  if (s.fileVault === false) out.push(cand('seguranca', 'seguranca:filevault', 'info', 'FileVault desligado',
+    'O disco não está criptografado: quem pegar o Mac consegue ler seus arquivos.'));
+  if (s.gatekeeper === false) out.push(cand('seguranca', 'seguranca:gatekeeper', 'info', 'Gatekeeper desligado',
+    'O Mac não confere se os apps que você abre vêm de fontes confiáveis.'));
+  if (s.sip === false) out.push(cand('seguranca', 'seguranca:sip', 'info', 'Proteção do sistema (SIP) desligada',
+    'Os arquivos centrais do macOS ficam abertos a alterações por qualquer app com permissão de administrador.'));
+  return out;
+}
+
 /** Saída do Get-WinEvent → um aviso por app (nome sem .exe, minúsculo no id). */
 export function parseCrashes(json: string): Candidate[] {
   const raw: unknown = json.trim() ? JSON.parse(json) : [];
@@ -357,7 +379,18 @@ export function createWarnings(deps: WarningsDeps) {
       }
       apply('travamento', parseCrashes(await ps(PS_CRASHES)));
     }),
-    antivirus: job('antivirus', async () => apply('antivirus', [avWarning(parseAv(await ps(PS_AV)))])),
+    // No Mac este ciclo lê FileVault/Gatekeeper/SIP (comandos fixos, só leitura); comando que falha vira "não sei"
+    antivirus: job('antivirus', async () => {
+      if ((deps.platform ?? process.platform) === 'darwin') {
+        const [fv, gk, sip] = await Promise.all([
+          exec('/usr/bin/fdesetup', ['status']), exec('/usr/sbin/spctl', ['--status']), exec('/usr/bin/csrutil', ['status']),
+        ].map(p => p.catch(() => '')));
+        const sec = parseMacSecurity({ fv: fv!, gk: gk!, sip: sip! });
+        if (Object.values(sec).every(v => v === null)) return;   // nada lido: o último valor bom fica
+        return apply('seguranca', macSecurityWarnings(sec));
+      }
+      apply('antivirus', [avWarning(parseAv(await ps(PS_AV)))]);
+    }),
   };
 
   async function readStartupApps(): Promise<StartupApp[]> {
