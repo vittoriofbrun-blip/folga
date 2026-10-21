@@ -10,7 +10,7 @@ import { classify, emptyHistory, type ClassifyHistory } from './classify.ts';
 import { startProbe } from './probe.ts';
 import { pushSample, freshWindowMs } from './samples.ts';
 import { createReleaser } from './release.ts';
-import { openWindow, setStartup, startupInstalled } from './window.ts';
+import { appBundlePath, openWindow, setStartup, startupAvailable, startupInstalled } from './window.ts';
 import { createWarnings } from './warnings.ts';
 import { createFiles } from './files.ts';
 import { createAppData, parseAppDataBases } from './appdata.ts';
@@ -357,10 +357,13 @@ const server = createServer(async (req, res) => {
       if (process.platform === 'darwin') return send(res, 409, { erro: 'abra pelo app Folga na barra de menus' });
       return showWindow() ? send(res, 200, { ok: true }) : send(res, 500, { erro: 'Edge não encontrado' });
     }
-    if (method === 'GET' && path === '/api/startup') return send(res, 200, { on: startupInstalled() });
+    if (method === 'GET' && path === '/api/startup') return send(res, 200, { on: startupInstalled(), available: startupAvailable() });
     if (method === 'PUT' && path === '/api/startup') {
       const body = await readJson(req) as { on?: unknown };
       if (typeof body?.on !== 'boolean') return send(res, 400, { erro: 'on deve ser verdadeiro ou falso' });
+      // ligar só onde existe: no Mac, dentro do app e com o caminho do .app válido; desligar é sempre permitido
+      if (body.on && !startupAvailable()) return send(res, 409, { erro: 'disponível pelo app Folga' });
+      if (body.on && process.platform === 'darwin' && !appBundlePath()) return send(res, 409, { erro: 'caminho do Folga.app inválido' });
       return send(res, 200, { on: await setStartup(body.on, ROOT) });
     }
     if (method === 'GET' && path === '/api/log') {

@@ -3,6 +3,7 @@
 //   Folga             o app: ícone na barra, sobe e vigia o servidor (node de dentro do bundle)
 //   Folga --version   "folga <versão>" (o check compara com o package.json)
 //   Folga --selftest  casos puros; sai 0/1
+//   Folga --login     como sem argumento, mas de LaunchAgent (Abrir com o Mac): só o ícone, nunca abre a janela
 import AppKit
 import Foundation
 import os
@@ -163,12 +164,27 @@ func hasFullDiskAccess(trash: String = NSHomeDirectory() + "/.Trash") -> Bool {
 /// `com.apple.preference.security?Privacy_AllFiles` abrem os Ajustes; fica o formato novo (ADR 0007).
 let painelDisco = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles")!
 
+enum Lancamento: Equatable { case versao, selftest, rodar(login: Bool), uso }
+/// Argumentos (sem o nome do programa). `--login` vale sozinho: é o que o LaunchAgent passa (decisão 15).
+func lancamento(_ args: [String]) -> Lancamento {
+  switch args.first {
+  case nil: return .rodar(login: false)
+  case "--version": return .versao
+  case "--selftest": return .selftest
+  case "--login" where args.count == 1: return .rodar(login: true)
+  default: return .uso
+  }
+}
+
 func selftest() -> Int32 {
   var falhas = 0
   func caso(_ nome: String, _ ok: Bool) {
     if !ok { falhas += 1; FileHandle.standardError.write(Data("FALHOU: \(nome)\n".utf8)) }
   }
   caso("versão lida do Info.plist", version?.isEmpty == false)
+  caso("lancamento: sem argumento e --login rodam o app", lancamento([]) == .rodar(login: false) && lancamento(["--login"]) == .rodar(login: true))
+  caso("lancamento: --version, --selftest e o resto", lancamento(["--version"]) == .versao && lancamento(["--selftest"]) == .selftest
+       && lancamento(["--login", "x"]) == .uso && lancamento(["--x"]) == .uso)
 
   let t0 = Date(timeIntervalSince1970: 1_000_000)
   var quedas: [Date] = []
@@ -651,13 +667,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationWillTerminate(_ n: Notification) { supervisor?.parar() }
 }
 
-switch CommandLine.arguments.dropFirst().first {
-case "--version": print("folga \(version ?? "?")")
-case "--selftest": exit(selftest())
-case nil:
+switch lancamento(Array(CommandLine.arguments.dropFirst())) {
+case .versao: print("folga \(version ?? "?")")
+case .selftest: exit(selftest())
+case .rodar(let login):
   let me = ProcessInfo.processInfo.processIdentifier
   if NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).contains(where: { $0.processIdentifier != me }) {
-    DistributedNotificationCenter.default().postNotificationName(Notification.Name("\(bundleId).open"), object: nil, userInfo: nil, deliverImmediately: true)
+    // no login (--login) já estar rodando é normal: sai quieto, sem mandar abrir janela
+    if !login { DistributedNotificationCenter.default().postNotificationName(Notification.Name("\(bundleId).open"), object: nil, userInfo: nil, deliverImmediately: true) }
     exit(0)
   }
   MainActor.assumeIsolated {   // código de topo roda na thread principal
@@ -667,7 +684,7 @@ case nil:
     app.setActivationPolicy(.accessory)
     app.run()
   }
-default:
-  FileHandle.standardError.write(Data("uso: Folga [--version | --selftest]\n".utf8))
+case .uso:
+  FileHandle.standardError.write(Data("uso: Folga [--version | --selftest | --login]\n".utf8))
   exit(2)
 }

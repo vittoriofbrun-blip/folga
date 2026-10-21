@@ -1,6 +1,6 @@
 // Servidor real numa porta alta, com pasta de dados temporária e sonda falsa (R15–R17, R07–R09, R14).
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { request } from 'node:http';
@@ -176,6 +176,60 @@ try {
   assert.equal((await call('PUT', '/api/startup', { body: { on: false }, token })).body.on, false);
   assert.ok(!existsSync(join(startupDir, 'Folga.lnk')));
   ok('P04: atalho de inicialização liga e desliga (pasta temporária)');
+
+  if (process.platform === 'darwin') {
+    // Mac: LaunchAgent só dentro do app (FOLGA_APP=1); sem ele o interruptor não existe e nada é escrito
+    const plist = join(startupDir, 'local.folga.app.plist');
+    assert.deepEqual((await call('GET', '/api/startup')).body, { on: false, available: false });
+    assert.equal((await call('PUT', '/api/startup', { body: { on: true }, token })).status, 409);
+    assert.ok(!existsSync(plist), 'sem FOLGA_APP nada é criado');
+
+    const appStartup = async (appPath: string | undefined, fn: (c: (m: string, p: string, body?: unknown) => Promise<Res>, dir: string) => Promise<void>) => {
+      const port = PORT + 1001 + Math.floor(Math.random() * 500);
+      const dir = mkdtempSync(join(tmpdir(), 'folga-launchagents-'));
+      const data = mkdtempSync(join(tmpdir(), 'folga-http-app-'));
+      const env: Record<string, string | undefined> = { ...process.env, FOLGA_PORT: String(port), FOLGA_DATA_DIR: data, FOLGA_STARTUP_DIR: dir,
+        FOLGA_FAKE_PROBE: join(root, 'src', 'tests', 'fake-probe.mjs'), FOLGA_APP: '1', FOLGA_APP_PATH: appPath };
+      if (appPath === undefined) delete env.FOLGA_APP_PATH;
+      const child = spawn(process.execPath, ['--no-warnings', join(root, 'src', 'server.ts')], { env, stdio: ['pipe', 'ignore', 'inherit'] });   // stdin em pipe: FOLGA_APP=1 sai quando ele fecha
+      try {
+        let tk = '';
+        for (let i = 0; i < 100 && !tk; i++) {
+          try { tk = ((await (await fetch(`http://127.0.0.1:${port}/api/token`)).json()) as { token: string }).token; } catch { await sleep(100); }
+        }
+        assert.ok(tk, 'servidor do app não subiu');
+        await fn(async (m, p, body) => {
+          const r = await fetch(`http://127.0.0.1:${port}${p}`, { method: m, headers: { 'x-folga-token': tk, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+          return { status: r.status, body: await r.json().catch(() => null), headers: {} };
+        }, dir);
+      } finally { child.kill('SIGKILL'); await rm(dir, { recursive: true, force: true }); await rm(data, { recursive: true, force: true, maxRetries: 5 }); }
+    };
+
+    await appStartup('/Users/x/Applications/Fol&ga.app', async (c, dir) => {
+      const file = join(dir, 'local.folga.app.plist');
+      assert.deepEqual((await c('GET', '/api/startup')).body, { on: false, available: true });
+      assert.deepEqual((await c('PUT', '/api/startup', { on: true })).body, { on: true });
+      assert.deepEqual((await c('GET', '/api/startup')).body, { on: true, available: true });
+      const lint = spawnSync('/usr/bin/plutil', ['-lint', file], { encoding: 'utf8' });
+      assert.equal(lint.status, 0, lint.stdout + lint.stderr);
+      const j = JSON.parse(spawnSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', file], { encoding: 'utf8' }).stdout);
+      assert.equal(j.Label, 'local.folga.app');
+      assert.deepEqual(j.ProgramArguments, ['/Users/x/Applications/Fol&ga.app/Contents/MacOS/Folga', '--login']);
+      assert.equal(j.RunAtLoad, true);
+      assert.equal(j.LimitLoadToSessionType, 'Aqua');
+      assert.equal(j.ProcessType, 'Interactive');
+      assert.ok(readFileSync(file, 'utf8').includes('Fol&amp;ga.app'), '& escapado no XML');
+      assert.deepEqual((await c('PUT', '/api/startup', { on: false })).body, { on: false });
+      assert.ok(!existsSync(file));
+    });
+    for (const ruim of ['relativo/Folga.app', '/Users/x/Folga', undefined]) {
+      await appStartup(ruim, async (c, dir) => {
+        assert.equal((await c('PUT', '/api/startup', { on: true })).status, 409, String(ruim));
+        assert.ok(!existsSync(join(dir, 'local.folga.app.plist')));
+      });
+    }
+    ok('P04 Mac: LaunchAgent só com FOLGA_APP=1, plist válido e escapado, caminho torto → 409');
+  }
 
   // A1: percent-encoding inválido derrubava o servidor (URIError numa rejeição não tratada)
   for (const bad of ['/%', '/%E0%A4%A', '/assets/%zz', '/%C0%80%']) assert.equal((await call('GET', bad)).status, 400, bad);

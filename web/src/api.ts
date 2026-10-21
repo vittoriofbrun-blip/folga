@@ -47,7 +47,7 @@ export const apiSource: Source = {
 export const getLog = (limit = 100): Promise<LogEntry[]> => read(`/api/log?limit=${limit}`);
 export const getSettings = (): Promise<Settings> => read('/api/settings');
 export const putSettings = (patch: Partial<Settings>) => write<Settings>('PUT', '/api/settings', patch);
-export const getStartup = (): Promise<{ on: boolean }> => read('/api/startup');
+export const getStartup = (): Promise<{ on: boolean; available: boolean }> => read('/api/startup');
 export const putStartup = (on: boolean) => write<{ on: boolean }>('PUT', '/api/startup', { on });
 
 // v2: avisos (F-15)
