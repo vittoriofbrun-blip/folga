@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,8 +16,13 @@ const exited = (c: ChildProcess, ms: number) => new Promise<number | null | 'viv
   c.once('exit', code => { clearTimeout(t); res(code); });
 });
 
+// porta que o sistema deu agora (bind na 0), em vez de sortear numa faixa fixa
+const freePort = () => new Promise<number>(res => {
+  const s = createServer().listen(0, '127.0.0.1', () => { const p = (s.address() as { port: number }).port; s.close(() => res(p)); });
+});
+
 async function subir(extra: Record<string, string>, stdin: 'pipe' | 'ignore') {
-  const port = 18000 + Math.floor(Math.random() * 1000);
+  const port = await freePort();
   const dataDir = mkdtempSync(join(tmpdir(), 'folga-app-'));
   const child = spawn(process.execPath, ['--no-warnings', join(root, 'src', 'server.ts')], {
     env: {

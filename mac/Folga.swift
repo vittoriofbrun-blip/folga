@@ -34,8 +34,9 @@ func afterCrash(_ crashes: [Date], upSince: Date, now: Date) -> [Date] {
 /// Exige executável e `--version` ≥ 24.
 func findNode(recorded: String, resources: URL = resources) -> String? {
   if recorded.isEmpty || recorded.hasPrefix("/") { return nil }
-  let base = resources.standardizedFileURL.path
-  let path = resources.appendingPathComponent(recorded).standardizedFileURL.path
+  // links resolvidos dos dois lados: um link dentro de Resources apontando para fora não passa
+  let base = resources.resolvingSymlinksInPath().standardizedFileURL.path
+  let path = resources.appendingPathComponent(recorded).resolvingSymlinksInPath().standardizedFileURL.path
   guard path.hasPrefix(base + "/"), FileManager.default.isExecutableFile(atPath: path) else { return nil }
   let p = Process()
   p.executableURL = URL(fileURLWithPath: path)
@@ -61,6 +62,31 @@ func childEnv(from env: [String: String], appPath: String, path: String, resourc
   out["PATH"] = path.split(separator: ":").map { $0.hasPrefix("/") ? String($0) : resources.appendingPathComponent(String($0)).path }
     .joined(separator: ":")
   return out
+}
+
+/// server.log em acréscimo, zerado acima de 1 MB (como o launch.mjs). O app tem Acesso Total ao Disco, então
+/// nunca segue link: um link plantado no lugar do log faria o Folga escrever num arquivo protegido. A pasta
+/// também precisa ser pasta de verdade (lstat). Qualquer falha → sem log (melhor que não subir).
+/// ponytail: só o último componente e a pasta-mãe são conferidos; pastas acima são do próprio usuário.
+func openLog(at path: String) -> FileHandle {
+  var st = stat()
+  let dir = (path as NSString).deletingLastPathComponent
+  guard lstat(dir, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else {
+    logger.error("server.log: a pasta não é uma pasta de verdade; sem log")
+    return FileHandle.nullDevice
+  }
+  let fd = open(path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+  guard fd >= 0 else {
+    logger.error("server.log não abriu (errno \(errno, privacy: .public)); sem log")
+    return FileHandle.nullDevice
+  }
+  if fstat(fd, &st) != 0 || (st.st_mode & S_IFMT) != S_IFREG {
+    close(fd)
+    logger.error("server.log não é arquivo comum; sem log")
+    return FileHandle.nullDevice
+  }
+  if st.st_size > 1_000_000 { _ = ftruncate(fd, 0) }
+  return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
 }
 
 func selftest() -> Int32 {
@@ -90,6 +116,32 @@ func selftest() -> Int32 {
   caso("findNode: absoluto (fora do bundle) → nil", findNode(recorded: "/bin/sh") == nil)
   caso("findNode: escapar do bundle com .. → nil", findNode(recorded: "../MacOS/Folga") == nil)
   caso("findNode: o node de dentro do bundle", findNode(recorded: "folga/bin/node") != nil)
+
+  let tmp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("folga-selftest-\(getpid())")
+  let fora = tmp.appendingPathComponent("fora")
+  let res = tmp.appendingPathComponent("Resources")
+  try? FileManager.default.createDirectory(at: fora, withIntermediateDirectories: true)
+  try? FileManager.default.createDirectory(at: res.appendingPathComponent("folga/bin"), withIntermediateDirectories: true)
+  try? FileManager.default.createSymbolicLink(atPath: res.appendingPathComponent("folga/bin/node").path,
+                                              withDestinationPath: Bundle.main.resourceURL!.appendingPathComponent("folga/bin/node").path)
+  caso("findNode: link dentro de Resources apontando para fora → nil", findNode(recorded: "folga/bin/node", resources: res) == nil)
+
+  let alvo = fora.appendingPathComponent("protegido.txt")
+  FileManager.default.createFile(atPath: alvo.path, contents: Data("intacto".utf8))
+  let logLink = tmp.appendingPathComponent("server.log")
+  try? FileManager.default.createSymbolicLink(atPath: logLink.path, withDestinationPath: alvo.path)
+  let h = openLog(at: logLink.path)
+  h.write(Data("vazou".utf8))
+  caso("openLog: link no lugar do log não é seguido", h === FileHandle.nullDevice
+       && (try? String(contentsOf: alvo, encoding: .utf8)) == "intacto")
+  let real = tmp.appendingPathComponent("real.log")
+  FileManager.default.createFile(atPath: real.path, contents: Data(count: 1_000_001))
+  let hr = openLog(at: real.path)
+  hr.write(Data("x".utf8))
+  try? hr.close()
+  caso("openLog: arquivo comum acima de 1 MB é zerado e recebe o acréscimo",
+       (try? FileManager.default.attributesOfItem(atPath: real.path)[.size] as? Int) == 1)
+  try? FileManager.default.removeItem(at: tmp)
 
   let env = childEnv(from: ["HOME": "/Users/v", "LANG": "pt_BR.UTF-8", "NODE_OPTIONS": "--require /tmp/x.js",
                             "DYLD_INSERT_LIBRARIES": "/tmp/x.dylib", "NODE_PATH": "/tmp", "SECRET": "s"],
@@ -169,7 +221,9 @@ final class Supervisor {
     p.currentDirectoryURL = resources.appendingPathComponent("folga")
     p.environment = childEnv(from: ProcessInfo.processInfo.environment, appPath: Bundle.main.bundlePath, path: cfg?["path"] ?? "/usr/bin:/bin")
     p.standardInput = Pipe()   // o app nunca fecha: se o app cair, o pipe fecha e o servidor sai
-    let log = logHandle()
+    let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Folga")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let log = openLog(at: dir.appendingPathComponent("server.log").path)
     p.standardOutput = log
     p.standardError = log
     p.terminationHandler = { _ in Task { @MainActor in self.caiu() } }
@@ -207,24 +261,11 @@ final class Supervisor {
     p.terminate()
     let limite = Date().addingTimeInterval(3)
     while p.isRunning && Date() < limite { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
-    if p.isRunning { kill(p.processIdentifier, SIGKILL) }
+    if p.isRunning { kill(p.processIdentifier, SIGKILL) }   // isRunning logo antes: o pid ainda é do nosso filho
   }
 
   @objc private func sairDoApp() { parar(); NSApp.terminate(nil) }
 
-  /// <dataDir>/server.log em acréscimo, zerado acima de 1 MB (como o launch.mjs). Sem log é melhor que não subir.
-  private func logHandle() -> FileHandle {
-    let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Folga")
-    let file = dir.appendingPathComponent("server.log")
-    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
-    if size > 1_000_000 || !FileManager.default.fileExists(atPath: file.path) {
-      FileManager.default.createFile(atPath: file.path, contents: nil)
-    }
-    guard let h = FileHandle(forWritingAtPath: file.path) else { return FileHandle.nullDevice }
-    h.seekToEndOfFile()
-    return h
-  }
 }
 
 @MainActor
