@@ -1,6 +1,6 @@
 // Fonte falsa com a MESMA forma da real (F-03 só troca a importação no App.tsx).
 import { DEFAULT_SETTINGS } from '../../src/types';
-import type { AppGroup, MemoryState, Outcome, ReleaseResponse, ReleaseResult } from '../../src/types';
+import type { AppDataScan, AppGroup, DiskInfo, MemoryState, QuickCleanItem, StaleScan, Outcome, ReleaseResponse, ReleaseResult } from '../../src/types';
 
 export type Source = {
   subscribe(onState: (s: MemoryState) => void): () => void;
@@ -122,3 +122,53 @@ export const mockSource: Source = {
     return { availBefore, availAfter: TOTAL - used, results };
   },
 };
+
+// Respostas falsas das leituras da tela Arquivos e do Início (só ?mock). undefined = vai para o servidor.
+// ponytail: só Mac (números do guia); no Windows cai no servidor como antes.
+export function mockRead(path: string): unknown {
+  if (!MAC) return undefined;
+  const t = Date.now();
+  if (path === '/api/disk') return [{ drive: 'Macintosh HD', total: 494 * GB, free: 38 * GB, purgeable: 21 * GB }] satisfies DiskInfo[];
+  if (path === '/api/appdata') {
+    const lib = '/Users/voce/Library';
+    return {
+      t, durationMs: 3400, truncated: false, totalBytes: 16.1 * GB,
+      entries: [
+        {
+          id: 'claude', name: 'Claude', where: `${lib}/Application Support/Claude`, bytes: 13 * GB,
+          items: [
+            { id: 'claude:code-cache', label: 'Cache de código', path: `${lib}/Application Support/Claude/Code Cache`, bytes: 0.4 * GB, files: 310, actionable: false, note: 'Claude aberto: feche para limpar' },
+            { id: 'claude:gpu-cache', label: 'Cache de vídeo', path: `${lib}/Application Support/Claude/GPUCache`, bytes: 120 * MB, files: 12, actionable: false, note: 'Claude aberto: feche para limpar' },
+          ],
+          notes: [{ text: 'Disco da máquina virtual do Claude: não é cache, o Folga não limpa', bytes: 12.4 * GB }],
+        },
+        {
+          id: 'chrome', name: 'Google Chrome', where: `${lib}/Caches/Google/Chrome`, bytes: 3.1 * GB,
+          items: [
+            { id: 'chrome:cache', label: 'Cache de páginas', path: `${lib}/Caches/Google/Chrome/Default/Cache`, bytes: 2.6 * GB, files: 41_200, actionable: true },
+            { id: 'chrome:code', label: 'Cache de código', path: `${lib}/Caches/Google/Chrome/Default/Code Cache`, bytes: 0.5 * GB, files: 3_900, actionable: false, note: 'Chrome aberto: feche para limpar' },
+          ],
+          notes: [],
+        },
+      ],
+    } satisfies AppDataScan;
+  }
+  if (path === '/api/quickclean') {
+    return [
+      { category: 'temp_usuario', label: 'Temporários', bytes: 640 * MB, files: 1_820, actionable: true },
+      { category: 'cache_navegador', label: 'Cache de navegadores', bytes: 0, files: 0, actionable: false, unknown: true, note: 'Não deu para ler: o macOS guarda isto atrás do Acesso Total ao Disco, que será pedido pelo app Folga (próxima etapa).' },
+      { category: 'lixeira', label: 'Lixeira', bytes: 1.2 * GB, files: 96, actionable: false, note: 'o Folga não esvazia' },
+    ] as QuickCleanItem[];
+  }
+  if (path === '/api/files/stale') {
+    const d = 86_400_000;
+    return {
+      t, durationMs: 1800, roots: [], scanned: 4200, truncated: false, totalBytes: 2.3 * GB, olderThanDays: 180, minBytes: 10 * MB, accessTracking: true,
+      files: [
+        { path: '/Users/voce/Downloads/Instalador antigo.app', name: 'Instalador antigo.app', root: 'Downloads', size: 1.4 * GB, lastUsed: t - 400 * d, lastModified: t - 400 * d, basis: 'adicionado', isApp: true },
+        { path: '/Users/voce/Documents/Aula gravada.mov', name: 'Aula gravada.mov', root: 'Documents', size: 0.9 * GB, lastUsed: t - 250 * d, lastModified: t - 260 * d, basis: 'spotlight' },
+      ],
+    } satisfies StaleScan;
+  }
+  return undefined;
+}

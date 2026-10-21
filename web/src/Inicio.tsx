@@ -261,6 +261,7 @@ export function Inicio({ state, go }: { state: MemoryState | null; go: (v: View,
               <dl className="home-facts">
                 <div><dt><i className="dot" style={{ background: diskTone }} />Ocupado</dt><dd>{size(diskUsed)}</dd></div>
                 <div><dt><i className="dot dot-empty" />Livre</dt><dd>{size(sys.free)}</dd></div>
+                {sys.purgeable !== undefined && sys.purgeable > 0 && <div><dt>Liberável pelo sistema</dt><dd>{size(sys.purgeable)}</dd></div>}
                 <div><dt>Total</dt><dd>{size(sys.total)}</dd></div>
               </dl>
             </div>
