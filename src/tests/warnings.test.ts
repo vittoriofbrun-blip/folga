@@ -6,7 +6,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  approvedEnabled, avWarning, cleanName, macCrashes, macSecurityWarnings, parseMacSecurity, macDiskInfo, parseCrashText, parseIpsHeader, createWarnings, decodeAvState, parseAv, parseCrashes, parseRegQuery, settingsWarning,
+  approvedEnabled, avWarning, cleanName, macCrashes, parseLaunchctlPrint, macSecurityWarnings, parseMacSecurity, macDiskInfo, parseCrashText, parseIpsHeader, createWarnings, decodeAvState, parseAv, parseCrashes, parseRegQuery, settingsWarning,
   type WarningsDeps,
 } from '../warnings.ts';
 import { DEFAULT_SETTINGS, type MemoryState, type Warning } from '../types.ts';
@@ -440,6 +440,59 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   await w.run.antivirus();
   assert.ok(ids(w).includes('seguranca:gatekeeper'), 'exit 1 com texto: Gatekeeper desligado aparece');
   ok('segurança do Mac: job chama só os três comandos fixos, sem PowerShell');
+}
+
+{
+  const fx = (n: string) => readFileSync(join(import.meta.dirname, 'fixtures', 'mac', n), 'utf8');
+  const g = parseLaunchctlPrint(fx('launchctl-gui.txt'));
+  assert.ok(g.loaded.has('com.exemplo.credit-caio-acorda') && g.loaded.has('com.apple.syncdefaultsd') && g.loaded.size === 6);
+  assert.deepEqual([...g.disabled].sort(), ['com.apple.ManagedClientAgent.enrollagent', 'com.exemplo.credit-gateway']);
+  const s = parseLaunchctlPrint(fx('launchctl-system.txt'));
+  assert.ok(s.loaded.has('com.apple.runningboardd') && !s.loaded.has('net.mullvad.daemon'));
+  assert.deepEqual([...s.disabled].sort(), ['com.apple.CSCSupportd', 'com.apple.ftpd']);
+  for (const junk of ['', 'lixo\nsem formato', '\tservices = {\n\t\tabc\n\t}']) {
+    const r = parseLaunchctlPrint(junk); assert.equal(r.loaded.size + r.disabled.size, 0);
+  }
+  const base = mkdtempSync(join(tmpdir(), 'folga-launch-'));
+  const mk = (d: string, files: string[]) => { mkdirSync(join(base, d), { recursive: true }); for (const f of files) writeFileSync(join(base, d, f), '<plist/>'); return join(base, d); };
+  const evil = '$(rm -rf ~).plist';
+  const ua = mk('ua', ['a.plist', 'b.plist', 'c.plist', 'c.plist.bak-x', '.DS_Store', evil]);
+  mkdirSync(join(ua, '_aposentados')); writeFileSync(join(ua, '_aposentados', 'z.plist'), '');
+  const ld = mk('ld', ['d.plist']);
+  const text = (domain: string) => domain === 'system'
+    ? '\tservices = {\n\t\t       1      - \td\n\t}\n'
+    : '\tservices = {\n\t\t       1      - \ta\n\t\t       0      - \tb\n\t}\n\n\tdisabled services = {\n\t\t"b" => disabled\n\t}\n';
+  const calls: string[][] = [];
+  const mkRig = (fail = false) => rig({
+    platform: 'darwin',
+    launchDirs: [{ dir: ua, source: 'launchagent_usuario', domain: 'gui' }, { dir: ld, source: 'launchdaemon', domain: 'system' }],
+    exec: async (f, a) => { calls.push([f, ...a]); if (fail) throw new Error('x'); return text(a[1]!); },
+  }).w;
+  const apps = await mkRig().startupApps();
+  const by = Object.fromEntries(apps.map(a => [a.name, a]));
+  assert.equal(by.a?.enabled, true);
+  assert.equal(by.b?.enabled, false, 'em disabled');
+  assert.equal(by.c?.enabled, false, 'não carregado');
+  assert.equal(by.d?.source, 'launchdaemon');
+  assert.equal(by.d?.enabled, true);
+  assert.equal(by.a?.command, join(ua, 'a.plist'));
+  assert.deepEqual(apps.map(a => a.name).sort(), ['$(rm -rf ~)', 'a', 'b', 'c', 'd'].sort(), 'bak, _aposentados e .DS_Store fora; nome estranho vira texto');
+  assert.deepEqual(calls, [['/bin/launchctl', 'print', `gui/${process.getuid!()}`], ['/bin/launchctl', 'print', 'system']]);
+  await assert.rejects(mkRig(true).startupApps(), 'launchctl falhou: não inventa estado');
+  await rm(base, { recursive: true });
+  ok('itens do Mac: launchctl print (só leitura, sem nome de plist em argv), ativo/desativado, lixo fora, falha rejeita');
+}
+{
+  // pino: nenhum verbo que muda estado, nem sfltool/sudo, no código do app
+  const { execFileSync } = await import('node:child_process');
+  let hits = '';
+  try {
+    hits = execFileSync('git', ['grep', '-nE', 'sfltool|\\bsudo\\b|launchctl.*(load|unload|bootstrap|bootout|enable|disable|kickstart)', '--', 'src/*.ts', 'mac'],
+      { cwd: join(import.meta.dirname, '..', '..'), encoding: 'utf8' });
+  } catch { /* status 1 = sem ocorrência */ }
+  const real = hits.split('\n').filter(l => l && !/^\S+:\d+:\s*(\/\/|\*|\/\*)/.test(l) && !l.startsWith('src/tests/'));
+  assert.deepEqual(real, []);
+  ok('pino: nada de sfltool/sudo/verbos que mudam o launchd no código');
 }
 
 console.log(`warnings: ${passed} casos ok`);

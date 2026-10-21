@@ -102,7 +102,7 @@ export type Warning = {
   firstSeen: number; lastSeen: number; active: boolean;
 };
 export type DiskInfo = { drive: string; total: number; free: number; purgeable?: number };   // purgeable (Mac): o que o sistema libera sozinho; nunca entra em free
-export type StartupApp = { name: string; command: string; source: 'registro_usuario' | 'registro_maquina' | 'pasta_inicializar'; enabled: boolean };
+export type StartupApp = { name: string; command: string; source: 'registro_usuario' | 'registro_maquina' | 'pasta_inicializar' | 'launchagent_usuario' | 'launchagent_sistema' | 'launchdaemon'; enabled: boolean };
 
 // Arquivos parados (D16)
 export type StaleBasis = 'acesso' | 'recentes' | 'modificacao' | 'spotlight' | 'adicionado';

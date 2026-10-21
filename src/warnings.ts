@@ -20,6 +20,7 @@ export type WarningsDeps = {
   macVolume?: () => Promise<unknown | null>;   // sonda --volume; injetável nos testes
   statfs?: (path: string) => Promise<{ bsize: number; blocks: number; bavail: number }>;
   startupFolder?: string;
+  launchDirs?: { dir: string; source: StartupApp['source']; domain: 'gui' | 'system' }[];   // Mac: pastas de LaunchAgents/Daemons
   crashDir?: string;   // Mac: padrão ~/Library/Logs/DiagnosticReports
 };
 
@@ -260,6 +261,25 @@ export function approvedEnabled(hex: string | undefined): boolean {
   return Number.isNaN(b) ? true : (b & 1) === 0;
 }
 
+/**
+ * `launchctl print <domínio>`: rótulos da seção `services = {` (carregados: "pid status<TAB>rótulo") e os
+ * `"rótulo" => disabled` de `disabled services = {`. Texto fora do formato = conjuntos vazios.
+ */
+export function parseLaunchctlPrint(text: string): { loaded: Set<string>; disabled: Set<string> } {
+  const loaded = new Set<string>(), disabled = new Set<string>();
+  let sect: 'services' | 'disabled' | null = null;
+  for (const line of text.split(/\r?\n/)) {
+    if (line === '\tservices = {') sect = 'services';
+    else if (line === '\tdisabled services = {') sect = 'disabled';
+    else if (line === '\t}') sect = null;
+    else if (sect === 'services') { const m = /^\t\t\s*\S+\s+\S+\s*\t(\S+)$/.exec(line); if (m) loaded.add(m[1]!); }
+    else if (sect === 'disabled') { const m = /^\t\t"(.+)" => disabled$/.exec(line); if (m) disabled.add(m[1]!); }
+  }
+  return { loaded, disabled };
+}
+
+const PLIST_MAX = 1024 * 1024;   // só conferimos o tamanho: o conteúdo nunca é lido
+
 // ---------------------------------------------------------------- monitor
 
 const RANK: Record<Severity, number> = { critico: 0, atencao: 1, info: 2 };
@@ -401,7 +421,40 @@ export function createWarnings(deps: WarningsDeps) {
     }),
   };
 
+  // Mac: só `launchctl print` (verbo de leitura), caminho absoluto, argumentos fixos; nome de plist nunca vai para argv.
+  async function readLaunchItems(): Promise<StartupApp[]> {
+    const uid = process.getuid?.() ?? 501;
+    const dirs = deps.launchDirs ?? [
+      { dir: join(homedir(), 'Library', 'LaunchAgents'), source: 'launchagent_usuario' as const, domain: 'gui' as const },
+      { dir: '/Library/LaunchAgents', source: 'launchagent_sistema' as const, domain: 'gui' as const },
+      { dir: '/Library/LaunchDaemons', source: 'launchdaemon' as const, domain: 'system' as const },
+    ];
+    const state = new Map<string, ReturnType<typeof parseLaunchctlPrint>>();
+    for (const d of new Set(dirs.map(x => x.domain))) {
+      // falha aqui rejeita: o estado não é inventado
+      state.set(d, parseLaunchctlPrint(await exec('/bin/launchctl', ['print', d === 'gui' ? `gui/${uid}` : 'system'])));
+    }
+    const apps: StartupApp[] = [];
+    for (const d of dirs) {
+      const st = state.get(d.domain)!;
+      for (const f of await readdir(d.dir).catch(() => [] as string[])) {
+        if (!f.endsWith('.plist')) continue;
+        const label = f.slice(0, -'.plist'.length);
+        const name = cleanName(label);
+        if (!name) continue;
+        const path = join(d.dir, f);
+        try {
+          const l = await lstat(path);   // sem seguir link: só listamos, nunca abrimos
+          if (!(l.isSymbolicLink() || (l.isFile() && l.size <= PLIST_MAX))) continue;
+        } catch { continue; }
+        apps.push({ name, command: path, source: d.source, enabled: st.loaded.has(label) && !st.disabled.has(label) });
+      }
+    }
+    return apps.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }
+
   async function readStartupApps(): Promise<StartupApp[]> {
+    if ((deps.platform ?? process.platform) === 'darwin') return readLaunchItems();
     const apps: StartupApp[] = [];
     const queries = await Promise.all(REG_SOURCES.map(async s => [s, await regQuery(s.key), await regQuery(s.approved)] as const));
     for (const [s, runText, apprText] of queries) {
