@@ -49,6 +49,14 @@ Estado real do Mac (raio-X de 2026-10-20, só leitura):
 12. **`.app` velho em `~/Downloads` (e só lá) pode ir para a Lixeira**, como um item só, com o tamanho total e o
     último uso pelo Spotlight. Em qualquer outra pasta o pacote continua fechado; nunca um `.app` de `/Applications`.
 
+### Decisões do Vittorio (2026-10-21, plano 3)
+
+13. **Barra de menus mostra ícone + "62% · 39 GB"** (memória usada · disco livre).
+14. **"Liberar parados" do menu mostra a lista e pede OK** antes de encerrar.
+15. **Ao ligar o Mac (se ativado), só o ícone** — a janela não abre sozinha.
+16. **Pode criar a assinatura local "Folga Local"** (chave só no Mac, na pasta do Folga) para a permissão de disco não
+    sumir a cada atualização.
+
 ## Objetivos
 
 - Rodar no Mac com as mesmas telas e o mesmo comportamento do Windows, trocando só as peças do sistema.
