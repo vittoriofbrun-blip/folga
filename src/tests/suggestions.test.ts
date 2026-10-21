@@ -489,10 +489,18 @@ try {
     });
     let preview = previewCom();
     const cleaned: string[][] = [];
+    const freshPreviews: unknown[] = [];
     let cleanAnswer = { bytes: 500 * MB, files: 10, skipped: 0 };
+    // como o clean de verdade: id fora da allowlist ou de app aberto é pulado (contado), o resto apaga
+    const fakeClean = async (ids: string[]) => {
+      cleaned.push(ids);
+      const ok = new Set(preview.entries.flatMap(e => e.items).filter(i => i.actionable).map(i => i.id));
+      const skipped = ids.filter(i => !ok.has(i)).length;
+      return skipped === ids.length ? { bytes: 0, files: 0, skipped } : { ...cleanAnswer, skipped: cleanAnswer.skipped + skipped };
+    };
     const mkA = () => createSuggestions({
       dataDir: appDir, files, getState: () => state, release: async () => releaseAnswer, emit: () => {},
-      appData: { preview: async () => preview, clean: async ids => { cleaned.push(ids); return cleanAnswer; } },
+      appData: { preview: async o => { if (o?.fresh) freshPreviews.push(o); return preview; }, clean: fakeClean },
     });
     const sa = mkA();
     const errOf = (r: Suggestion | SuggestionError) => { assert.ok(isErr(r), 'devia recusar'); return (r as SuggestionError).erro; };
@@ -511,7 +519,8 @@ try {
       assert.match(errOf(await sa.add(draft('dados_apps', [forjado]), 'agente')), /item 1/);       // fora da allowlist: nem vira cartão
     const ag = asSug(await sa.add(draft('dados_apps', ['claude:GPUCache']), 'agente'));
     const sf = await forjar(ag.id, 'claude:../../Documents');
-    assert.equal(asSug(await sf.approve(ag.id)).status, 'falhou'); assert.equal(cleaned.length, 0);
+    assert.equal(asSug(await sf.approve(ag.id)).status, 'falhou'); assert.deepEqual(cleaned, [['claude:../../Documents']]);   // o clean recusa o forjado
+    cleaned.length = 0;
     await sf.flush();
     const sb = mkA();
     assert.match(errOf(await sb.add(draft('dados_apps', ['claude:../../Documents']), 'folga')), /item 1/);
@@ -521,8 +530,9 @@ try {
     assert.match(c.items[0]!.detail, /Application Support/);                              // R23: caminho real no cartão
     preview = previewCom({ 'claude:Cache': { actionable: false } });                      // Claude abriu antes do clique
     const fail = asSug(await sb.approve(c.id));
-    assert.equal(fail.status, 'falhou'); assert.equal(cleaned.length, 0);
+    assert.equal(fail.status, 'falhou');
     assert.equal(fail.result, 'Nada foi apagado: um dos apps foi aberto ou o cache mudou.');
+    cleaned.length = 0;
 
     preview = previewCom();
     const d = asSug(await sb.add(draft('dados_apps', ['claude:Cache', 'claude:GPUCache', 'claude:Cache']), 'agente'));
@@ -530,6 +540,12 @@ try {
     const done = asSug(await sb.approve(d.id));
     assert.equal(done.status, 'feita'); assert.deepEqual(cleaned, [['claude:Cache', 'claude:GPUCache']]);
     assert.match(done.result!, /10 arquivos apagados · 500 MB/);
+    assert.equal(freshPreviews.length, 0, 'aprovar não mede a Library inteira de novo: o clean rejulga cada alvo');
+    const part = asSug(await sb.add(draft('dados_apps', ['claude:Cache', 'claude:GPUCache']), 'agente'));
+    preview = previewCom({ 'claude:GPUCache': { actionable: false } });                   // um dos dois abriu
+    const p2 = asSug(await sb.approve(part.id));
+    assert.equal(p2.status, 'feita'); assert.match(p2.result!, / · 1 cache ficou$/);
+    preview = previewCom();
     await sb.flush();
 
     // arquivo adulterado: cartão dados_apps com origem vigia não executa; ids repetidos não escondem que nada saiu

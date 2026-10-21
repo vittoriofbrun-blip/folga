@@ -147,11 +147,11 @@ export function createSuggestions(deps: SuggestionsDeps) {
   }
 
   /** Dados dos apps: cada id tem de ser item ACIONÁVEL do preview do servidor (allowlist recalculada das regras). */
-  async function buildAppData(ids: string[], opts: { fresh?: boolean } = {}): Promise<SuggestionItem[] | SuggestionError> {
+  async function buildAppData(ids: string[]): Promise<SuggestionItem[] | SuggestionError> {
     if (ids.length === 0) return err('nenhum cache na sugestão');
     if (ids.length > MAX_APPS) return err('são caches demais');
     if (!deps.appData) return err('dados dos apps indisponível', 503);
-    const scan = await deps.appData.preview(opts);
+    const scan = await deps.appData.preview();
     const byId = new Map(scan.entries.flatMap(e => e.items).map(i => [i.id, i]));
     const out: SuggestionItem[] = [];
     const seen = new Set<string>();
@@ -274,12 +274,12 @@ export function createSuggestions(deps: SuggestionsDeps) {
   }
 
   async function runAppData(s: Suggestion): Promise<Outcome> {
-    // R21, para qualquer origem: preview sem cache (dono fechado agora?) e o clean recalcula os alvos das regras
+    // R21, para qualquer origem: o clean recalcula os alvos das regras e rejulga cada um (id forjado, app aberto → pulado);
+    // sem preview novo, que mediria a Library inteira só para conferir o que o clean já confere
     // decisão 11 vale também para cartão vindo do arquivo (adulterado): o vigia nunca apaga dados de app
     if (s.source === 'vigia') return { status: 'falhou', result: 'Nada foi apagado: o vigia não propõe limpeza de dados dos apps.' };
+    if (!deps.appData) return { status: 'falhou', result: 'Nada foi apagado: dados dos apps indisponível.' };
     const ids = [...new Set(s.items.map(i => i.id))];   // o clean conta os pulados sobre ids sem repetição
-    const check = await buildAppData(ids, { fresh: true });
-    if (!Array.isArray(check) || !deps.appData) return { status: 'falhou', result: 'Nada foi apagado: um dos apps foi aberto ou o cache mudou.' };
     const r = await deps.appData.clean(ids);
     if (r.skipped >= ids.length) return { status: 'falhou', result: 'Nada foi apagado: um dos apps foi aberto ou o cache mudou.' };
     const kept = r.skipped ? ` · ${plural(r.skipped, 'cache ficou', 'caches ficaram')}` : '';
