@@ -12,7 +12,7 @@ import { createReleaser } from './release.ts';
 import { openWindow, setStartup, startupInstalled } from './window.ts';
 import { createWarnings } from './warnings.ts';
 import { createFiles } from './files.ts';
-import { createAppData } from './appdata.ts';
+import { createAppData, parseAppDataBases } from './appdata.ts';
 import { createSuggestions } from './suggestions.ts';
 import { createWatch } from './watch.ts';
 import { createNotify } from './notify.ts';
@@ -207,10 +207,11 @@ const files = createFiles({
   runningKeys: () => (state ? new Set(state.apps.map(a => a.key)) : null),        // Mac: navegador aberto pela sonda
 });
 // FOLGA_APPDATA_BASES (testes e verificação ao vivo): JSON { "appSupport": "/tmp/…", … }. Ele SUBSTITUI as bases
-// padrão (não mescla): a base que o teste não listar não é lida. JSON quebrado → não sobe (nunca cai nas pastas reais).
+// padrão (não mescla): a base que o teste não listar não é lida. Torto (JSON quebrado, null, lista, base desconhecida,
+// caminho relativo) → não sobe: nunca cai nas pastas reais nem em '/'.
 const appData = createAppData({
   runningKeys: () => (state ? new Set(state.apps.map(a => a.key)) : null),
-  bases: process.env.FOLGA_APPDATA_BASES ? JSON.parse(process.env.FOLGA_APPDATA_BASES) : undefined,
+  bases: process.env.FOLGA_APPDATA_BASES ? parseAppDataBases(process.env.FOLGA_APPDATA_BASES) : undefined,
 });
 const suggestions = createSuggestions({
   dataDir: DATA_DIR, files, getState: () => state, emit, appData,

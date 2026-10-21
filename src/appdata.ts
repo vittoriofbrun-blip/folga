@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import type { Stats } from 'node:fs';
 import { lstat, readdir, realpath, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, sep } from 'node:path';
+import { isAbsolute, join, sep } from 'node:path';
 import { newBudget, walk } from './files.ts';
 import type { AppDataEntry, AppDataItem, AppDataScan } from './types.ts';
 
@@ -42,6 +42,19 @@ const WHERE: Record<AppDataBase, string> = {
   appSupport: 'Suporte a Aplicativos', caches: 'Caches', containers: 'Contêineres', groupContainers: 'Contêineres de Grupo',
   localAppData: 'AppData Local', roamingAppData: 'AppData Roaming',
 };
+/**
+ * FOLGA_APPDATA_BASES (testes e verificação ao vivo). Lança se não for objeto só com bases conhecidas e caminhos
+ * absolutos: o servidor não sobe, em vez de cair no ~/Library real ou de varrer '/' por um JSON torto.
+ */
+export function parseAppDataBases(raw: string): Partial<Record<AppDataBase, string>> {
+  const v: unknown = JSON.parse(raw);
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('FOLGA_APPDATA_BASES: use um objeto JSON');
+  for (const [k, p] of Object.entries(v)) {
+    if (!Object.hasOwn(WHERE, k)) throw new Error(`FOLGA_APPDATA_BASES: base desconhecida: ${k}`);
+    if (typeof p !== 'string' || !p || !isAbsolute(p)) throw new Error(`FOLGA_APPDATA_BASES: ${k} precisa de caminho absoluto`);
+  }
+  return v as Partial<Record<AppDataBase, string>>;
+}
 const PROFILE = /^(Default|Profile \d+|Guest Profile|System Profile)$/;
 const BUNDLE_ID = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;   // o que decide é casar com app instalado (installedIds)
 const NO_CACHE = 'Sem cache reconhecido: o Folga não limpa.';

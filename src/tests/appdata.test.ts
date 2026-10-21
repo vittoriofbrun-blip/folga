@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFil
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createAppData, newestVersion } from '../appdata.ts';
+import { createAppData, newestVersion, parseAppDataBases } from '../appdata.ts';
 
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'folga-appdata-')));
 function file(p: string, n = 4096) { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, Buffer.alloc(n, 1)); return p; }
@@ -131,6 +131,13 @@ try {
     assert.ok(!existsSync(join(ud, 'Default', 'GPUCache')) && existsSync(join(ud, 'Default', 'Cache')) && existsSync(join(roamingAppData, 'Claude', 'Cache')));
     console.log('ok  windows: GPUCache do Chrome fechado; Cache/Code Cache ficam para a limpeza rápida; Claude aberto fica');
   }
+
+  // I1: FOLGA_APPDATA_BASES torto não cai nas pastas reais nem em '/': o servidor não sobe
+  const abs = process.platform === 'win32' ? 'C:\\tmp\\a' : '/tmp/a';
+  for (const raw of ['null', '"/"', '/', '["/"]', '{"x":"/"}', '{"caches":1}', '{"caches":""}', '{"caches":"rel/a"}', '{"__proto__":"/tmp/a"}', '[]'])
+    assert.throws(() => parseAppDataBases(raw), undefined, raw);
+  assert.deepEqual(parseAppDataBases(JSON.stringify({ caches: abs })), { caches: abs });
+  console.log('ok  parseAppDataBases: só objeto com bases conhecidas e caminho absoluto');
 
   assert.equal(newestVersion(['2.0.9', '2.0.14', '2.0.10']), '2.0.14'); assert.equal(newestVersion(['2.0.9', 'latest']), null);
   assert.equal(newestVersion([]), null); assert.equal(newestVersion(['2.0', '2.0.0']), null);
