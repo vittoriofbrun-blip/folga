@@ -1,0 +1,50 @@
+# 0007 — Folga.app no Mac: app de barra com janela WebKit e o servidor dentro do bundle
+
+**Status:** aceito (2026-10-21). Plano 3; decisões 5, 10 e 16 do spec do Mac.
+
+## Contexto
+No Windows a janela é o Edge em modo app (ADR 0001). No Mac o Vittorio quer um ícone na barra de menus e a
+mesma interface React, sem pagar um Chromium (decisão 5), e quer o Acesso Total ao Disco só para o `Folga.app`,
+nunca para o `node` solto (decisão 10).
+
+## Decisão
+- **Janela WebKit, não Edge/Chrome.** O `WKWebView` usa o motor do Safari, que já está no Mac. Um Chrome
+  ou Edge em modo app abriria um navegador inteiro (vários processos, centenas de MB) num Mac que muitas vezes
+  já está em swap, e o Edge nem vem instalado no Mac.
+- **Um binário Swift (`mac/Folga.swift`), sem Xcode.** `scripts/mac-app.mjs build` compila com `swiftc -O` e
+  monta o `.app`: `Info.plist` gerado pelo script (`local.folga.app`, `LSUIElement`, rede local liberada no ATS),
+  `Contents/MacOS/Folga` e `Contents/Resources/folga.json` com o `node` e o `PATH` de quem rodou o build.
+- **O servidor vai copiado no bundle** (`Contents/Resources/folga/`: `src/`, `dist/`, `probe/bin/probe-mac`,
+  `package.json`). Assim o app não depende do repositório, que outra sessão pode estar mexendo, e a assinatura
+  sela o código que de fato roda. O Acesso Total ao Disco dado ao app vale para o `node` e a sonda que ele
+  sobe (o app é o processo responsável) e para nenhum `node` de fora.
+- **Conferência:** `scripts/mac-app.mjs check <app> [--previous <arquivo>]` valida o `Info.plist`, `--version`,
+  `--selftest`, as assinaturas do bundle e da sonda de dentro, e recusa requisito designado fraco
+  (`requirementWeak`): requisito só com `identifier "local.folga.app"` manteria a permissão entre builds, mas
+  qualquer binário ad-hoc com esse id herdaria o Acesso Total ao Disco. Com `--previous`, roda a mesma conta
+  que o TCC faz depois de reinstalar (`codesign --verify -R=<requisito do build anterior>`).
+
+### Assinatura: ramo B (ad-hoc)
+Spike de 2026-10-21 (macOS 26.5.1, LibreSSL 3.3.6 do sistema):
+- **Ramo A tentado e descartado.** Certificado "Folga Local" autoassinado (`openssl req -x509` com
+  `extendedKeyUsage=codeSigning`, 10 anos) num chaveiro só dele, fora da lista de busca, importado com
+  `-T /usr/bin/codesign` e `set-key-partition-list`. O `security find-identity` acha a identidade, mas marcada
+  `CSSMERR_TP_NOT_TRUSTED` (0 válidas), e o `codesign --keychain <chaveiro> -s "Folga Local"` (e pelo hash
+  SHA-1) responde "no identity found". Para torná-la válida seria preciso gravar confiança no certificado
+  (`security add-trusted-cert`), o que abre a janela de senha do macOS, ou pôr o chaveiro na lista de busca do
+  usuário; as duas coisas ficam fora do que quem constrói pode fazer. O chaveiro de teste foi apagado.
+- **Ramo B em uso:** ad-hoc puro. O requisito designado é `cdhash H"…"`, preso ao conteúdo exato do app.
+  `--adhoc` é aceito (a CI passa) e dá no mesmo.
+- **Consequência:** um build idêntico (mesmos arquivos) dá o mesmo `cdhash` e o `check --previous` fica verde;
+  qualquer mudança no app ou no servidor copiado muda o `cdhash`, o `check --previous` fica vermelho e
+  **depois de cada reinstalação o Vittorio liga o Folga de novo no Acesso Total ao Disco** (Ajustes do Sistema →
+  Privacidade e Segurança → Acesso Total ao Disco).
+- **Limite honesto:** o ad-hoc não dá para imitar (o requisito é o hash do próprio app), mas também não prova
+  autoria. Se um dia o ramo A voltar (por exemplo, o Vittorio dando confiança ao certificado ele mesmo), o limite
+  dele é: um programa já rodando como você consegue assinar com essa chave, como aconteceria com um certificado
+  pago guardado no mesmo Mac.
+
+## Consequências
+- A CI do macOS monta o app ad-hoc e roda o `check` (sem segredo).
+- O `node` gravado no `folga.json` é o do build; trocar de Node pede rebuild.
+- As Tasks 5, 6 e 8 do plano 3 completam este ADR (Acesso Total ao Disco, assistente fora dele, avisos).

@@ -20,3 +20,5 @@ jobs:
         run: node scripts/build-probe.mjs && node scripts/probe-smoke.mjs
       - if: runner.os == 'Windows'
         run: node scripts/probe-smoke.mjs
+      - if: runner.os == 'macOS'
+        run: npm run build && node scripts/build-probe.mjs && node scripts/mac-app.mjs build --adhoc && node scripts/mac-app.mjs check build/Folga.app
