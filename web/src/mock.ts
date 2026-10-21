@@ -156,7 +156,8 @@ export function mockRead(path: string): unknown {
   if (path === '/api/quickclean') {
     return [
       { category: 'temp_usuario', label: 'Temporários', bytes: 640 * MB, files: 1_820, actionable: true },
-      { category: 'cache_navegador', label: 'Cache de navegadores', bytes: 0, files: 0, actionable: false, unknown: true, note: 'Não deu para ler: o macOS guarda isto atrás do Acesso Total ao Disco, que será pedido pelo app Folga (próxima etapa).' },
+      // como o servidor: Chrome medido e acionável; o Safari sem permissão só aparece na nota (nunca unknown no item)
+      { category: 'cache_navegador', label: 'Cache dos navegadores', bytes: 820 * MB, files: 2_400, actionable: true, note: 'Safari: Não deu para ler: o macOS guarda isto atrás do Acesso Total ao Disco, que será pedido pelo app Folga (próxima etapa).' },
       { category: 'lixeira', label: 'Lixeira', bytes: 1.2 * GB, files: 96, actionable: false, note: 'o Folga não esvazia' },
     ] as QuickCleanItem[];
   }

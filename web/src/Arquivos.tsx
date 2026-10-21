@@ -86,13 +86,13 @@ export function Arquivos({ state }: { state: MemoryState | null }) {
   };
   useEffect(loadClean, []);
 
-  // dados dos apps (só no Mac: é a medição de Library, que demora alguns segundos)
+  // dados dos apps (Mac e Windows: medição das pastas de dados dos apps, que demora alguns segundos)
   const mac = state?.memPressure !== undefined;
   const loadApps = () => {
     setAppsError(false);
     getAppData().then(setApps).catch(() => { setApps(null); setAppsError(true); });
   };
-  useEffect(() => { if (mac) loadApps(); }, [mac]);
+  useEffect(loadApps, []);
 
   // sugestões, inclusive as do assistente
   useEffect(() => {
@@ -108,7 +108,7 @@ export function Arquivos({ state }: { state: MemoryState | null }) {
   const doneApps = sugs.filter(s => s.kind === 'dados_apps' && s.status === 'feita').length;
   const firstApps = useRef(true);
   useEffect(() => { if (firstClean.current) { firstClean.current = false; return; } loadClean(); }, [doneClean]);
-  useEffect(() => { if (firstApps.current) { firstApps.current = false; return; } setAppSel(new Set()); if (mac) loadApps(); }, [doneApps]);
+  useEffect(() => { if (firstApps.current) { firstApps.current = false; return; } setAppSel(new Set()); loadApps(); }, [doneApps]);
 
   async function search() {
     setScanning(true); setScanError(''); setSel(new Set());
@@ -208,7 +208,7 @@ export function Arquivos({ state }: { state: MemoryState | null }) {
               {scanning ? 'procurando…' : 'Procurar'}
             </button>
             <p className="arq-result" role="status">
-              {scanning ? (mac ? 'Olhando Downloads, Mesa, Documentos, Imagens, Filmes, Música e iCloud Drive…' : 'Olhando Downloads, Área de Trabalho, Documentos, Imagens, Vídeos e Músicas…')
+              {scanning ? (mac ? 'Olhando Downloads, Mesa, Documentos, Imagens, Filmes, Música…' : 'Olhando Downloads, Área de Trabalho, Documentos, Imagens, Vídeos e Músicas…')
                 : scan ? `${plural(scan.files.length, 'arquivo', 'arquivos')}${scan.files.length >= 500 ? ' (os 500 maiores)' : ''} · ${sizeFine(scan.totalBytes)} · em ${nf1.format(scan.durationMs / 1000)}${NB}s${scan.truncated ? ' · parou no limite, pode haver mais' : ''}`
                 : ''}
             </p>
@@ -270,48 +270,46 @@ export function Arquivos({ state }: { state: MemoryState | null }) {
           )}
         </section>
 
-        {mac && (
-          <section className="arq-clean" aria-labelledby={`${uid}-da`}>
-            <h2 className="arq-h" id={`${uid}-da`}>Dados dos apps</h2>
-            <div className="arq-card">
-              {apps === null && !appsError && <p className="arq-empty" role="status">Medindo os dados dos apps…</p>}
-              {appsError && <p className="arq-empty">Não deu para medir agora. <button type="button" className="arq-link" onClick={loadApps}>Tentar de novo</button></p>}
-              {apps && apps.entries.length === 0 && <p className="arq-empty">Nenhum app com dados grandes.</p>}
-              {apps?.entries.map(e => (
-                <div key={e.id} className="arq-app">
-                  <p className="arq-app-head"><strong>{e.name}</strong><span className="arq-cat-size">{sizeFine(e.bytes)}</span></p>
-                  <p className="arq-cat-note" title={e.where}>{e.where}</p>
-                  <ul className="arq-cats">
-                    {e.items.map(i => (
-                      <li key={i.id} data-info={!i.actionable || undefined}>
-                        <span className="arq-cat-name">
-                          {i.actionable && <input type="checkbox" className="arq-app-chk" checked={appSel.has(i.id)} disabled={i.bytes === 0} onChange={() => toggleApp(i.id)} aria-label={`Selecionar ${i.label}`} />}
-                          {i.label}
-                        </span>
-                        <span className="arq-cat-size">{sizeFine(i.bytes)}</span>
-                        <span className="arq-cat-note">{plural(i.files, 'arquivo', 'arquivos')}{i.note ? ` · ${i.note}` : ''}</span>
-                      </li>
-                    ))}
-                    {e.notes.map(n => (
-                      <li key={n.text} data-info>
-                        <span className="arq-cat-name">{n.text}</span>
-                        <span className="arq-cat-size">{sizeFine(n.bytes)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-              {apps?.truncated && <p className="arq-fine">Medição parcial: parou no limite, pode haver mais.</p>}
-              <p className="arq-fine">
-                {chosenApp.length === 0 ? 'Nenhum cache selecionado.' : `${plural(chosenApp.length, 'cache selecionado', 'caches selecionados')} · ${sizeFine(chosenAppBytes)}.`}
-                {' '}Só apps fechados. Conversas, logins e configurações ficam. Apaga de vez, não vai para a Lixeira.
-              </p>
-              <button type="button" className="pill" onClick={() => prepare('dados')} disabled={chosenApp.length === 0 || preparing !== null} aria-busy={preparing === 'dados'}>
-                {preparing === 'dados' ? 'preparando…' : 'Preparar limpeza'}
-              </button>
-            </div>
-          </section>
-        )}
+        <section className="arq-clean" aria-labelledby={`${uid}-da`}>
+          <h2 className="arq-h" id={`${uid}-da`}>Dados dos apps</h2>
+          <div className="arq-card">
+            {apps === null && !appsError && <p className="arq-empty" role="status">Medindo os dados dos apps…</p>}
+            {appsError && <p className="arq-empty">Não deu para medir agora. <button type="button" className="arq-link" onClick={loadApps}>Tentar de novo</button></p>}
+            {apps && apps.entries.length === 0 && <p className="arq-empty">Nenhum app com dados grandes.</p>}
+            {apps?.entries.map(e => (
+              <div key={e.id} className="arq-app">
+                <p className="arq-app-head"><strong>{e.name}</strong><span className="arq-cat-size">{sizeFine(e.bytes)}</span></p>
+                <p className="arq-cat-note" title={e.where}>{e.where}</p>
+                <ul className="arq-cats">
+                  {e.items.map(i => (
+                    <li key={i.id} data-info={!i.actionable || undefined}>
+                      <span className="arq-cat-name">
+                        {i.actionable && <input type="checkbox" className="arq-app-chk" checked={appSel.has(i.id)} disabled={i.bytes === 0} onChange={() => toggleApp(i.id)} aria-label={`Selecionar ${i.label}`} />}
+                        {i.label}
+                      </span>
+                      <span className="arq-cat-size">{sizeFine(i.bytes)}</span>
+                      <span className="arq-cat-note">{plural(i.files, 'arquivo', 'arquivos')}{i.note ? ` · ${i.note}` : ''}</span>
+                    </li>
+                  ))}
+                  {e.notes.map(n => (
+                    <li key={n.text} data-info>
+                      <span className="arq-cat-name">{n.text}</span>
+                      <span className="arq-cat-size">{sizeFine(n.bytes)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+            {apps?.truncated && <p className="arq-fine">Medição parcial: parou no limite, pode haver mais.</p>}
+            <p className="arq-fine">
+              {chosenApp.length === 0 ? 'Nenhum cache selecionado.' : `${plural(chosenApp.length, 'cache selecionado', 'caches selecionados')} · ${sizeFine(chosenAppBytes)}.`}
+              {' '}Só apps fechados. Conversas, logins e configurações ficam. Apaga de vez, não vai para a Lixeira.
+            </p>
+            <button type="button" className="pill" onClick={() => prepare('dados')} disabled={chosenApp.length === 0 || preparing !== null} aria-busy={preparing === 'dados'}>
+              {preparing === 'dados' ? 'preparando…' : 'Preparar limpeza'}
+            </button>
+          </div>
+        </section>
 
         <section className="arq-clean" aria-labelledby={`${uid}-lr`}>
           <h2 className="arq-h" id={`${uid}-lr`}>Limpeza rápida</h2>
