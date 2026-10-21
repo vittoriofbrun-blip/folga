@@ -101,7 +101,7 @@ export type Warning = {
   view?: View;             // onde se resolve
   firstSeen: number; lastSeen: number; active: boolean;
 };
-export type DiskInfo = { drive: string; total: number; free: number };
+export type DiskInfo = { drive: string; total: number; free: number; purgeable?: number };   // purgeable (Mac): o que o sistema libera sozinho; nunca entra em free
 export type StartupApp = { name: string; command: string; source: 'registro_usuario' | 'registro_maquina' | 'pasta_inicializar'; enabled: boolean };
 
 // Arquivos parados (D16)

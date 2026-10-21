@@ -60,6 +60,7 @@ export function memoryDraft(plan: { names: string[]; keys: string[]; bytes: numb
 
 /** O disco do sistema, ou o primeiro que veio. */
 export function systemDisk(disks: readonly DiskInfo[]): DiskInfo | null {
+  if (process.platform !== 'win32') return disks[0] ?? null;
   const sys = (process.env.SystemDrive ?? 'C:').toUpperCase();
   return disks.find(d => d.drive.toUpperCase() === sys) ?? disks[0] ?? null;
 }

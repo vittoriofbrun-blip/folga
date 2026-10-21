@@ -33,7 +33,7 @@ try {
   let pend: Suggestion[] = [];
   for (let i = 0; i < 60 && pend.length === 0; i++) {
     await sleep(200);
-    try { pend = (await get<Suggestion[]>('/api/suggestions')).filter(s => s.status === 'pendente'); } catch { /* subindo */ }
+    try { pend = (await get<Suggestion[]>('/api/suggestions')).filter(s => s.status === 'pendente' && s.kind === 'liberar_memoria'); } catch { /* subindo */ }
   }
   assert.equal(pend.length, 1, 'o vigia deveria ter proposto sozinho');
   const s = pend[0]!;
@@ -48,7 +48,7 @@ try {
   assert.ok(antes.apps.some(a => a.key === 'notepad'), 'o notepad não pode ter sido fechado sem o clique');
   assert.deepEqual(await get<LogEntry[]>('/api/log?limit=5'), []);
   await sleep(1_200);   // vários ciclos do vigia
-  assert.equal((await get<Suggestion[]>('/api/suggestions')).length, 1, 'não repete o cartão a cada ciclo');
+  assert.equal((await get<Suggestion[]>('/api/suggestions')).filter(s => s.kind === 'liberar_memoria').length, 1, 'não repete o cartão a cada ciclo');
   assert.ok((await get<MemoryState>('/api/state')).apps.some(a => a.key === 'notepad'));
   console.log('ok  R20: nada foi executado e o cartão não se repete');
 

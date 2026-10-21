@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { readdir, statfs as fsStatfs } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, parse } from 'node:path';
+import { macHelper } from './platform.ts';
 import type { DiskInfo, Emit, MemoryState, Settings, StartupApp, Severity, View, Warning, WarningKind } from './types.ts';
 
 export type WarningsDeps = {
@@ -15,6 +16,7 @@ export type WarningsDeps = {
   // opcionais, só para testes: o servidor passa apenas os obrigatórios
   exec?: (file: string, args: string[]) => Promise<string>;
   now?: () => number;
+  platform?: NodeJS.Platform;
   statfs?: (path: string) => Promise<{ bsize: number; blocks: number; bavail: number }>;
   startupFolder?: string;
 };
@@ -104,6 +106,12 @@ export function memoryWarning(memLoad: number, threshold: number): Candidate | n
   return cand('memoria', 'memoria', critical ? 'critico' : 'atencao',
     critical ? 'Memória quase esgotada' : 'Memória alta',
     `${nf0.format(memLoad)} % da memória está em uso.`, 'memoria');
+}
+
+/** Disco do Mac: livre = o que o statfs diz (nunca somado ao purgeable); purgeable = o que o macOS libera sozinho. */
+export function macDiskInfo(sf: { bsize: number; blocks: number; bavail: number }, vol: { name: string; important: number } | null): DiskInfo {
+  const total = sf.bsize * sf.blocks, free = sf.bsize * sf.bavail;
+  return vol ? { drive: vol.name, total, free, purgeable: Math.max(0, vol.important - free) } : { drive: 'Mac', total, free };
 }
 
 export function diskWarning(d: DiskInfo): Candidate | null {
@@ -211,7 +219,20 @@ export function createWarnings(deps: WarningsDeps) {
     if (sig !== lastSig) { lastSig = sig; deps.emit('warnings', list()); }
   }
 
+  // --volume é caro e o aviso roda a cada minuto: guarda 10 min
+  let volAt = 0;
+  let vol: { name: string; important: number } | null = null;
   async function disk(): Promise<DiskInfo[]> {
+    if ((deps.platform ?? process.platform) === 'darwin') {
+      // statfs do volume de dados (o home), não do "/" lacrado
+      const s = await statfs(homedir());
+      if (now() - volAt > 10 * 60_000) {
+        volAt = now();
+        const r = await macHelper(['--volume', homedir()], null, 15_000) as { name?: unknown; important?: unknown } | null;
+        vol = r && typeof r.name === 'string' && typeof r.important === 'number' ? { name: r.name, important: r.important } : null;
+      }
+      return [macDiskInfo(s, vol)];
+    }
     const sys = (process.env.SystemDrive ?? 'C:').toUpperCase();
     const profile = parse(homedir()).root.replace(/\\$/, '').toUpperCase();
     const drives = [...new Set([sys, profile].filter(d => /^[A-Z]:$/.test(d)))];

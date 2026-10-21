@@ -92,12 +92,12 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'ver_disco',
-    description: 'Use para ver quanto espaço livre há em cada unidade de disco do PC.',
+    description: 'Use para ver quanto espaço livre há no disco (no PC, em cada unidade). No Mac, liberavelPeloSistemaGB é o que o macOS libera sozinho quando precisa e não está somado em livreGB.',
     inputSchema: nada,
     readOnly: true,
     run: async () => {
-      const d = await get('/api/disk') as { drive: string; total: number; free: number }[];
-      return d.map(x => ({ unidade: x.drive, totalGB: +(x.total / GB).toFixed(1), livreGB: +(x.free / GB).toFixed(1), livrePorcento: x.total ? Math.round((x.free / x.total) * 100) : null }));
+      const d = await get('/api/disk') as { drive: string; total: number; free: number; purgeable?: number }[];
+      return d.map(x => ({ unidade: x.drive, totalGB: +(x.total / GB).toFixed(1), livreGB: +(x.free / GB).toFixed(1), livrePorcento: x.total ? Math.round((x.free / x.total) * 100) : null, ...(x.purgeable ? { liberavelPeloSistemaGB: +(x.purgeable / GB).toFixed(1) } : {}) }));
     },
   },
   {

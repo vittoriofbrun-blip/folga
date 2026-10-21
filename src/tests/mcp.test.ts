@@ -38,7 +38,7 @@ const ROUTES: Record<string, unknown> = {
     { id: 'memoria', kind: 'memoria', severity: 'critico', title: 'Memória alta', detail: '98 %', view: 'memoria', firstSeen: 0, active: true },
     { id: 'velho', kind: 'sonda', severity: 'info', title: 'Antigo', detail: '-', firstSeen: 0, active: false },
   ],
-  'GET /api/disk': [{ drive: 'C:', total: 500 * GB, free: 40 * GB }],
+  'GET /api/disk': [{ drive: 'C:', total: 500 * GB, free: 40 * GB }, { drive: 'Macintosh HD', total: 500 * GB, free: 40 * GB, purgeable: 12 * GB }],
   'POST /api/files/scan': { t: 0, durationMs: 1, roots: ['C:\\Users\\A\\Downloads'], scanned: 9000, truncated: true, accessTracking: true, olderThanDays: 180, minBytes: 10 * MB, files, totalBytes: 99 * GB },
   'GET /api/quickclean': [{ category: 'temp_usuario', label: 'Temporários', bytes: 300 * MB, files: 50, actionable: true }, { category: 'lixeira', label: 'Lixeira', bytes: 5 * MB, files: 2, actionable: false, note: 'só informação' }],
   'GET /api/appdata': { t: 0, durationMs: 1, truncated: false, totalBytes: 3 * GB, entries: [
@@ -163,7 +163,7 @@ await caso('ver_avisos: só os ativos, do mais grave ao menos grave', async () =
 });
 
 await caso('ver_disco, ver_limpeza_rapida, ver_inicializacao e ver_registro resumem a API', async () => {
-  assert.deepEqual((await call('ver_disco')).json, [{ unidade: 'C:', totalGB: 500, livreGB: 40, livrePorcento: 8 }]);
+  assert.deepEqual((await call('ver_disco')).json, [{ unidade: 'C:', totalGB: 500, livreGB: 40, livrePorcento: 8 }, { unidade: 'Macintosh HD', totalGB: 500, livreGB: 40, livrePorcento: 8, liberavelPeloSistemaGB: 12 }]);
   const q = (await call('ver_limpeza_rapida')).json;
   assert.equal(q[0].MB, 300);
   assert.equal(q[1].podeLimpar, false);

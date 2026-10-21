@@ -6,7 +6,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  approvedEnabled, avWarning, createWarnings, decodeAvState, parseAv, parseCrashes, parseRegQuery, settingsWarning,
+  approvedEnabled, avWarning, macDiskInfo, createWarnings, decodeAvState, parseAv, parseCrashes, parseRegQuery, settingsWarning,
   type WarningsDeps,
 } from '../warnings.ts';
 import { DEFAULT_SETTINGS, type MemoryState, type Warning } from '../types.ts';
@@ -29,6 +29,7 @@ function rig(over: Partial<WarningsDeps> = {}) {
     settingsProblem: () => env.settingsProblem,
     emit: (_e, data) => { env.emitted.push(data as Warning[]); },
     now: () => env.t,
+    platform: 'win32',   // estes casos são do disco do Windows; o do Mac é macDiskInfo
     statfs: async () => ({ bsize: 4096, blocks: env.disk.total / 4096, bavail: env.disk.free / 4096 }),
     exec: async () => { throw new Error('exec não esperado'); },
     ...over,
@@ -295,6 +296,17 @@ const MCAFEE = 266240;     // 0x041000: McAfee ativo e em dia
   env.memLoad = 40; await w.run.fast();
   assert.equal(env.emitted.length, n, 'depois do stop nada muda nem emite');
   ok('start() roda tudo logo; stop() limpa timers e silencia');
+}
+
+{
+  const sf = { bsize: 4096, blocks: 55_700_000, bavail: 9_500_000 };
+  const d = macDiskInfo(sf, { name: 'Macintosh HD', important: 52e9 });
+  assert.equal(d.free, 4096 * 9_500_000);   // livre = o que o statfs diz, nunca + purgeable
+  assert.equal(d.purgeable, 52e9 - 4096 * 9_500_000);
+  assert.equal(d.drive, 'Macintosh HD');
+  assert.equal(macDiskInfo({ bsize: 4096, blocks: 10, bavail: 5 }, { name: 'X', important: 1 }).purgeable, 0);   // nunca negativo
+  assert.deepEqual(macDiskInfo({ bsize: 4096, blocks: 10, bavail: 5 }, null), { drive: 'Mac', total: 40960, free: 20480 });
+  ok('macDiskInfo: livre do statfs, purgeable à parte e nunca negativo');
 }
 
 console.log(`warnings: ${passed} casos ok`);
