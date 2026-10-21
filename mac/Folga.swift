@@ -128,6 +128,23 @@ func tamanho(_ b: Int64) -> String {
   return "\(f.string(from: NSNumber(value: max(0, Double(b)) / mb)) ?? "?")\u{a0}MB"
 }
 
+/// Botões do alerta de liberar: "Cancelar" é o 1º (Return), "Fechar" o 2º (sem tecla). Só o 2º fecha apps.
+func confirmouFechar(_ r: NSApplication.ModalResponse) -> Bool { r == .alertSecondButtonReturn }
+
+/// Título e texto do alerta de resultado. `status == nil` = sem resposta depois do POST (tempo esgotado, conexão
+/// caiu): a liberação pode ter acontecido, então manda ver o Registro. R08: o que voltou é o disponível depois
+/// menos o de antes, nunca a soma dos apps.
+func resultadoLiberar(status: Int?, corpo: [String: Any]) -> (titulo: String, texto: String) {
+  guard let status else { return ("Não deu para confirmar o resultado: veja o Registro", "A liberação pode ter acontecido.") }
+  guard status == 200 else { return ("Não deu para liberar agora", corpo["erro"] as? String ?? "Erro \(status).") }
+  guard let depois = (corpo["availAfter"] as? NSNumber)?.int64Value, let antes = (corpo["availBefore"] as? NSNumber)?.int64Value else {
+    return ("Liberação feita; veja o Registro", "")
+  }
+  let volta = depois - antes
+  return volta > 0 ? ("\(tamanho(volta)) liberados", "Medido antes e depois de fechar.")
+    : ("Nada voltou para a memória", "Os apps podem ter pedido para salvar ou continuam abertos.")
+}
+
 func statusText(memLoad: Int?, freeBytes: Int64?) -> String {
   guard let m = memLoad else { return "Folga" }
   guard let f = freeBytes else { return "\(m)%" }
@@ -227,6 +244,14 @@ func selftest() -> Int32 {
   caso("idleApps: estado sem apps → vazio", idleApps(["memLoad": 50]).isEmpty)
   caso("tamanho: 180 MB e 1,5 GB", tamanho(180 * 1_048_576) == "180\u{a0}MB" && tamanho(1_610_612_736) == "1,5\u{a0}GB")
 
+  caso("alerta: 1º botão (Cancelar/Return) não fecha", !confirmouFechar(.alertFirstButtonReturn))
+  caso("alerta: 2º botão (Fechar) fecha", confirmouFechar(.alertSecondButtonReturn))
+  caso("alerta: Esc/abort não fecha", !confirmouFechar(.abort) && !confirmouFechar(.stop))
+  caso("resultado: sem resposta → veja o Registro", resultadoLiberar(status: nil, corpo: [:]).titulo == "Não deu para confirmar o resultado: veja o Registro")
+  caso("resultado: 200 sem números → veja o Registro", resultadoLiberar(status: 200, corpo: ["results": []]).titulo == "Liberação feita; veja o Registro")
+  caso("resultado: R08 depois − antes", resultadoLiberar(status: 200, corpo: ["availBefore": 1_000_000_000, "availAfter": 1_188_743_680]).titulo == "180\u{a0}MB liberados")
+  caso("resultado: nada voltou", resultadoLiberar(status: 200, corpo: ["availBefore": 5, "availAfter": 5]).titulo == "Nada voltou para a memória")
+  caso("resultado: 409 mostra o erro do servidor", resultadoLiberar(status: 409, corpo: ["erro": "app protegido"]).texto == "app protegido")
   caso("statusText sem servidor → Folga", statusText(memLoad: nil, freeBytes: nil) == "Folga")
   caso("statusText 62% · 39 GB", statusText(memLoad: 62, freeBytes: 39_000_000_000) == "62% · 39 GB")
 
@@ -263,6 +288,7 @@ final class Supervisor {
   private let tentar = NSMenuItem(title: "O Folga parou — tentar de novo", action: #selector(tentarDeNovo), keyEquivalent: "")
 
   private let janela = Janela()
+  private let liberar = NSMenuItem(title: "Liberar parados…", action: #selector(liberarParados), keyEquivalent: "")
   private var relogio: Timer?
   private let sessao = URLSession(configuration: .ephemeral)
 
@@ -280,7 +306,6 @@ final class Supervisor {
     sair.target = self
     let abrir = NSMenuItem(title: "Abrir Folga", action: #selector(abrirJanela), keyEquivalent: "o")
     abrir.target = self
-    let liberar = NSMenuItem(title: "Liberar parados…", action: #selector(liberarParados), keyEquivalent: "")
     liberar.target = self
     for i in [abrir, liberar, .separator(), estado, tentar, .separator(), sair] { menu.addItem(i) }
     item.menu = menu
@@ -290,7 +315,14 @@ final class Supervisor {
 
   @objc func abrirJanela() { janela.abrir() }
 
-  @objc private func liberarParados() { Task { await liberar() } }
+  @objc private func liberarParados() {
+    guard liberar.isEnabled else { return }
+    liberar.isEnabled = false   // sem segundo POST enquanto este roda
+    Task {
+      await liberarAgora()
+      liberar.isEnabled = true
+    }
+  }
 
   private func pedir(_ metodo: String, _ caminho: String, token: String? = nil, corpo: Data? = nil) async -> (Int, [String: Any])? {
     var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(caminho)")!)
@@ -315,7 +347,7 @@ final class Supervisor {
 
   /// O mesmo caminho do botão da tela Memória: lista do servidor, confirmação, POST /api/release com o token.
   /// O releaser revalida tudo no clique (protegido → 409). O token é lido só aqui e não fica guardado.
-  private func liberar() async {
+  private func liberarAgora() async {
     guard let (st, estado) = await pedir("GET", "/api/state"), st == 200 else {
       return avisar("O Folga não respondeu", "Tente de novo em alguns segundos.")
     }
@@ -325,23 +357,25 @@ final class Supervisor {
     let a = NSAlert()
     a.messageText = "Liberar parados"
     a.informativeText = "Fechar do jeito normal (como Cmd+Q): \(apps.map(\.name).joined(separator: ", ")) — cerca de \(tamanho(total)). Cada app pode perguntar se você quer salvar."
-    a.addButton(withTitle: "Fechar")
-    a.addButton(withTitle: "Cancelar").keyEquivalent = "\u{1b}"   // Esc cancela
+    a.addButton(withTitle: "Cancelar")                        // 1º = Return
+    a.addButton(withTitle: "Fechar").keyEquivalent = ""       // nenhuma tecla fecha apps
+    // Esc também cancela (o botão Cancelar já tem o Return; um botão só tem uma tecla)
+    let esc = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
+      if e.keyCode == 53 { NSApp.stopModal(withCode: .alertFirstButtonReturn); return nil }
+      return e
+    }
     NSApp.activate(ignoringOtherApps: true)
-    guard a.runModal() == .alertFirstButtonReturn else { return }
+    let resposta = a.runModal()
+    if let esc { NSEvent.removeMonitor(esc) }
+    guard confirmouFechar(resposta) else { return }
 
     guard let (ts, tk) = await pedir("GET", "/api/token"), ts == 200, let token = tk["token"] as? String else {
       return avisar("Não deu para liberar agora", "O Folga não respondeu. Tente de novo.")
     }
     let corpo = try? JSONSerialization.data(withJSONObject: ["keys": apps.map(\.key)])
-    guard let (rs, r) = await pedir("POST", "/api/release", token: token, corpo: corpo) else {
-      return avisar("Não deu para liberar agora", "O Folga não respondeu. Tente de novo.")
-    }
-    guard rs == 200 else { return avisar("Não deu para liberar agora", r["erro"] as? String ?? "Erro \(rs).") }
-    // R08: o que voltou é o disponível depois menos o de antes, nunca a soma dos apps
-    let volta = ((r["availAfter"] as? NSNumber)?.int64Value ?? 0) - ((r["availBefore"] as? NSNumber)?.int64Value ?? 0)
-    avisar(volta > 0 ? "\(tamanho(volta)) liberados" : "Nada voltou para a memória",
-           volta > 0 ? "Medido antes e depois de fechar." : "Os apps podem ter pedido para salvar ou continuam abertos.")
+    let r = await pedir("POST", "/api/release", token: token, corpo: corpo)
+    let (titulo, texto) = resultadoLiberar(status: r?.0, corpo: r?.1 ?? [:])
+    avisar(titulo, texto)
     await atualizarTexto()
   }
 
