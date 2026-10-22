@@ -4,7 +4,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join, posix } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { SuggestionError } from './suggestions.ts';
@@ -114,6 +114,28 @@ export const validSessionId = (provider: AgentProvider, v: unknown): string | nu
 
 const fwd = (p: string) => p.replaceAll('\\', '/');
 const toml = (s: string) => JSON.stringify(s);   // string TOML básica = string JSON
+// Codex 0.157 no Mac (spike do ADR 0006, 22/10): recursos novos que dão ao agente outro jeito de agir. Fora fica o
+// code_mode_host: desligado, o MCP do Folga para de funcionar (o code mode falha fechado).
+export const CODEX_DISABLE_MAC = ['unified_exec', 'multi_agent', 'memories', 'workspace_dependencies', 'skill_mcp_dependency_install',
+  'in_app_local_automation', 'worktrees'];
+const API_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'CODEX_API_KEY'];
+
+/** Ambiente do CLI. Windows: o do servidor sem as chaves de API (a cota vem da assinatura). Mac: montado do zero — nada de
+ *  NODE_*, DYLD_*, chave de API ou PATH do usuário. O PATH fixo basta: os dois CLIs são nativos, o shell está desligado e o
+ *  MCP vai por caminho absoluto (process.execPath); o bin do bundle não entra para o CLI não achar o node do app pelo nome. */
+export function cliEnv(base: NodeJS.ProcessEnv, platform: NodeJS.Platform): NodeJS.ProcessEnv {
+  if (platform !== 'darwin') {
+    const clean = { ...base };
+    for (const k of API_KEYS) delete clean[k];
+    return clean;
+  }
+  const user = userInfo().username;
+  return {
+    HOME: homedir(), USER: user, LOGNAME: user, ...(base.LANG ? { LANG: base.LANG } : {}),
+    TMPDIR: base.TMPDIR ?? tmpdir(), PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+  };
+}
+
 const CODEX_DISABLE = ['shell_tool', 'plugins', 'apps', 'browser_use', 'browser_use_external', 'computer_use', 'image_generation',
   'in_app_browser', 'hooks', 'tool_suggest', 'skill_search', 'goals', 'view_image'];
 
@@ -132,10 +154,9 @@ export const DISCLAIM_UNAVAILABLE = 125;
 export const DISCLAIM_FAIL = 'O assistente não roda dentro do app Folga neste macOS: não deu para isolá-lo do app. Nada foi executado.';
 
 /** Comando real de cada provedor, com as flags exatas do spike (ADR 0006). */
-export function realLaunch(t: TurnInput, dataDir: string, port: number, exe = WIN_EXE[t.provider]): Launch {
+export function realLaunch(t: TurnInput, dataDir: string, port: number, exe = WIN_EXE[t.provider], platform = process.platform): Launch {
   // a cota vem da assinatura: chave de API no ambiente trocaria o faturamento sem o Antônio saber
-  const clean = { ...process.env };
-  for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'CODEX_API_KEY']) delete clean[k];
+  const clean = cliEnv(process.env, platform);
   // texto que começa com "-" viraria opção do CLI
   const prompt = t.prompt.startsWith('-') ? ' ' + t.prompt : t.prompt;
 
@@ -165,7 +186,7 @@ export function realLaunch(t: TurnInput, dataDir: string, port: number, exe = WI
     '-c', `mcp_servers.folga.args=[${toml('--no-warnings')},${toml(mcpRoot)}]`,
     '-c', `mcp_servers.folga.env={FOLGA_PORT=${toml(String(port))},FOLGA_DATA_DIR=${toml(fwd(dataDir))}}`,
     '-c', `developer_instructions=${toml(t.system)}`,
-    ...CODEX_DISABLE.flatMap(f => ['--disable', f]),
+    ...(platform === 'darwin' ? [...CODEX_DISABLE, ...CODEX_DISABLE_MAC] : CODEX_DISABLE).flatMap(f => ['--disable', f]),
   ];
   // `exec resume` não aceita --sandbox nem -C (por isso sandbox_mode vai por -c e a pasta é o cwd do processo)
   return {

@@ -4,9 +4,9 @@
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { agentCwd, codexNative, createAgent, disclaimed, findCli, missing, safeExe, DISCLAIM_FAIL, DISCLAIM_UNAVAILABLE, extractSuggestions, feed, killTree, newAcc, realLaunch, type Launch } from '../agent.ts';
+import { agentCwd, cliEnv, CODEX_DISABLE_MAC, codexNative, createAgent, disclaimed, findCli, missing, safeExe, DISCLAIM_FAIL, DISCLAIM_UNAVAILABLE, extractSuggestions, feed, killTree, newAcc, realLaunch, type Launch } from '../agent.ts';
 import type { AgentEvent, AgentProvider, Suggestion, SuggestionDraft } from '../types.ts';
 
 let n = 0;
@@ -180,6 +180,49 @@ await caso('Codex: leitura apenas, sem config do usuário, recursos desligados; 
   assert.deepEqual(resume.slice(0, 2), ['exec', 'resume']);
   assert.deepEqual(resume.slice(-3), ['--', 'T1', 'de novo']);
   assert.ok(resume.includes('sandbox_mode="read-only"') && resume.includes('--ignore-user-config'));
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Ambiente e flags no Mac: ambiente montado do zero, PATH fixo do sistema; recursos novos do Codex só no darwin
+// ---------------------------------------------------------------------------------------------------
+const SUJO: NodeJS.ProcessEnv = { NODE_OPTIONS: '--require /tmp/x.js', DYLD_INSERT_LIBRARIES: '/tmp/x.dylib', ANTHROPIC_API_KEY: 'k', OPENAI_API_KEY: 'k',
+  PATH: '/Users/v/.nvm/bin:/tmp', LANG: 'pt_BR.UTF-8', SEGREDO: 's' };
+await caso('cliEnv: no Mac só HOME/USER/LOGNAME/LANG/TMPDIR/PATH fixo; no Windows a cópia de hoje sem as chaves de API', () => {
+  const mac = cliEnv(SUJO, 'darwin');
+  assert.deepEqual(Object.keys(mac).sort(), ['HOME', 'LANG', 'LOGNAME', 'PATH', 'TMPDIR', 'USER']);
+  assert.equal(mac.PATH, '/usr/bin:/bin:/usr/sbin:/sbin');
+  assert.equal(mac.HOME, homedir());
+  assert.equal(mac.USER, userInfo().username);
+  assert.equal(mac.LOGNAME, userInfo().username);
+  assert.equal(mac.LANG, 'pt_BR.UTF-8');
+  assert.ok(mac.TMPDIR);
+  assert.ok(!('LANG' in cliEnv({ PATH: '/x' }, 'darwin')), 'sem LANG no base, sem LANG');
+  const win = cliEnv(SUJO, 'win32');
+  const { ANTHROPIC_API_KEY: _a, OPENAI_API_KEY: _o, ...semChaves } = SUJO;
+  assert.deepEqual(win, semChaves);
+});
+
+await caso('realLaunch no Mac: exe passado, ambiente do cliEnv, Codex com os nomes do Mac desligados; Windows igual a hoje', () => {
+  const t = (provider: AgentProvider) => ({ provider, prompt: 'oi', sessionId: null, system: 'S', mcpFile: 'm' });
+  const c = realLaunch(t('claude'), '/d', 4780, '/x/claude.exe', 'darwin');
+  assert.equal(c.cmd, '/x/claude.exe');
+  assert.deepEqual(c.env, { ...cliEnv(process.env, 'darwin'), CLAUDE_CODE_HARBOR_KITE: '0' });
+  const g = realLaunch(t('gpt'), '/d', 4780, '/x/codex', 'darwin');
+  assert.equal(g.cmd, '/x/codex');
+  assert.deepEqual(g.env, cliEnv(process.env, 'darwin'));
+  const disabled = g.args.flatMap((x, i) => (x === '--disable' ? [g.args[i + 1]] : []));
+  for (const f of ['shell_tool', 'plugins', 'apps', 'browser_use', 'browser_use_external', 'computer_use', 'image_generation', 'in_app_browser', 'hooks', 'tool_suggest', 'skill_search', 'goals', 'view_image', ...CODEX_DISABLE_MAC]) assert.ok(disabled.includes(f), f);
+  assert.ok(CODEX_DISABLE_MAC.includes('unified_exec') && !CODEX_DISABLE_MAC.includes('code_mode_host'), 'code_mode_host desligado derruba o MCP (ADR 0006)');
+  assert.ok(g.args.includes(`mcp_servers.folga.command=${JSON.stringify(process.execPath.replaceAll('\\', '/'))}`));
+  // Windows: o de hoje, sem nenhum nome do Mac
+  for (const p of ['claude', 'gpt'] as const) {
+    const w = realLaunch(t(p), 'C:/d', 4780, undefined, 'win32');
+    if (process.platform === 'win32') assert.deepEqual(w, realLaunch(t(p), 'C:/d', 4780));
+    assert.ok(w.cmd.endsWith(p === 'claude' ? 'claude.exe' : 'codex.exe'), w.cmd);
+    const { ANTHROPIC_API_KEY: _a, ANTHROPIC_AUTH_TOKEN: _b, OPENAI_API_KEY: _c, CODEX_API_KEY: _d, ...rest } = process.env;
+    assert.deepEqual(w.env, p === 'claude' ? { ...rest, CLAUDE_CODE_HARBOR_KITE: '0' } : rest);
+    assert.ok(!w.args.some(x => CODEX_DISABLE_MAC.includes(x)));
+  }
 });
 
 // ---------------------------------------------------------------------------------------------------

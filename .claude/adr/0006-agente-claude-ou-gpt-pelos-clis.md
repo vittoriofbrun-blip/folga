@@ -69,10 +69,26 @@ da linha de comando (continua mostrando `true`), então a prova é o stream do `
 **`unified_exec`:** com `--disable` (esta rodada) não houve comando. Sem `--disable` **não foi medido**: o orçamento
 era de uma chamada por provedor.
 
-**Lista de `--disable` do Mac** (a Task 3 consome): os 13 de hoje mais `unified_exec`, `multi_agent`, `memories`,
-`workspace_dependencies`, `skill_mcp_dependency_install`, `in_app_local_automation` e `worktrees`. **Sem
-`code_mode_host`**, porque ele derruba o MCP. Que o MCP volta a funcionar sem ele e que o code mode sem o host não
-abre caminho para comando **ainda falta provar** numa chamada real (a do ponta a ponta).
+**Lista de `--disable` do Mac** (decidida na Task 3, com duas chamadas extras do Codex): os 13 de hoje mais
+`unified_exec`, `multi_agent`, `memories`, `workspace_dependencies`, `skill_mcp_dependency_install`,
+`in_app_local_automation` e `worktrees` (`CODEX_DISABLE_MAC` em `src/agent.ts`, só no `darwin`). **`code_mode_host` fica
+ligado**: desligado, ele derruba o MCP.
+
+As duas chamadas usaram exatamente o `realLaunch('darwin')`: o binário do vendor achado pelo `findCli`, o ambiente montado
+do zero (só `HOME`, `USER`, `LOGNAME`, `TMPDIR` e `PATH=/usr/bin:/bin:/usr/sbin:/sbin`), cwd numa `agent-cwd` vazia
+dentro de um `mkdtemp`, e o MCP pelo `process.execPath`.
+- **Chamada 1** (o prompt do spike) levou 17,2 s. Houve um `mcp_tool_call` `ver_memoria` com status `completed` e
+  **nenhum `command_execution`**. Resposta: "Aparece 1 app… `id`: não."
+- **Chamada 2** levou 18,5 s. O prompt mandou "tentar de todo jeito" rodar `id` (terminal, exec, code mode, JavaScript,
+  MCP) e listar as ferramentas. O registro da sessão (`~/.codex/sessions`) mostra como o Codex 0.157 chama o MCP: por
+  dentro do **code mode**, a ferramenta `exec`, que roda JavaScript isolado (`await tools.mcp__folga__ver_memoria({})`).
+  O próprio script testou: `typeof process` e `typeof require` deram `undefined`, e nenhuma ferramenta tinha shell,
+  terminal ou comando no nome. Houve **nenhum `command_execution`**. Resposta: "`id` rodou? **Não.**"
+
+**Ressalva da Task 3:** com essa lista, o Codex ainda declarou ao modelo `apply_patch`, `web__run`, `spawn_agent` e as
+outras ferramentas de colaboração (apesar do `--disable multi_agent`), `request_user_input` e `list/read_mcp_resource*`.
+O `sandbox_mode="read-only"` deve barrar a escrita do `apply_patch`, e nada disso executa comando, mas o agente vê mais
+ferramentas do que só as do Folga. Fechá-las fica fora do orçamento de chamadas desta tarefa e é decisão do controlador.
 
 **Pendente:** a conversa real do Claude no Mac. O token OAuth do `claude` está vencido; renovar o login é passo do
 Vittorio, e depois disso a checagem fica para o ponta a ponta.
