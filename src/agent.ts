@@ -5,7 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, posix } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { SuggestionError } from './suggestions.ts';
 import type {
@@ -69,11 +69,11 @@ export function safeExe(p: string, uid: number): string | null {
 
 const CODEX_JS = '/@openai/codex/bin/codex.js';
 const CODEX_ARCH: Record<string, [string, string]> = { arm64: ['arm64', 'aarch64'], x64: ['x64', 'x86_64'] };
-/** O `codex` do npm é um script (codex.js) que lança o binário do vendor: o Folga roda o binário direto. */
+/** O `codex` do npm é um script (codex.js) que lança o binário do vendor: o Folga roda o binário direto. Só Mac (posix). */
 export function codexNative(real: string, arch: string): string {
   const a = CODEX_ARCH[arch];
   if (!a || !real.endsWith(CODEX_JS)) return real;
-  return join(real.slice(0, -'/bin/codex.js'.length), 'node_modules', '@openai', `codex-darwin-${a[0]}`, 'vendor', `${a[1]}-apple-darwin`, 'bin', 'codex');
+  return posix.join(real.slice(0, -'/bin/codex.js'.length), 'node_modules', '@openai', `codex-darwin-${a[0]}`, 'vendor', `${a[1]}-apple-darwin`, 'bin', 'codex');
 }
 
 const nodeVersion = (v: string) => v.slice(1).split('.').map(Number);
