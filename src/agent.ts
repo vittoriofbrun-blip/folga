@@ -290,6 +290,26 @@ export function extractSuggestions(raw: string): Extracted {
 // ---------------------------------------------------------------------------------------------------
 type Stored = { id: string; provider: AgentProvider; sessionId: string | null; messages: ChatMessage[] };
 
+const SO_TEXTO: Record<'win32' | 'darwin', Record<string, string>> = {
+  win32: {
+    SO: 'Windows', O_USUARIO: 'o Antônio', DO_USUARIO: 'do Antônio', AO_USUARIO: 'ao Antônio', DO_PC: 'do PC',
+    EXEMPLO_CAMINHO: 'C:\\\\Users\\\\Antônio\\\\Downloads\\\\setup-antigo.exe', NOTA_BARRAS: 'Dentro do JSON, barras invertidas em dobro.',
+    PASTAS_SISTEMA: 'Windows, Program Files, ProgramData, AppData fora dos temporários e caches das ferramentas',
+  },
+  // o app é do Vittorio, mas o código vai para o Antônio no PR: nome próprio fica fora do texto do Mac
+  darwin: {
+    SO: 'Mac (macOS)', O_USUARIO: 'o usuário', DO_USUARIO: 'do usuário', AO_USUARIO: 'ao usuário', DO_PC: 'do computador',
+    EXEMPLO_CAMINHO: '/Users/voce/Downloads/instalador-antigo.dmg', NOTA_BARRAS: '',
+    PASTAS_SISTEMA: '/System, /Library, /Applications, ~/Library fora dos caches que as ferramentas mostram',
+  },
+};
+let promptModelo: string | undefined;
+export function promptFor(platform: NodeJS.Platform): string {
+  promptModelo ??= readFileSync(join(import.meta.dirname, 'agent-prompt.md'), 'utf8').trim();
+  const t = SO_TEXTO[platform === 'darwin' ? 'darwin' : 'win32'];
+  return promptModelo.replace(/\{\{(\w+)\}\}/g, (_, k: string) => t[k] ?? '');
+}
+
 export function killTree(pid: number, platform = process.platform) {
   if (platform === 'darwin') {
     // só o grupo que o spawn detached criou (pgid == pid do filho): nunca 0/1/negativo nem o nosso próprio grupo
@@ -310,7 +330,6 @@ export function createAgent(deps: AgentDeps) {
   const cwd = agentCwd(deps.dataDir);
   const kill = deps.killTree ?? killTree;
   const timeoutMs = deps.turnTimeoutMs ?? TURN_TIMEOUT_MS;
-  let system: string | null = null;
 
   const fresh = (provider: AgentProvider): Stored => ({ id: randomUUID(), provider, sessionId: null, messages: [] });
   function load(): Stored {
@@ -344,8 +363,7 @@ export function createAgent(deps: AgentDeps) {
     writeFileSync(mcpFile, JSON.stringify(cfg));
   }
   function systemPrompt(): string {
-    system ??= readFileSync(join(import.meta.dirname, 'agent-prompt.md'), 'utf8').trim();
-    return `${system}\n\nHoje é ${dateBR()}.`;
+    return `${promptFor(process.platform)}\n\nHoje é ${dateBR()}.`;
   }
 
   /** Fecha o turno: grava a resposta (ou o erro) e avisa a tela. Ignora se a conversa já foi trocada (reset). */

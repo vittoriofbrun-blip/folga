@@ -55,7 +55,7 @@ const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : u
 export const TOOLS: Tool[] = [
   {
     name: 'ver_memoria',
-    description: 'Use para saber como está a memória do PC agora: porcentagem em uso e os apps agrupados em parados, em uso e protegidos. Os protegidos vêm detalhados (R36): os maiores, o motivo de cada um em palavras e, nos processos sem janela, de que app eles são serviço. Nenhum protegido pode ser fechado; só a lista "nunca fechar" do usuário sai de lá, em Ajustes.',
+    description: 'Use para saber como está a memória do computador agora: porcentagem em uso e os apps agrupados em parados, em uso e protegidos. Os protegidos vêm detalhados (R36): os maiores, o motivo de cada um em palavras e, nos processos sem janela, de que app eles são serviço. Nenhum protegido pode ser fechado; só a lista "nunca fechar" do usuário sai de lá, em Ajustes.',
     inputSchema: nada,
     readOnly: true,
     run: async () => {
@@ -92,7 +92,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'ver_disco',
-    description: 'Use para ver quanto espaço livre há no disco (no PC, em cada unidade). No Mac, liberavelPeloSistemaGB é o que o macOS libera sozinho quando precisa e não está somado em livreGB.',
+    description: 'Use para ver quanto espaço livre há no disco (no computador, em cada unidade). No Mac, liberavelPeloSistemaGB é o que o macOS libera sozinho quando precisa e não está somado em livreGB.',
     inputSchema: nada,
     readOnly: true,
     run: async () => {
@@ -157,7 +157,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'ver_inicializacao',
-    description: 'Use para ver quais programas abrem junto com o Windows (e se estão ativos). Ajuda a explicar o que pesa logo depois de ligar o PC.',
+    description: 'Use para ver quais programas abrem junto com o sistema (Windows: inicialização; Mac: LaunchAgents e LaunchDaemons) e se estão ativos. Ajuda a explicar o que pesa logo depois de ligar o computador.',
     inputSchema: nada,
     readOnly: true,
     run: async () => {
