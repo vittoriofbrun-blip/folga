@@ -9,6 +9,7 @@
 import AppKit
 import Foundation
 import os
+import Security
 import UserNotifications
 import WebKit
 
@@ -216,6 +217,13 @@ func notifyExit(status: UNAuthorizationStatus, alert: UNNotificationSetting) -> 
   }
 }
 
+/// A instância principal pede autorização se ainda não está autorizado e ainda não pediu para este build.
+/// Não exige `.notDetermined`: para um cliente que o usernoted nunca aceitou o estado pode vir `.denied` sem
+/// nunca ter havido pedido na tela — esperar `.notDetermined` deixava o Folga sem pedir nunca.
+func deveSolicitar(status: UNAuthorizationStatus, jaPediuNesteBuild: Bool) -> Bool {
+  status != .authorized && !jaPediuNesteBuild
+}
+
 enum Lancamento: Equatable { case versao, selftest, notificar, rodar(login: Bool), uso }
 /// Argumentos (sem o nome do programa). `--login` vale sozinho: é o que o LaunchAgent passa (decisão 15).
 func lancamento(_ args: [String]) -> Lancamento {
@@ -370,6 +378,12 @@ func selftest() -> Int32 {
   caso("aviso de notificações: 0 nenhum, 3 neutro, 4 desligadas", avisoNotificacoesTexto(0) == nil
        && avisoNotificacoesTexto(3) == avisoNotificacoesPendentes && avisoNotificacoesTexto(4) == avisoNotificacoes
        && !avisoNotificacoesPendentes.contains("desligadas"))
+  caso("deveSolicitar: negado ou não perguntado, sem pedido neste build → pede",
+       deveSolicitar(status: .denied, jaPediuNesteBuild: false) && deveSolicitar(status: .notDetermined, jaPediuNesteBuild: false))
+  caso("deveSolicitar: já pediu neste build → não pede", !deveSolicitar(status: .denied, jaPediuNesteBuild: true)
+       && !deveSolicitar(status: .notDetermined, jaPediuNesteBuild: true))
+  caso("buildCarimbo: cdhash da própria assinatura (40 hex)", buildCarimbo().count == 40 && buildCarimbo().allSatisfy(\.isHexDigit))
+  caso("deveSolicitar: autorizado → não pede", !deveSolicitar(status: .authorized, jaPediuNesteBuild: false))
   caso("disco livre: 39 GB", discoLivreTexto(39_000_000_000) == "Disco livre: 39 GB")
   caso("disco livre: ilegível → —", discoLivreTexto(nil) == "Disco livre: —")
   caso("statusText só memória (decisão 18)", statusText(memLoad: 62) == "62%")
@@ -772,6 +786,30 @@ func relatar(_ etapa: String, _ erro: Error?) {
   FileHandle.standardError.write(Data("folga avisos: \(linha)\n".utf8))
 }
 
+/// Carimbo do build instalado: o cdhash da própria assinatura (muda a cada build ad-hoc); sem ele, a versão.
+func buildCarimbo() -> String {
+  var code: SecCode?
+  var staticCode: SecStaticCode?
+  var info: CFDictionary?
+  if SecCodeCopySelf([], &code) == errSecSuccess, let code, SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess,
+     let staticCode, SecCodeCopySigningInformation(staticCode, [], &info) == errSecSuccess,
+     let cd = (info as? [String: Any])?[kSecCodeInfoUnique as String] as? Data {
+    return cd.map { String(format: "%02x", $0) }.joined()
+  }
+  return "versao-\(version ?? "?")"
+}
+
+/// Uma linha datada em ~/Library/Application Support/Folga/notificacoes.log (mesmas travas do server.log) e no log público.
+func anotarNotificacoes(_ linha: String) {
+  logger.notice("avisos \(linha, privacy: .public)")
+  FileHandle.standardError.write(Data("folga avisos: \(linha)\n".utf8))
+  let dir = URL(fileURLWithPath: homeDir()).appendingPathComponent("Library/Application Support/Folga")
+  try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+  let h = openLog(at: dir.appendingPathComponent("notificacoes.log").path)
+  h.write(Data("\(ISO8601DateFormatter().string(from: Date())) \(linha)\n".utf8))
+  if h !== FileHandle.nullDevice { try? h.close() }
+}
+
 /// `Folga --notify`: roda antes da instância única e nunca toca o supervisor nem abre janela. Texto só do ambiente.
 /// Não pede autorização: quem pede é a instância principal (um processo de 10 s matava o pedido na tela).
 /// 0 = postado · 3 = ainda não perguntado (ou sem resposta em 10 s) · 4 = recusado · 5 = erro ao postar.
@@ -800,14 +838,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   private var pediu = false
   init(login: Bool) { self.login = login }
 
-  /// Pede autorização uma vez, só se o macOS ainda não perguntou, com o app de pé (o pedido fica na tela).
+  /// Pede autorização uma vez por build instalado (cdhash), com o app de pé (o pedido fica na tela), se o estado
+  /// não é autorizado — mesmo `.denied` (ver `deveSolicitar`). Cada passo vai para notificacoes.log, para quem
+  /// instala ler o resultado sem `log show`.
   func pedirAutorizacao() {
     guard !pediu else { return }
     pediu = true
+    let chave = "pedidoNotificacoesFeitoPara"
+    let build = buildCarimbo()
     let centro = UNUserNotificationCenter.current()
     centro.getNotificationSettings { st in
-      guard st.authorizationStatus == .notDetermined else { return }
-      centro.requestAuthorization(options: [.alert, .sound]) { _, erro in relatar("requestAuthorization", erro) }
+      let antes = "status=\(st.authorizationStatus.rawValue) alert=\(st.alertSetting.rawValue)"
+      guard deveSolicitar(status: st.authorizationStatus, jaPediuNesteBuild: UserDefaults.standard.string(forKey: chave) == build) else {
+        anotarNotificacoes("build=\(build) \(antes) sem pedido (autorizado ou já pedido neste build)")
+        return
+      }
+      UserDefaults.standard.set(build, forKey: chave)
+      anotarNotificacoes("build=\(build) \(antes) pedindo")
+      centro.requestAuthorization(options: [.alert, .sound]) { ok, erro in
+        relatar("requestAuthorization", erro)
+        let e = erro.map { $0 as NSError }
+        anotarNotificacoes("build=\(build) granted=\(ok) erro=" + (e.map { "\($0.domain) \($0.code) \($0.localizedDescription)" } ?? "nenhum"))
+      }
     }
   }
 
