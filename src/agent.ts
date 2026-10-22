@@ -290,7 +290,14 @@ export function extractSuggestions(raw: string): Extracted {
 // ---------------------------------------------------------------------------------------------------
 type Stored = { id: string; provider: AgentProvider; sessionId: string | null; messages: ChatMessage[] };
 
-export function killTree(pid: number) {
+export function killTree(pid: number, platform = process.platform) {
+  if (platform === 'darwin') {
+    // só o grupo que o spawn detached criou (pgid == pid do filho): nunca 0/1/negativo nem o nosso próprio grupo
+    if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) return;
+    // ponytail: servidor morto por SIGKILL deixa o CLI terminar o turno sozinho (o MCP sai quando o stdin fecha); pegar esse caso pediria um vigia de fora.
+    try { process.kill(-pid, 'SIGKILL'); } catch { /* ESRCH: já morreu */ }
+    return;
+  }
   const r = spawnSync('C:\\Windows\\System32\\taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, timeout: 5_000, stdio: 'ignore' });
   if (r.status !== 0) { try { process.kill(pid); } catch { /* já morreu */ } }
 }
@@ -416,7 +423,7 @@ export function createAgent(deps: AgentDeps) {
     };
 
     mkdirSync(cwd, { recursive: true });
-    const child = spawn(l.cmd, l.args, { cwd: l.cwd ?? cwd, env: l.env ?? process.env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(l.cmd, l.args, { cwd: l.cwd ?? cwd, env: l.env ?? process.env, shell: false, windowsHide: true, detached: process.platform === 'darwin', stdio: ['ignore', 'pipe', 'pipe'] });
     if (child.pid) { turn.pid = child.pid; turn.live = true; deps.selfPids.add(child.pid); }
     const timer = setTimeout(() => { turn.killed = 'timeout'; killLive(); }, timeoutMs);
 

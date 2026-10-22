@@ -265,7 +265,7 @@ const fakeLaunch = (t: { provider: AgentProvider; prompt: string; sessionId: str
 
 const CLAUDE_SID = '11111111-2222-4333-8444-555555555555';
 const made: string[] = [];   // pastas de dados criadas por setup(), apagadas no fim
-function setup(opts: { timeout?: number; slowAdd?: number; disclaim?: (l: Launch) => Launch } = {}) {
+function setup(opts: { timeout?: number; slowAdd?: number; disclaim?: (l: Launch) => Launch; launch?: typeof fakeLaunch } = {}) {
   const kills: number[] = [];
   const dataDir = mkdtempSync(join(tmpdir(), 'folga-agentdata-'));
   made.push(dataDir);
@@ -273,7 +273,7 @@ function setup(opts: { timeout?: number; slowAdd?: number; disclaim?: (l: Launch
   const selfPids = new Set<number>();
   const added: SuggestionDraft[] = [];
   const agent = createAgent({
-    dataDir, port: 4799, selfPids, launch: fakeLaunch, turnTimeoutMs: opts.timeout, disclaim: opts.disclaim,
+    dataDir, port: 4799, selfPids, launch: opts.launch ?? fakeLaunch, turnTimeoutMs: opts.timeout, disclaim: opts.disclaim,
     killTree: pid => { kills.push(pid); killTree(pid); },
     emit: (ev, data) => { if (ev === 'agent') events.push(data as AgentEvent); },
     addSuggestion: async d => {
@@ -634,6 +634,74 @@ await caso('send: CLI não achado → 503 com a mensagem (no Mac, diz onde procu
   assert.equal(missing('gpt', 'win32'), 'Codex não encontrado');
   assert.equal(a.conversation().busy, false);
 });
+
+// Mac: o CLI roda em grupo de processos próprio; parar / estourar o tempo / reset matam o grupo (o neto, que seria o MCP, também)
+const PROBE_MAC_T = join(import.meta.dirname, '..', '..', 'probe', 'bin', 'probe-mac');
+if (process.platform === 'darwin') {
+  const netoFile = join(dir, 'neto.pid');
+  const withGrandchild = join(dir, 'fake-neto.mjs');
+  writeFileSync(withGrandchild, `
+import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+const g = spawn('sleep', ['60'], { stdio: 'ignore' });
+writeFileSync(process.argv[2], String(g.pid));
+process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: '11111111-2222-4333-8444-555555555555' }) + '\\n');
+setTimeout(() => {}, 60000);
+`);
+  const launchNeto = () => ({ cmd: process.execPath, args: [withGrandchild, netoFile] });
+  const esperaPids = async (s: ReturnType<typeof setup>) => {
+    rmSync(netoFile, { force: true });
+    let pid = 0, neto = 0;
+    for (let i = 0; i < 60 && !(pid && neto); i++) {
+      pid = [...s.selfPids][0] ?? 0;
+      try { neto = Number(readFileSync(netoFile, 'utf8')); } catch { neto = 0; }
+      await sleep(50);
+    }
+    assert.ok(pid && neto, 'filho e neto subiram');
+    assert.ok(alive(pid) && alive(neto));
+    return { pid, neto };
+  };
+  const morreram = async (...pids: number[]) => {
+    for (let i = 0; i < 40 && pids.some(alive); i++) await sleep(50);
+    for (const p of pids) assert.ok(!alive(p), `pid ${p} ainda vivo`);
+  };
+  await caso('Mac: stop() mata o grupo inteiro (o neto também)', async () => {
+    const s = setup({ launch: launchNeto });
+    await s.agent.send('claude', 'x');
+    const { pid, neto } = await esperaPids(s);
+    s.agent.stop();
+    await morreram(pid, neto);
+    await s.fim();
+  });
+  await caso('Mac: tempo esgotado mata o grupo inteiro', async () => {
+    const s = setup({ launch: launchNeto, timeout: 800 });
+    await s.agent.send('claude', 'x');
+    const { pid, neto } = await esperaPids(s);
+    await morreram(pid, neto);
+    await s.fim();
+  });
+  await caso('Mac: reset() no meio do turno mata o grupo inteiro', async () => {
+    const s = setup({ launch: launchNeto });
+    await s.agent.send('claude', 'x');
+    const { pid, neto } = await esperaPids(s);
+    s.agent.reset();
+    await morreram(pid, neto);
+  });
+  await caso('killTree recusa pid 0/1/negativo/não inteiro/o do próprio grupo (nunca mata o que não criou)', () => {
+    for (const bad of [0, 1, -5, 1.5, NaN, process.pid]) assert.doesNotThrow(() => killTree(bad, 'darwin'));
+    assert.ok(alive(process.pid));
+  });
+  if (existsSync(PROBE_MAC_T)) {
+    await caso('Mac: pelo --disclaim o pid é o do processo final (SETEXEC) e stop() derruba os dois', async () => {
+      const s = setup({ launch: launchNeto, disclaim: l => disclaimed(l, 'darwin', true, PROBE_MAC_T) });
+      await s.agent.send('claude', 'x');
+      const { pid, neto } = await esperaPids(s);
+      s.agent.stop();
+      await morreram(pid, neto);
+      await s.fim();
+    });
+  } else console.log('  (pulado: --disclaim — probe/bin/probe-mac não existe)');
+}
 
 await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 for (const d of made) await rm(d, { recursive: true, force: true, maxRetries: 5 });
