@@ -45,11 +45,11 @@ const CODEX_EXE = process.env.FOLGA_CODEX_EXE ?? join(process.env.APPDATA ?? joi
   'npm', 'node_modules', '@openai', 'codex', 'node_modules', '@openai', 'codex-win32-x64', 'vendor', 'x86_64-pc-windows-msvc', 'bin', 'codex.exe');
 const WIN_EXE: Record<AgentProvider, string> = { claude: CLAUDE_EXE, gpt: CODEX_EXE };
 const MISSING: Record<AgentProvider, string> = { claude: 'Claude Code não encontrado', gpt: 'Codex não encontrado' };
-const WHERE_MAC = ' (procurei em ~/.local/bin, no Homebrew e no nvm)';
-const missing = (p: AgentProvider) => MISSING[p] + (process.platform === 'darwin' ? WHERE_MAC : '');
+const WHERE_MAC = ' (procurei em ~/.local/bin, no nvm e no Homebrew)';
+export const missing = (p: AgentProvider, platform: NodeJS.Platform = process.platform) => MISSING[p] + (platform === 'darwin' ? WHERE_MAC : '');
 
-// Mach-O fino (64/32 bits, nas duas ordens de byte) e universal
-const MACHO = new Set(['cffaedfe', 'feedfacf', 'cefaedfe', 'feedface', 'cafebabe', 'bebafeca']);
+// Mach-O fino (64/32 bits, nas duas ordens de byte) e universal (fat e fat64)
+const MACHO = new Set(['cffaedfe', 'feedfacf', 'cefaedfe', 'feedface', 'cafebabe', 'bebafeca', 'cafebabf', 'bfbafeca']);
 const writableByOthers = (st: { uid: number; mode: number }, uid: number) => (st.uid !== uid && st.uid !== 0) || (st.mode & 0o022) !== 0;
 
 /** Caminho real do binário se ele é seguro de executar: absoluto, arquivo comum Mach-O (script nunca), com bit de execução,
@@ -86,13 +86,14 @@ function nvmBins(home: string): string[] {
 }
 
 /** Binário do CLI por lista fechada de lugares (nunca o PATH nem o cwd). No Mac: o override do env (se houver, só ele),
- *  ~/.local/bin, Homebrew, /usr/local/bin e o nvm do maior para o menor; o primeiro que passa no safeExe ganha. */
+ *  ~/.local/bin, o nvm do maior para o menor, Homebrew e /usr/local/bin; o primeiro que passa no safeExe ganha.
+ *  O nvm vem antes do Homebrew: aqui o claude do Homebrew estava velho (2.1.187) e o validado no ADR 0006 é o do nvm. */
 export function findCli(provider: AgentProvider, o: { home: string; uid: number; arch: string; env: NodeJS.ProcessEnv; platform?: NodeJS.Platform; system?: string[] }): string | null {
   const override = o.env[provider === 'claude' ? 'FOLGA_CLAUDE_EXE' : 'FOLGA_CODEX_EXE'];
   if ((o.platform ?? process.platform) !== 'darwin') { const p = override ?? WIN_EXE[provider]; return existsSync(p) ? p : null; }
   const name = provider === 'claude' ? 'claude' : 'codex';
   const cands = override ? [override]
-    : [join(o.home, '.local', 'bin'), ...(o.system ?? ['/opt/homebrew/bin', '/usr/local/bin']), ...nvmBins(o.home)].map(d => join(d, name));
+    : [join(o.home, '.local', 'bin'), ...nvmBins(o.home), ...(o.system ?? ['/opt/homebrew/bin', '/usr/local/bin'])].map(d => join(d, name));
   for (const c of cands) {
     if (!isAbsolute(c)) continue;
     let real: string;

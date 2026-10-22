@@ -2,11 +2,11 @@
 // um turno por vez (R25), teto de tempo, retomada e troca de provedor. Os CLIs são trocados por um script
 // node que imita o formato real (fixtures tiradas de uma execução real, ADR 0006); nada chama a rede.
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentCwd, codexNative, createAgent, disclaimed, findCli, safeExe, DISCLAIM_FAIL, DISCLAIM_UNAVAILABLE, extractSuggestions, feed, killTree, newAcc, realLaunch, type Launch } from '../agent.ts';
+import { agentCwd, codexNative, createAgent, disclaimed, findCli, missing, safeExe, DISCLAIM_FAIL, DISCLAIM_UNAVAILABLE, extractSuggestions, feed, killTree, newAcc, realLaunch, type Launch } from '../agent.ts';
 import type { AgentEvent, AgentProvider, Suggestion, SuggestionDraft } from '../types.ts';
 
 let n = 0;
@@ -519,6 +519,7 @@ await caso('codexNative: codex.js do npm vira o binário do vendor da arquitetur
 if (process.platform === 'darwin') {
   const uid = process.getuid!();
   const macho = Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0, 0, 0, 0]);
+  const fat64 = Buffer.from([0xca, 0xfe, 0xba, 0xbf, 0, 0, 0, 0]);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'folga-cli-')));
   made.push(root);
   const put = (p: string, body: Buffer | string, mode = 0o755) => { mkdirSync(join(p, '..'), { recursive: true }); writeFileSync(p, body); chmodSync(p, mode); return p; };
@@ -526,6 +527,8 @@ if (process.platform === 'darwin') {
   await caso('safeExe: só Mach-O, executável, do usuário, sem escrita para grupo/outros (arquivo e pasta), link resolvido', () => {
     const ok = put(join(root, 'a', 'cli'), macho);
     assert.equal(safeExe(ok, uid), ok);
+    const f64 = put(join(root, 'a', 'fat64'), fat64);
+    assert.equal(safeExe(f64, uid), f64, 'universal fat64');
     assert.equal(safeExe(put(join(root, 'a', 'script'), '#!/usr/bin/env node\n'), uid), null, 'script');
     assert.equal(safeExe(put(join(root, 'a', 'g'), macho, 0o775), uid), null, 'grupo escreve');
     assert.equal(safeExe(put(join(root, 'a', 'nx'), macho, 0o644), uid), null, 'sem x');
@@ -548,13 +551,19 @@ if (process.platform === 'darwin') {
     const brew = join(root, 'brew');   // no lugar de /opt/homebrew/bin e /usr/local/bin, que a máquina pode ter
     const o = { home, uid, arch: 'arm64', env: {} as NodeJS.ProcessEnv, system: [brew] };
     assert.equal(findCli('claude', o), null, 'nada instalado');
+    const fromBrew = put(join(brew, 'claude'), macho);
+    assert.equal(findCli('claude', o), fromBrew, 'Homebrew só quando o nvm não tem');
     const nvm = (v: string) => join(home, '.nvm', 'versions', 'node', v, 'bin');
     put(join(nvm('v9.0.0'), 'claude'), macho);
     put(join(nvm('v22.1.0'), 'claude'), macho);
     const v24 = put(join(nvm('v24.18.0'), 'claude'), macho);
-    assert.equal(findCli('claude', o), v24, 'v24 > v22 > v9');
-    const fromBrew = put(join(brew, 'claude'), macho);
-    assert.equal(findCli('claude', o), fromBrew, 'Homebrew ganha do nvm');
+    assert.equal(findCli('claude', o), v24, 'v24 > v22 > v9, e o nvm ganha do Homebrew');
+    const v2410 = put(join(nvm('v24.10.0'), 'claude'), macho);
+    put(join(nvm('v24.9.0'), 'claude'), macho);
+    assert.equal(findCli('claude', o), v24, 'v24.18 > v24.10');
+    rmSync(join(nvm('v24.18.0'), 'claude'));
+    assert.equal(findCli('claude', o), v2410, 'v24.10 > v24.9 (numérico)');
+    put(v24, macho);
     const local = put(join(home, '.local', 'bin', 'claude'), macho);
     assert.equal(findCli('claude', o), local);
     // codex: o bin do nvm é link para o codex.js (script); vale o nativo do vendor
@@ -578,6 +587,8 @@ await caso('send: CLI não achado → 503 com a mensagem (no Mac, diz onde procu
     assert.ok('erro' in r && r.status === 503 && r.erro.startsWith(`${nome} não encontrado`), JSON.stringify(r));
     if (process.platform === 'darwin') assert.ok(r.erro.includes('Homebrew') && r.erro.includes('nvm'), r.erro);
   }
+  assert.equal(missing('claude', 'darwin'), 'Claude Code não encontrado (procurei em ~/.local/bin, no nvm e no Homebrew)');
+  assert.equal(missing('gpt', 'win32'), 'Codex não encontrado');
   assert.equal(a.conversation().busy, false);
 });
 
