@@ -178,6 +178,22 @@ pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `
   continua como reserva; (5) a contagem de avisos no menu aparece **sempre**, porque nenhum dos dois caminhos é
   garantido; (6) o Foco não pode ser lido: a tela diz isso e não tenta adivinhar.
 
+### Notificações: estado em 2026-10-22 (investigação em aberto)
+
+Medido no app instalado (`~/Applications/Folga.app`, registro único no LaunchServices, build f640ad5…):
+`notificacoes.log` → `status=1 alert=2 pedindo` e, no `requestAuthorization` da instância principal,
+`granted=false erro=UNErrorDomain 1 Notifications are not allowed for this application`. O Folga não aparece em
+Ajustes › Notificações e não há entrada `local.folga.app` em `com.apple.ncprefs`.
+
+Conclusão: o `usernoted` recusa o Folga como cliente antes de qualquer pergunta ao Vittorio — o problema é
+registro/assinatura, não o momento do pedido. Um app de diagnóstico ad-hoc (`local.folga.diag`) recebeu o pedido
+quando estava sozinho no registro; diferenças a isolar numa próxima sessão: hardened runtime, `LSUIElement`,
+política `.accessory`, pasta (`~/Applications`), e o histórico do bundle id `local.folga.app` (pedidos anteriores
+recusados). Plano: matriz de apps de teste com bundle ids novos, uma diferença por vez, com o Vittorio avisado
+de que aparecerão pedidos na tela.
+
+Enquanto isso, a entrega dos avisos é o contador no menu e a tela Avisos (funcionando, conferido ao vivo).
+
 ## Consequências
 - A CI do macOS monta o app ad-hoc e roda o `check` (sem segredo).
 - O `node` gravado no `folga.json` é o do build; trocar de Node pede rebuild.
