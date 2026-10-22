@@ -3,9 +3,9 @@
 // valida e vira cartão que o usuário aprova na tela (R20–R24). Um turno por vez, teto de 120 s (R25).
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { SuggestionError } from './suggestions.ts';
 import type {
@@ -25,6 +25,7 @@ export type AgentDeps = {
   launch?: (t: TurnInput) => Launch;            // troca o comando do provedor (script fake)
   killTree?: (pid: number) => void;             // troca o taskkill (teste confere quando ele é chamado)
   disclaim?: (l: Launch) => Launch;             // troca o embrulho do --disclaim (teste do código 126)
+  findCli?: (p: AgentProvider) => string | null; // troca a busca do binário do CLI
 };
 export type SendResult = { ok: true } | { erro: string; status: number };
 
@@ -42,7 +43,66 @@ const KIND_BY_TIPO: Record<string, SuggestionKind> = { lixeira: 'lixeira', limpe
 const CLAUDE_EXE = process.env.FOLGA_CLAUDE_EXE ?? join(homedir(), '.local', 'bin', 'claude.exe');
 const CODEX_EXE = process.env.FOLGA_CODEX_EXE ?? join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'),
   'npm', 'node_modules', '@openai', 'codex', 'node_modules', '@openai', 'codex-win32-x64', 'vendor', 'x86_64-pc-windows-msvc', 'bin', 'codex.exe');
+const WIN_EXE: Record<AgentProvider, string> = { claude: CLAUDE_EXE, gpt: CODEX_EXE };
 const MISSING: Record<AgentProvider, string> = { claude: 'Claude Code não encontrado', gpt: 'Codex não encontrado' };
+const WHERE_MAC = ' (procurei em ~/.local/bin, no Homebrew e no nvm)';
+const missing = (p: AgentProvider) => MISSING[p] + (process.platform === 'darwin' ? WHERE_MAC : '');
+
+// Mach-O fino (64/32 bits, nas duas ordens de byte) e universal
+const MACHO = new Set(['cffaedfe', 'feedfacf', 'cefaedfe', 'feedface', 'cafebabe', 'bebafeca']);
+const writableByOthers = (st: { uid: number; mode: number }, uid: number) => (st.uid !== uid && st.uid !== 0) || (st.mode & 0o022) !== 0;
+
+/** Caminho real do binário se ele é seguro de executar: absoluto, arquivo comum Mach-O (script nunca), com bit de execução,
+ *  do usuário ou do root e sem escrita para grupo/outros — ele e a pasta onde mora. Senão null. */
+export function safeExe(p: string, uid: number): string | null {
+  if (!isAbsolute(p)) return null;
+  try {
+    const real = realpathSync(p);
+    const st = lstatSync(real);
+    if (!st.isFile() || (st.mode & 0o111) === 0 || writableByOthers(st, uid) || writableByOthers(statSync(dirname(real)), uid)) return null;
+    const head = Buffer.alloc(4);
+    const fd = openSync(real, 'r');
+    try { if (readSync(fd, head, 0, 4, 0) !== 4) return null; } finally { closeSync(fd); }
+    return MACHO.has(head.toString('hex')) ? real : null;
+  } catch { return null; }
+}
+
+const CODEX_JS = '/@openai/codex/bin/codex.js';
+const CODEX_ARCH: Record<string, [string, string]> = { arm64: ['arm64', 'aarch64'], x64: ['x64', 'x86_64'] };
+/** O `codex` do npm é um script (codex.js) que lança o binário do vendor: o Folga roda o binário direto. */
+export function codexNative(real: string, arch: string): string {
+  const a = CODEX_ARCH[arch];
+  if (!a || !real.endsWith(CODEX_JS)) return real;
+  return join(real.slice(0, -'/bin/codex.js'.length), 'node_modules', '@openai', `codex-darwin-${a[0]}`, 'vendor', `${a[1]}-apple-darwin`, 'bin', 'codex');
+}
+
+const nodeVersion = (v: string) => v.slice(1).split('.').map(Number);
+function nvmBins(home: string): string[] {
+  const root = join(home, '.nvm', 'versions', 'node');
+  let vs: string[];
+  try { vs = readdirSync(root).filter(v => /^v\d+(\.\d+)*$/.test(v)); } catch { return []; }
+  vs.sort((x, y) => { const a = nodeVersion(x), b = nodeVersion(y); for (let i = 0; i < 3; i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (b[i] ?? 0) - (a[i] ?? 0); return 0; });
+  return vs.map(v => join(root, v, 'bin'));
+}
+
+/** Binário do CLI por lista fechada de lugares (nunca o PATH nem o cwd). No Mac: o override do env (se houver, só ele),
+ *  ~/.local/bin, Homebrew, /usr/local/bin e o nvm do maior para o menor; o primeiro que passa no safeExe ganha. */
+export function findCli(provider: AgentProvider, o: { home: string; uid: number; arch: string; env: NodeJS.ProcessEnv; platform?: NodeJS.Platform; system?: string[] }): string | null {
+  const override = o.env[provider === 'claude' ? 'FOLGA_CLAUDE_EXE' : 'FOLGA_CODEX_EXE'];
+  if ((o.platform ?? process.platform) !== 'darwin') { const p = override ?? WIN_EXE[provider]; return existsSync(p) ? p : null; }
+  const name = provider === 'claude' ? 'claude' : 'codex';
+  const cands = override ? [override]
+    : [join(o.home, '.local', 'bin'), ...(o.system ?? ['/opt/homebrew/bin', '/usr/local/bin']), ...nvmBins(o.home)].map(d => join(d, name));
+  for (const c of cands) {
+    if (!isAbsolute(c)) continue;
+    let real: string;
+    try { real = realpathSync(c); } catch { continue; }
+    const exe = safeExe(name === 'codex' ? codexNative(real, o.arch) : real, o.uid);
+    if (exe) return exe;
+  }
+  return null;
+}
+const findCliHere = (p: AgentProvider) => findCli(p, { home: homedir(), uid: process.getuid?.() ?? -1, arch: process.arch, env: process.env });
 
 /** Pasta vazia onde os CLIs rodam: a pasta de dados guarda ui-token, ajustes, registro e sugestões, e o agente não deve vê-los. */
 export const agentCwd = (dataDir: string) => join(dataDir, 'agent-cwd');
@@ -71,7 +131,7 @@ export const DISCLAIM_UNAVAILABLE = 125;
 export const DISCLAIM_FAIL = 'O assistente não roda dentro do app Folga neste macOS: não deu para isolá-lo do app. Nada foi executado.';
 
 /** Comando real de cada provedor, com as flags exatas do spike (ADR 0006). */
-export function realLaunch(t: TurnInput, dataDir: string, port: number): Launch {
+export function realLaunch(t: TurnInput, dataDir: string, port: number, exe = WIN_EXE[t.provider]): Launch {
   // a cota vem da assinatura: chave de API no ambiente trocaria o faturamento sem o Antônio saber
   const clean = { ...process.env };
   for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'CODEX_API_KEY']) delete clean[k];
@@ -81,7 +141,7 @@ export function realLaunch(t: TurnInput, dataDir: string, port: number): Launch 
   if (t.provider === 'claude') {
     const home = fwd(homedir());
     return {
-      cmd: CLAUDE_EXE,
+      cmd: exe,
       args: [
         '-p', prompt, '--output-format', 'stream-json', '--verbose',
         ...(t.sessionId ? ['--resume', t.sessionId] : []),
@@ -108,7 +168,7 @@ export function realLaunch(t: TurnInput, dataDir: string, port: number): Launch 
   ];
   // `exec resume` não aceita --sandbox nem -C (por isso sandbox_mode vai por -c e a pasta é o cwd do processo)
   return {
-    cmd: CODEX_EXE,
+    cmd: exe,
     args: t.sessionId ? ['exec', 'resume', ...common, '--', t.sessionId, prompt] : ['exec', ...common, '--', prompt],
     env: clean,
     cwd: agentCwd(dataDir),
@@ -221,7 +281,6 @@ export function createAgent(deps: AgentDeps) {
   const cwd = agentCwd(deps.dataDir);
   const kill = deps.killTree ?? killTree;
   const timeoutMs = deps.turnTimeoutMs ?? TURN_TIMEOUT_MS;
-  const exists: Record<AgentProvider, boolean> = { claude: existsSync(CLAUDE_EXE), gpt: existsSync(CODEX_EXE) };
   let system: string | null = null;
 
   const fresh = (provider: AgentProvider): Stored => ({ id: randomUUID(), provider, sessionId: null, messages: [] });
@@ -312,11 +371,11 @@ export function createAgent(deps: AgentDeps) {
     finally { if (current === turn) { busy = false; current = null; } }
   }
 
-  function runTurn(provider: AgentProvider, prompt: string) {
+  function runTurn(provider: AgentProvider, prompt: string, exe: string | undefined) {
     const convId = conv.id;
     const acc = newAcc();
     const input: TurnInput = { provider, prompt, sessionId: conv.sessionId, system: systemPrompt(), mcpFile };
-    const raw = deps.launch ? deps.launch(input) : realLaunch(input, deps.dataDir, deps.port);
+    const raw = deps.launch ? deps.launch(input) : realLaunch(input, deps.dataDir, deps.port, exe);
     const l = deps.disclaim ? deps.disclaim(raw) : disclaimed(raw, process.platform, process.env.FOLGA_APP === '1', PROBE_MAC);
     const turn: Turn = { pid: null, convId, killed: null, live: false };
     const killLive = () => { if (turn.live && turn.pid) kill(turn.pid); };
@@ -368,7 +427,10 @@ export function createAgent(deps: AgentDeps) {
 
     async send(provider: AgentProvider, text: string): Promise<SendResult> {
       if (busy) return { erro: 'já estou respondendo', status: 409 };
-      if (!deps.launch && !exists[provider]) return { erro: MISSING[provider], status: 503 };
+      // achado de novo a cada turno: instalar o CLI depois não exige reiniciar (custo: alguns stat)
+      // ponytail: entre o safeExe e o spawn há uma janela de microssegundos; quem consegue trocar o binário nela já escreve na pasta do usuário e venceria de qualquer jeito.
+      const exe = deps.launch ? undefined : (deps.findCli ?? findCliHere)(provider) ?? null;
+      if (exe === null) return { erro: missing(provider), status: 503 };
       if (conv.provider !== provider) {
         // sessões não passam de um provedor para o outro: conversa nova (R25/D14)
         if (conv.messages.length) console.log(`[agente] provedor mudou de ${conv.provider} para ${provider}: conversa nova`);
@@ -380,7 +442,7 @@ export function createAgent(deps: AgentDeps) {
       save();
       busy = true;
       emit({ type: 'start', conversation: conv.id, provider });
-      try { runTurn(provider, text); }
+      try { runTurn(provider, text, exe); }
       catch (e) {
         void finish(current, conv.id, provider, { ...newAcc(), error: `não consegui iniciar: ${e instanceof Error ? e.message : 'erro'}` }, null, null, '');
       }

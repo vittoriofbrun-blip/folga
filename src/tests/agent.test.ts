@@ -2,11 +2,11 @@
 // um turno por vez (R25), teto de tempo, retomada e troca de provedor. Os CLIs são trocados por um script
 // node que imita o formato real (fixtures tiradas de uma execução real, ADR 0006); nada chama a rede.
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentCwd, createAgent, disclaimed, DISCLAIM_FAIL, DISCLAIM_UNAVAILABLE, extractSuggestions, feed, killTree, newAcc, realLaunch, type Launch } from '../agent.ts';
+import { agentCwd, codexNative, createAgent, disclaimed, findCli, safeExe, DISCLAIM_FAIL, DISCLAIM_UNAVAILABLE, extractSuggestions, feed, killTree, newAcc, realLaunch, type Launch } from '../agent.ts';
 import type { AgentEvent, AgentProvider, Suggestion, SuggestionDraft } from '../types.ts';
 
 let n = 0;
@@ -503,6 +503,82 @@ await caso('disclaim indisponível (sai 125) ou probe-mac ausente: mensagem fixa
   await cru.send('claude', 'oi');
   for (let i = 0; i < 50 && cru.conversation().busy; i++) await sleep(100);
   assert.equal(cru.conversation().messages.at(-1)?.text, 'O Claude não respondeu agora. Tente de novo.');
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Achar o CLI sem confiar no PATH (Mac): lista fechada de lugares, só binário Mach-O do usuário sem escrita para outros
+// ---------------------------------------------------------------------------------------------------
+await caso('codexNative: codex.js do npm vira o binário do vendor da arquitetura; outro caminho volta igual', () => {
+  const js = '/Users/v/.nvm/versions/node/v24.18.0/lib/node_modules/@openai/codex/bin/codex.js';
+  const base = '/Users/v/.nvm/versions/node/v24.18.0/lib/node_modules/@openai/codex/node_modules/@openai';
+  assert.equal(codexNative(js, 'arm64'), `${base}/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex`);
+  assert.equal(codexNative(js, 'x64'), `${base}/codex-darwin-x64/vendor/x86_64-apple-darwin/bin/codex`);
+  assert.equal(codexNative('/opt/homebrew/Cellar/codex/1/bin/codex', 'arm64'), '/opt/homebrew/Cellar/codex/1/bin/codex');
+});
+
+if (process.platform === 'darwin') {
+  const uid = process.getuid!();
+  const macho = Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0, 0, 0, 0]);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'folga-cli-')));
+  made.push(root);
+  const put = (p: string, body: Buffer | string, mode = 0o755) => { mkdirSync(join(p, '..'), { recursive: true }); writeFileSync(p, body); chmodSync(p, mode); return p; };
+
+  await caso('safeExe: só Mach-O, executável, do usuário, sem escrita para grupo/outros (arquivo e pasta), link resolvido', () => {
+    const ok = put(join(root, 'a', 'cli'), macho);
+    assert.equal(safeExe(ok, uid), ok);
+    assert.equal(safeExe(put(join(root, 'a', 'script'), '#!/usr/bin/env node\n'), uid), null, 'script');
+    assert.equal(safeExe(put(join(root, 'a', 'g'), macho, 0o775), uid), null, 'grupo escreve');
+    assert.equal(safeExe(put(join(root, 'a', 'nx'), macho, 0o644), uid), null, 'sem x');
+    const open = put(join(root, 'aberta', 'cli'), macho);
+    chmodSync(join(root, 'aberta'), 0o777);
+    assert.equal(safeExe(open, uid), null, 'pasta 777');
+    chmodSync(join(root, 'aberta'), 0o755);
+    mkdirSync(join(root, 'links'));
+    symlinkSync(ok, join(root, 'links', 'cli'));
+    assert.equal(safeExe(join(root, 'links', 'cli'), uid), ok, 'link devolve o destino');
+    symlinkSync(join(root, 'a', 'script'), join(root, 'links', 'script'));
+    assert.equal(safeExe(join(root, 'links', 'script'), uid), null, 'link para script');
+    assert.equal(safeExe('claude', uid), null);
+    assert.equal(safeExe('./claude', uid), null);
+    assert.equal(safeExe(ok, uid + 1), null, 'dono é outro usuário');
+  });
+
+  await caso('findCli: ~/.local/bin ganha; nvm do maior para o menor (numérico); codex.js vira o nativo; override também validado', () => {
+    const home = join(root, 'home');
+    const brew = join(root, 'brew');   // no lugar de /opt/homebrew/bin e /usr/local/bin, que a máquina pode ter
+    const o = { home, uid, arch: 'arm64', env: {} as NodeJS.ProcessEnv, system: [brew] };
+    assert.equal(findCli('claude', o), null, 'nada instalado');
+    const nvm = (v: string) => join(home, '.nvm', 'versions', 'node', v, 'bin');
+    put(join(nvm('v9.0.0'), 'claude'), macho);
+    put(join(nvm('v22.1.0'), 'claude'), macho);
+    const v24 = put(join(nvm('v24.18.0'), 'claude'), macho);
+    assert.equal(findCli('claude', o), v24, 'v24 > v22 > v9');
+    const fromBrew = put(join(brew, 'claude'), macho);
+    assert.equal(findCli('claude', o), fromBrew, 'Homebrew ganha do nvm');
+    const local = put(join(home, '.local', 'bin', 'claude'), macho);
+    assert.equal(findCli('claude', o), local);
+    // codex: o bin do nvm é link para o codex.js (script); vale o nativo do vendor
+    const pkg = join(home, '.nvm', 'versions', 'node', 'v24.18.0', 'lib', 'node_modules', '@openai', 'codex');
+    const js = put(join(pkg, 'bin', 'codex.js'), '#!/usr/bin/env node\n');
+    symlinkSync(js, join(nvm('v24.18.0'), 'codex'));
+    assert.equal(findCli('gpt', o), null, 'sem o nativo, o script não serve');
+    const native = put(join(pkg, 'node_modules', '@openai', 'codex-darwin-arm64', 'vendor', 'aarch64-apple-darwin', 'bin', 'codex'), macho);
+    assert.equal(findCli('gpt', o), native);
+    // override do env: só ele, e validado
+    assert.equal(findCli('claude', { ...o, env: { FOLGA_CLAUDE_EXE: join(root, 'a', 'script') } }), null);
+    assert.equal(findCli('claude', { ...o, env: { FOLGA_CLAUDE_EXE: join(root, 'a', 'cli') } }), join(root, 'a', 'cli'));
+    assert.equal(findCli('claude', { ...o, env: { FOLGA_CLAUDE_EXE: 'claude' } }), null, 'relativo nunca');
+  });
+}
+
+await caso('send: CLI não achado → 503 com a mensagem (no Mac, diz onde procurou)', async () => {
+  const a = createAgent({ dataDir: mkdtempSync(join(dir, 'semcli-')), port: 1, selfPids: new Set(), emit: () => {}, addSuggestion: async () => ({ erro: 'x', status: 500 }), findCli: () => null });
+  for (const [p, nome] of [['claude', 'Claude Code'], ['gpt', 'Codex']] as const) {
+    const r = await a.send(p, 'oi');
+    assert.ok('erro' in r && r.status === 503 && r.erro.startsWith(`${nome} não encontrado`), JSON.stringify(r));
+    if (process.platform === 'darwin') assert.ok(r.erro.includes('Homebrew') && r.erro.includes('nvm'), r.erro);
+  }
+  assert.equal(a.conversation().busy, false);
 });
 
 await rm(dir, { recursive: true, force: true, maxRetries: 5 });
