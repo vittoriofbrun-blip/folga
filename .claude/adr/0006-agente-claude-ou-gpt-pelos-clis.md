@@ -40,6 +40,46 @@ Chamado direto, com o exe do vendor e `shell:false` (o `.cmd` exigiria shell):
   Como o shell e as skills estão desligados, ele não consegue agir sobre essas instruções. O prompt de
   sistema manda ignorá-las.
 
+## No Mac (22/10)
+Spike refeito no MacBook (arm64) com `scripts/spike-agent.mjs`, agora sem caminho do Windows: `REPO` vem do
+`import.meta.dirname` e os CLIs de `FOLGA_CLAUDE_EXE`/`FOLGA_CODEX_EXE` (faltou → sai explicando). Flags iguais às do
+`realLaunch`, cwd numa pasta vazia dentro de um `mkdtemp`, chaves de API tiradas do ambiente. Prompt único: "Use
+ver_memoria e diga quantos apps aparecem. Depois tente rodar o comando `id` no terminal e diga, em uma palavra, se
+conseguiu." **Duas chamadas de modelo, uma por provedor.** Checagens sem modelo com `env -i HOME=$HOME PATH=/usr/bin:/bin`.
+
+**Binários.** No nvm (`~/.nvm/versions/node/v24.18.0/bin`) `claude` aponta para
+`…/@anthropic-ai/claude-code/bin/claude.exe` (Mach-O arm64, 2.1.246) e `codex` para `…/@openai/codex/bin/codex.js`
+(script `#!/usr/bin/env node`). O Folga usa o nativo que o `codex.js` lança:
+`…/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex` (Mach-O arm64,
+`codex-cli 0.157.0`). `probe-mac --disclaim <binário> --version` imprime a versão dos dois (o `SETEXEC` funciona com eles).
+
+| flag | ainda existe? | observado |
+|---|---|---|
+| Claude: `-p`, `--output-format`, `--verbose`, `--resume`, `--tools`, `--mcp-config`, `--strict-mcp-config`, `--allowedTools`, `--permission-mode`, `--setting-sources`, `--disable-slash-commands`, `--system-prompt`, `--settings` | sim (as 13, no `--help` da 2.1.246); `dontAsk` está nas escolhas de `--permission-mode` | `init.tools` = só os 9 `mcp__folga__*`, MCP `connected`, 0 skills, 0 plugins. O modelo não respondeu: **401 "OAuth access token has expired"** (2 retries, 4,2 s, US$ 0). Nenhum `tool_use`, nenhum comando. Nenhum aviso de chaveiro apareceu. |
+| Codex `exec` e `exec resume`: `--json`, `--skip-git-repo-check`, `--ignore-user-config`, `--disable`, `-c` | sim, nos dois | ver abaixo |
+| `--disable` dos 13 de hoje (`shell_tool` … `view_image`) | sim, os 13 em `features list` (stable, true) | nenhum `command_execution` |
+| `--disable unified_exec`, `multi_agent`, `memories`, `workspace_dependencies`, `skill_mcp_dependency_install`, `in_app_local_automation`, `worktrees` | sim (stable, true); aceitos sem erro | nenhum `command_execution` |
+| `--disable code_mode_host` | sim (stable, true); aceito | **derruba o MCP**: item `error` "Code Mode is unavailable because code-mode host is disabled… will fail closed"; o `ver_memoria` não foi chamado e a resposta foi "Não consegui acessar `ver_memoria`… execução de `id`: **não**" (14,5 s) |
+| `--disable nome_que_nao_existe` | — | sai com erro (`Unknown feature flag`, rc 1). Nome novo não pode ir para o Windows sem conferir a versão de lá. |
+
+**`id` não rodou em nenhum dos dois.** No Claude não havia ferramenta fora do MCP; no Codex não houve
+`command_execution` e ele mesmo disse que o terminal estava indisponível. O `features list` não reflete o `--disable`
+da linha de comando (continua mostrando `true`), então a prova é o stream do `exec`, não a lista.
+
+**`unified_exec`:** com `--disable` (esta rodada) não houve comando. Sem `--disable` **não foi medido**: o orçamento
+era de uma chamada por provedor.
+
+**Lista de `--disable` do Mac** (a Task 3 consome): os 13 de hoje mais `unified_exec`, `multi_agent`, `memories`,
+`workspace_dependencies`, `skill_mcp_dependency_install`, `in_app_local_automation` e `worktrees`. **Sem
+`code_mode_host`**, porque ele derruba o MCP. Que o MCP volta a funcionar sem ele e que o code mode sem o host não
+abre caminho para comando **ainda falta provar** numa chamada real (a do ponta a ponta).
+
+**Pendente:** a conversa real do Claude no Mac. O token OAuth do `claude` está vencido; renovar o login é passo do
+Vittorio, e depois disso a checagem fica para o ponta a ponta.
+
+**Assimetria do `~/.codex/AGENTS.md`:** continua (no Mac do Vittorio o arquivo existe e está vazio, 0 bytes). O `--ignore-user-config` não tira o `AGENTS.md`; com shell, exec e
+skills desligados ele não tem como agir sobre essas instruções.
+
 ## Consequências
 - Cada turno abre um processo de 100 a 300 MB, que termina ao fim do turno. Esse processo fica na árvore
   `__self` enquanto vive, e o R18 vale entre turnos.
