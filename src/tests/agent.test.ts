@@ -630,6 +630,18 @@ if (process.platform === 'darwin') {
     mkdirSync(join(root, 'lk'));
     symlinkSync(zsh, join(root, 'lk', 'claude'));
     assert.equal(findCli('claude', { ...o, env: { FOLGA_CLAUDE_EXE: join(root, 'lk', 'claude') } }), null, 'link chamado claude para um zsh: o nome REAL vale');
+    // instalador nativo: ~/.local/bin/claude -> ~/.local/share/claude/versions/2.1.246 (nome real = versão, só nessa pasta)
+    const nh = join(root, 'nativo');
+    const ver = put(join(nh, '.local', 'share', 'claude', 'versions', '2.1.246'), macho);
+    mkdirSync(join(nh, '.local', 'bin'), { recursive: true });
+    symlinkSync(ver, join(nh, '.local', 'bin', 'claude'));
+    assert.equal(findCli('claude', { ...o, home: nh }), ver, 'instalador nativo aceito pela pasta versions');
+    const fora = put(join(root, 'fora', '2.1.246'), macho);
+    assert.equal(findCli('claude', { ...o, env: { FOLGA_CLAUDE_EXE: fora } }), null, 'nome de versão fora da pasta versions');
+    assert.equal(findCli('claude', { ...o, home: nh, env: { FOLGA_CLAUDE_EXE: fora } }), null, 'idem com o home do instalador');
+    const outroHome = join(root, 'nativo2');
+    const v2 = put(join(outroHome, 'x', '2.1.246'), macho);
+    assert.equal(findCli('claude', { ...o, home: nh, env: { FOLGA_CLAUDE_EXE: v2 } }), null, 'versions de outro lugar');
     const okc = put(join(root, 'a', 'claude'), macho);
     assert.equal(findCli('claude', { ...o, env: { FOLGA_CLAUDE_EXE: okc } }), okc);
     const okx = put(join(root, 'a', 'claude.exe'), macho);

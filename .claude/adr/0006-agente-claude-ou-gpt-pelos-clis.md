@@ -105,7 +105,9 @@ skills desligados ele não tem como agir sobre essas instruções.
   declaração de ferramentas do Codex. **Nenhuma consegue executar:** sandbox `read-only`, shell, `unified_exec`,
   `multi_agent` e `worktrees` desligados, e o code mode isolado (sem `process` nem `require`).
 - **Binário:** o nome real do CLI achado tem de ser `claude`, `claude.exe` ou `codex` (um link chamado `claude` para
-  `/bin/zsh` não passa). `LANG` só entra no ambiente se casar `^[A-Za-z0-9_.@-]{1,64}$`.
+  `/bin/zsh` não passa; exceção: o instalador nativo do Claude Code liga
+  `~/.local/bin/claude` a `~/.local/share/claude/versions/<x.y.z>`, então um nome real `x.y.z` vale, só dentro dessa pasta
+  e só para o Claude). `LANG` só entra no ambiente se casar `^[A-Za-z0-9_.@-]{1,64}$`.
 
 ## Consequências
 - Cada turno abre um processo de 100 a 300 MB, que termina ao fim do turno. Esse processo fica na árvore

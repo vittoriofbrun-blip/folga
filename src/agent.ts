@@ -85,6 +85,12 @@ function nvmBins(home: string): string[] {
   return vs.map(v => join(root, v, 'bin'));
 }
 
+/** Instalador nativo do Claude Code: ~/.local/bin/claude é link para ~/.local/share/claude/versions/<x.y.z>; o nome real é a versão. */
+function nativeVersion(exe: string, home: string): boolean {
+  if (!/^\d+\.\d+\.\d+$/.test(basename(exe))) return false;
+  try { return dirname(exe) === realpathSync(join(home, '.local', 'share', 'claude', 'versions')); } catch { return false; }
+}
+
 /** Binário do CLI por lista fechada de lugares (nunca o PATH nem o cwd). No Mac: o override do env (se houver, só ele),
  *  ~/.local/bin, o nvm do maior para o menor, Homebrew e /usr/local/bin; o primeiro que passa no safeExe ganha.
  *  O nvm vem antes do Homebrew: aqui o claude do Homebrew estava velho (2.1.187) e o validado no ADR 0006 é o do nvm. */
@@ -100,7 +106,7 @@ export function findCli(provider: AgentProvider, o: { home: string; uid: number;
     try { real = realpathSync(c); } catch { continue; }
     const exe = safeExe(name === 'codex' ? codexNative(real, o.arch) : real, o.uid);
     // o nome REAL do binário: um link chamado claude para /bin/zsh não passa
-    if (exe && ['claude', 'claude.exe', 'codex'].includes(basename(exe))) return exe;
+    if (exe && (['claude', 'claude.exe', 'codex'].includes(basename(exe)) || (name === 'claude' && nativeVersion(exe, o.home)))) return exe;
   }
   return null;
 }
