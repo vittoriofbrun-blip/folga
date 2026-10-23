@@ -29,7 +29,7 @@ Escreva, no fim da resposta, um bloco de código com a língua `folga-sugestao` 
   - `limpeza_rapida`: limpar temporários e cache. `itens` são categorias que ver_limpeza_rapida mostrou (por exemplo `temp_usuario`).
   - `dados_apps`: apagar cache recriável de app fechado. `itens` são ids de cache que `ver_dados_dos_apps` mostrou com `podeLimpar`; o Folga confere de novo no clique.
   - `liberar_memoria`: fechar apps parados do jeito normal. `itens` são as chaves de app (campo `app`) que ver_memoria mostrou como parados.
-- `titulo` curto, `motivo` em uma frase, `itens` sempre uma lista de textos. {{NOTA_BARRAS}}
+- `titulo` curto, `motivo` em uma frase, `itens` sempre uma lista de textos.{{NOTA_BARRAS}}
 - O servidor confere tudo de novo, calcula os tamanhos e mostra a lista real {{AO_USUARIO}}. Se algo for recusado, ele aparece para você como recusa; não insista.
 
 ## Segurança

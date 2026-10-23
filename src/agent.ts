@@ -5,7 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir, userInfo } from 'node:os';
-import { dirname, isAbsolute, join, posix } from 'node:path';
+import { basename, dirname, isAbsolute, join, posix } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { SuggestionError } from './suggestions.ts';
 import type {
@@ -99,7 +99,8 @@ export function findCli(provider: AgentProvider, o: { home: string; uid: number;
     let real: string;
     try { real = realpathSync(c); } catch { continue; }
     const exe = safeExe(name === 'codex' ? codexNative(real, o.arch) : real, o.uid);
-    if (exe) return exe;
+    // o nome REAL do binário: um link chamado claude para /bin/zsh não passa
+    if (exe && ['claude', 'claude.exe', 'codex'].includes(basename(exe))) return exe;
   }
   return null;
 }
@@ -131,7 +132,7 @@ export function cliEnv(base: NodeJS.ProcessEnv, platform: NodeJS.Platform): Node
   }
   const user = userInfo().username;
   return {
-    HOME: homedir(), USER: user, LOGNAME: user, ...(base.LANG ? { LANG: base.LANG } : {}),
+    HOME: homedir(), USER: user, LOGNAME: user, ...(base.LANG && /^[A-Za-z0-9_.@-]{1,64}$/.test(base.LANG) ? { LANG: base.LANG } : {}),
     TMPDIR: base.TMPDIR ?? tmpdir(), PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
   };
 }
@@ -151,6 +152,7 @@ const PROBE_MAC = join(import.meta.dirname, '..', 'probe', 'bin', 'probe-mac');
 /** probe-mac --disclaim sai 125 sem executar quando o macOS não tem a API (e o probe-mac pode faltar no bundle): o assistente
  *  não roda no app (fail closed). 125 é só do disclaim; um 126 do próprio CLI continua a mensagem comum. */
 export const DISCLAIM_UNAVAILABLE = 125;
+export const CODEX_INCOMPATIVEL = 'A versão do Codex instalada não é compatível com o Folga.';
 export const DISCLAIM_FAIL = 'O assistente não roda dentro do app Folga neste macOS: não deu para isolá-lo do app. Nada foi executado.';
 
 /** Comando real de cada provedor, com as flags exatas do spike (ADR 0006). */
@@ -182,6 +184,7 @@ export function realLaunch(t: TurnInput, dataDir: string, port: number, exe = WI
   const common = [
     '--json', '--skip-git-repo-check', '--ignore-user-config',
     '-c', 'sandbox_mode="read-only"',
+    ...(platform === 'darwin' ? ['-c', 'web_search="disabled"'] : []),   // web__run abriria qualquer URL: injeção de prompt vazaria nomes de arquivo/app
     '-c', `mcp_servers.folga.command=${toml(fwd(process.execPath))}`,
     '-c', `mcp_servers.folga.args=[${toml('--no-warnings')},${toml(mcpRoot)}]`,
     '-c', `mcp_servers.folga.env={FOLGA_PORT=${toml(String(port))},FOLGA_DATA_DIR=${toml(fwd(dataDir))}}`,
@@ -293,7 +296,7 @@ type Stored = { id: string; provider: AgentProvider; sessionId: string | null; m
 const SO_TEXTO: Record<'win32' | 'darwin', Record<string, string>> = {
   win32: {
     SO: 'Windows', O_USUARIO: 'o Antônio', DO_USUARIO: 'do Antônio', AO_USUARIO: 'ao Antônio', DO_PC: 'do PC',
-    EXEMPLO_CAMINHO: 'C:\\\\Users\\\\Antônio\\\\Downloads\\\\setup-antigo.exe', NOTA_BARRAS: 'Dentro do JSON, barras invertidas em dobro.',
+    EXEMPLO_CAMINHO: 'C:\\\\Users\\\\Antônio\\\\Downloads\\\\setup-antigo.exe', NOTA_BARRAS: ' Dentro do JSON, barras invertidas em dobro.',
     PASTAS_SISTEMA: 'Windows, Program Files, ProgramData, AppData fora dos temporários e caches das ferramentas',
   },
   // o app é do Vittorio, mas o código vai para o Antônio no PR: nome próprio fica fora do texto do Mac
@@ -307,7 +310,10 @@ let promptModelo: string | undefined;
 export function promptFor(platform: NodeJS.Platform): string {
   promptModelo ??= readFileSync(join(import.meta.dirname, 'agent-prompt.md'), 'utf8').trim();
   const t = SO_TEXTO[platform === 'darwin' ? 'darwin' : 'win32'];
-  return promptModelo.replace(/\{\{(\w+)\}\}/g, (_, k: string) => t[k] ?? '');
+  return fillPrompt(promptModelo, t);
+}
+export function fillPrompt(model: string, t: Record<string, string>): string {
+  return model.replace(/\{\{(\w+)\}\}/g, (_, k: string) => { if (!(k in t)) throw new Error(`marcador {{${k}}} sem valor no prompt`); return t[k]!; });
 }
 
 export function killTree(pid: number, platform = process.platform) {
@@ -379,6 +385,7 @@ export function createAgent(deps: AgentDeps) {
       const motivo = why === 'timeout' ? 'Tempo esgotado: parei a resposta.'
         : why === 'stop' ? 'Resposta interrompida.'
         : acc.error === DISCLAIM_FAIL ? DISCLAIM_FAIL   // texto fixo nosso, não do CLI
+        : provider === 'gpt' && /Unknown feature flag/.test(stderr) ? CODEX_INCOMPATIVEL   // --disable de nome que essa versão não tem
         : `${nome} não respondeu agora. Tente de novo.`;
       if (!why) console.error('[agente] turno sem resposta:', provider, `código ${exitCode}:`, (acc.error ?? acc.softError ?? stderr.trim().split(/\r?\n/).slice(-2).join(' ')).slice(0, 400));
       msg = { id: randomUUID(), role: 'assistant', text: motivo, t: Date.now(), provider, tools: acc.tools.length ? [...new Set(acc.tools)] : undefined, error: true };

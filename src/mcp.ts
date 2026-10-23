@@ -102,7 +102,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'procurar_arquivos_parados',
-    description: 'Use para achar arquivos grandes que o Antônio não abre há muito tempo, nas pastas dele (Downloads, Área de Trabalho, Documentos, Imagens, Vídeos, Músicas). Pode levar alguns segundos. Devolve os 40 maiores com tamanho, último uso e como esse uso foi medido (base).',
+    description: 'Use para achar arquivos grandes que o usuário não abre há muito tempo, nas pastas dele (Downloads, Área de Trabalho, Documentos, Imagens, Vídeos, Músicas). Pode levar alguns segundos. Devolve os 40 maiores com tamanho, último uso e como esse uso foi medido (base).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -167,7 +167,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'ver_sugestoes',
-    description: 'Use para ver as sugestões que ainda aguardam a decisão do Antônio na tela (pendentes), para não repetir uma que já está lá.',
+    description: 'Use para ver as sugestões que ainda aguardam a decisão do usuário na tela (pendentes), para não repetir uma que já está lá.',
     inputSchema: nada,
     readOnly: true,
     run: async () => {

@@ -121,6 +121,10 @@ Cada regra tem um número. Ticket, teste ou revisão cita a regra pelo número. 
   produzir uma ação fora das pastas permitidas. Há um teste com esse caso.
 - **R25 Um turno por vez** — Teto de 120 s por turno; ao estourar, o servidor mata a árvore do processo do
   agente. O processo termina ao fim de cada turno.
+  - **No Mac** o assistente só roda com estas travas: CLI de uma lista fechada de lugares (nunca `PATH` nem `cwd`),
+    Mach-O, do usuário, sem escrita de grupo/outros no arquivo nem na pasta, com nome real `claude`/`claude.exe`/`codex`;
+    ambiente montado do zero (sem `NODE_*`, `DYLD_*` nem chave de API); Codex em sandbox `read-only`, sem web e com os
+    recursos que agem desligados; o CLI roda em grupo de processos próprio e parar/estourar o tempo mata o grupo inteiro.
 
 - **R29 Navegador com várias janelas** (F-13, 2026-10-18) — Navegador Chromium (Chrome, Edge, Brave, Vivaldi,
   Opera) com mais de uma janela fica "em uso", com o motivo à mostra.

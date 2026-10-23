@@ -96,6 +96,17 @@ Vittorio, e depois disso a checagem fica para o ponta a ponta.
 **Assimetria do `~/.codex/AGENTS.md`:** continua (no Mac do Vittorio o arquivo existe e está vazio, 0 bytes). O `--ignore-user-config` não tira o `AGENTS.md`; com shell, exec e
 skills desligados ele não tem como agir sobre essas instruções.
 
+### Revisão final (23/10): contexto residual e web desligada no Mac
+- **Web desligada no Mac:** `-c web_search="disabled"` (só `darwin`; o Windows fica como está até conferir o Codex de lá).
+  Sem isso o Codex declarava `web__run`, que abre qualquer URL: um nome de arquivo malicioso poderia mandar o agente
+  vazar nomes de arquivo e de app por uma URL. Conferido com **uma** chamada (mesmos flags, cwd descartável): o registro
+  da sessão em `~/.codex/sessions` não tem `web__run` nem `web.run` (as sessões anteriores, sem o flag, têm).
+- **Contexto residual que o agente ainda vê:** a lista de skills, `spawn_agent` e `request_user_input` aparecem na
+  declaração de ferramentas do Codex. **Nenhuma consegue executar:** sandbox `read-only`, shell, `unified_exec`,
+  `multi_agent` e `worktrees` desligados, e o code mode isolado (sem `process` nem `require`).
+- **Binário:** o nome real do CLI achado tem de ser `claude`, `claude.exe` ou `codex` (um link chamado `claude` para
+  `/bin/zsh` não passa). `LANG` só entra no ambiente se casar `^[A-Za-z0-9_.@-]{1,64}$`.
+
 ## Consequências
 - Cada turno abre um processo de 100 a 300 MB, que termina ao fim do turno. Esse processo fica na árvore
   `__self` enquanto vive, e o R18 vale entre turnos.
