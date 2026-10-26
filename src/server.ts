@@ -340,12 +340,12 @@ const server = createServer(async (req, res) => {
       return send(res, 200, settings);
     }
     if (method === 'POST' && path === '/api/release') {
-      const body = await readJson(req) as { keys?: unknown };
+      const body = await readJson(req) as { keys?: unknown; onlyIdle?: unknown };
       const keys = body?.keys;
       if (!Array.isArray(keys) || keys.length === 0 || keys.length > 100 || !keys.every(k => typeof k === 'string')) {
         return send(res, 400, { erro: 'keys deve ser uma lista de apps' });
       }
-      const r = await releaser.release(keys as string[], 'manual');
+      const r = await releaser.release(keys as string[], 'manual', body.onlyIdle === true);
       if ('erro' in r) return send(res, r.status, { erro: r.erro });
       if (lastSnap) onSnapshot(lastSnap);
       return send(res, 200, r);

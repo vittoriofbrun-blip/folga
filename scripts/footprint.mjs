@@ -18,7 +18,7 @@ while (Date.now() < end) {
   try {
     const s = await fetch(`http://127.0.0.1:${port}/api/state`).then(r => r.json());
     const self = s.apps.find(a => a.key === '__self');
-    if (self) samples.push({ mb: self.privateWorkingSet / MB, cpu: self.cpuPercent, pids: self.pids.length }); lastPids = self.pids;
+    if (self) { samples.push({ mb: self.privateWorkingSet / MB, cpu: self.cpuPercent, pids: self.pids.length }); lastPids = self.pids; }
   } catch { /* servidor reiniciando */ }
   await new Promise(r => setTimeout(r, 5_000));
 }

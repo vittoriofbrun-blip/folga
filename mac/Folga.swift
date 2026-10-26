@@ -550,7 +550,8 @@ final class Supervisor: NSObject, NSMenuDelegate {
     guard let (ts, tk) = await pedir("GET", "/api/token"), ts == 200, let token = tk["token"] as? String else {
       return avisar("Não deu para liberar agora", "O Folga não respondeu. Tente de novo.")
     }
-    let corpo = try? JSONSerialization.data(withJSONObject: ["keys": apps.map(\.key)])
+    // o alerta pode ficar aberto à vontade: o servidor só fecha o que ainda está parado no clique
+    let corpo = try? JSONSerialization.data(withJSONObject: ["keys": apps.map(\.key), "onlyIdle": true])
     let r = await pedir("POST", "/api/release", token: token, corpo: corpo)
     let (titulo, texto) = resultadoLiberar(status: r?.0, corpo: r?.1 ?? [:])
     avisar(titulo, texto)

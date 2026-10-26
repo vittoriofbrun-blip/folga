@@ -9,6 +9,9 @@ export const MAC_NEVER_CLOSE: readonly string[] = [
   'com.apple.terminal', 'com.googlecode.iterm2', 'com.mitchellh.ghostty', 'dev.warp.warp-stable',
   'com.microsoft.vscode', 'com.todesktop.230313mzl4w4u92', 'com.anthropic.claudefordesktop',
   'com.openai.codex', 'com.apple.dt.xcode',
+  'net.kovidgoyal.kitty', 'org.alacritty', 'dev.zed.zed', 'com.jetbrains.toolbox',
+  'com.jetbrains.intellij', 'com.jetbrains.intellij.ce', 'com.jetbrains.pycharm', 'com.jetbrains.pycharm.ce',
+  'com.jetbrains.webstorm', 'com.jetbrains.goland', 'com.jetbrains.rider', 'com.google.android.studio',
 ];
 
 export function dataDir(

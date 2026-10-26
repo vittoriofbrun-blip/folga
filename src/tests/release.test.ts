@@ -93,6 +93,17 @@ const ok = (name: string) => { passed++; console.log(`ok  ${name}`); };
 }
 
 {
+  // menu da barra: o alerta pode ficar aberto; app que voltou a ser usado recusa o pedido, nada enviado
+  const before = mem([app('calc', [1]), app('notepad', [2], { state: 'in_use' })], 200);
+  const { dir, sent, releaser } = setup(before, before, before);
+  const r = await releaser.release(['calc', 'notepad'], 'manual', true);
+  assert.ok('erro' in r && r.status === 409 && /notepad voltou a ser usado/.test(r.erro));
+  assert.equal(sent.length, 0);
+  ok('onlyIdle: app que voltou a ser usado recusa tudo, nada enviado');
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
+}
+
+{
   // uma liberação por vez
   const before = mem([app('calc', [1])], 200);
   const { dir, releaser } = setup(before, mem([], 300), mem([], 300));

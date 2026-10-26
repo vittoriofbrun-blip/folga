@@ -31,7 +31,8 @@ export function createReleaser(deps: ReleaseDeps) {
     return s;
   };
 
-  async function release(keys: string[], origin: LogEntry['origin']): Promise<ReleaseResponse | ReleaseError> {
+  // onlyIdle: quem confirmou olhando uma lista antiga (alerta do menu da barra) só fecha o que segue parado
+  async function release(keys: string[], origin: LogEntry['origin'], onlyIdle = false): Promise<ReleaseResponse | ReleaseError> {
     if (busy) return { erro: 'já existe uma liberação em andamento', status: 409 };
     const state = deps.getState();
     if (!state) return { erro: 'ainda lendo a memória', status: 503 };
@@ -42,6 +43,7 @@ export function createReleaser(deps: ReleaseDeps) {
       const g = state.apps.find(a => a.key === key);
       if (!g) continue;
       if (g.state === 'protected') return { erro: `${g.name} é protegido e não pode ser fechado`, status: 409 };
+      if (onlyIdle && g.state !== 'idle') return { erro: `${g.name} voltou a ser usado; nada foi fechado`, status: 409 };
       groups.push(g);
     }
     if (groups.length === 0) return { erro: 'nenhum dos apps está aberto', status: 409 };
