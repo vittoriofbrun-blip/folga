@@ -214,7 +214,7 @@ try {
       }
       assert.equal(await get('/api/token', { cookie: `folga_t=${tk}` }), 200, 'a janela (cookie) pega o token');
       assert.equal(await get('/api/state', { cookie: `outro=1; folga_t=${tk}` }), 200, 'cookie entre outros');
-      assert.equal(await get('/', {}), 200, 'a página em si não pede token');
+      assert.notEqual(await get('/', {}), 403, 'a página em si não pede token (404 na CI, que não monta a interface)');
     });
     ok('segurança (app): token só na memória; /api/ inteira recusa sem token, cookie da janela passa');
 

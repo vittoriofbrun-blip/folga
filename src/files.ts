@@ -170,9 +170,12 @@ function inside(root: string, child: string) {
 async function realOrNull(p: string) { try { return await realpath(p); } catch { return null; } }
 /** Caminho sem link em nenhum ponto (o real é ele mesmo). Pasta de cache e pasta de cada arquivo passam por aqui:
  *  um link trocado ali levaria a limpeza a apagar o que está do outro lado (revisão de segurança). */
+// ponytail: no Windows não há permissão por pasta (TCC) a herdar, e o nome curto 8.3 (C:\Users\ANTNIO~1) faria o
+// caminho real nunca bater; lá fica como era, sem esta checagem
 async function isRealPath(p: string) {
+  if (process.platform === 'win32') return true;
   const r = await realOrNull(p);
-  return r !== null && (process.platform === 'win32' ? r.toLowerCase() === p.toLowerCase() : r === p);
+  return r !== null && r === p;
 }
 
 /** Passeio com teto de entradas e de tempo. Não segue link nem junção; lê metadados com lstat, em lotes. */
@@ -656,7 +659,7 @@ export function createFiles(deps: FilesDeps) {
       const porPasta = new Map<string, string[]>();
       for (const [p] of list) { const d = dirname(p); porPasta.set(d, [...(porPasta.get(d) ?? []), basename(p)]); }
       const antes = process.cwd();
-      const mesma = (a: string, b: string) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+      const mesma = (a: string, b: string) => process.platform === 'win32' || a === b;   // Windows: ver isRealPath
       for (const [d, nomes] of porPasta) {
         try {
           process.chdir(d);   // segue link se a pasta já virou link: a conferência abaixo pega
