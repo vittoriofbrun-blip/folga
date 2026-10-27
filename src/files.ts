@@ -2,7 +2,7 @@
 // Nada aqui apaga arquivo do usuário de vez: arquivo do usuário só vai para a Lixeira (R22); só temporários
 // com mais de 7 dias e cache de navegador fechado são apagados, e quem chama é a aprovação de um cartão.
 import { spawn } from 'node:child_process';
-import { realpathSync, type Dirent, type Stats } from 'node:fs';
+import { lstatSync, realpathSync, unlinkSync, type Dirent, type Stats } from 'node:fs';
 import { lstat, opendir, readdir, realpath, unlink } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -647,28 +647,39 @@ export function createFiles(deps: FilesDeps) {
       else for (const [p, st] of temp) if (keys?.has(pathKey(p))) skipped++; else todo.push([p, st]);
     }
     let bytes = 0, files = 0;
-    /** old = temporário: ainda tem de ser antigo na hora do unlink */
-    const del = async (list: Array<[string, Stats]>, old: boolean) => {
-      for (let i = 0; i < list.length; i += 32) {
-        await Promise.all(list.slice(i, i + 32).map(async ([p]) => {
-          try {
-            const st = await lstat(p);   // reconfere logo antes: ainda arquivo comum e (se temporário) ainda antigo
-            if (!st.isFile() || (old && tempAge(st) >= limit)) { skipped++; return; }
-            // a pasta não virou link desde a coleta (ponytail: janela de corrida residual entre esta checagem e o unlink)
-            if (!await isRealPath(dirname(p))) { skipped++; return; }
-            await unlink(p);
-            bytes += st.size; files++;
-          } catch { skipped++; }   // travado, em uso ou sem permissão: fica
-        }));
+    /** old = temporário: ainda tem de ser antigo na hora do unlink.
+     *  Revisão de segurança: apagar pelo caminho inteiro deixa uma corrida (a pasta vira link entre a checagem e o
+     *  unlink e o unlink apaga o arquivo do outro lado, numa pasta protegida). Aqui o processo entra na pasta
+     *  (chdir), confere que entrou na pasta certa e apaga pelo NOME: trocar a pasta depois não muda onde o unlink cai.
+     *  Tudo síncrono dentro de cada pasta: nenhum outro código roda com o diretório atual trocado. */
+    const del = (list: Array<[string, Stats]>, old: boolean) => {
+      const porPasta = new Map<string, string[]>();
+      for (const [p] of list) { const d = dirname(p); porPasta.set(d, [...(porPasta.get(d) ?? []), basename(p)]); }
+      const antes = process.cwd();
+      const mesma = (a: string, b: string) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+      for (const [d, nomes] of porPasta) {
+        try {
+          process.chdir(d);   // segue link se a pasta já virou link: a conferência abaixo pega
+          if (!mesma(process.cwd(), d)) { skipped += nomes.length; continue; }
+          for (const n of nomes) {
+            try {
+              const st = lstatSync(n);   // reconfere logo antes: ainda arquivo comum e (se temporário) ainda antigo
+              if (!st.isFile() || (old && tempAge(st) >= limit)) { skipped++; continue; }
+              unlinkSync(n);
+              bytes += st.size; files++;
+            } catch { skipped++; }   // travado, em uso ou sem permissão: fica
+          }
+        } catch { skipped += nomes.length; }
+        finally { try { process.chdir(antes); } catch { /* a pasta de antes sumiu: segue */ } }
       }
     };
-    await del(todo, true);
+    del(todo, true);
     // M2: o navegador pode ter aberto desde a coleta; confere de novo logo antes de apagar os arquivos de cada um
     if (want.has('cache_navegador')) {
       for (const b of BROWSERS) {
         if (open[b] || !cache[b].length) continue;
         if ((await browsersOpen())[b]) { skipped += cache[b].length; continue; }
-        await del(cache[b], false);
+        del(cache[b], false);
       }
     }
     return { bytes, files, skipped };

@@ -68,9 +68,10 @@ if (IN_APP) {
 const agentTokenFile = join(DATA_DIR, 'agent-token');
 let AGENT_TOKEN = randomBytes(32).toString('hex');
 rmSync(agentTokenFile, { force: true });
+// close só mexe se o token ainda é o daquele turno: um turno velho (conversa zerada no meio) não apaga o do novo
 const agentTurn = {
-  open() { AGENT_TOKEN = randomBytes(32).toString('hex'); writeAtomic(agentTokenFile, AGENT_TOKEN); },
-  close() { rmSync(agentTokenFile, { force: true }); AGENT_TOKEN = randomBytes(32).toString('hex'); },
+  open() { AGENT_TOKEN = randomBytes(32).toString('hex'); writeAtomic(agentTokenFile, AGENT_TOKEN); return AGENT_TOKEN; },
+  close(t: string | void) { if (t !== AGENT_TOKEN) return; rmSync(agentTokenFile, { force: true }); AGENT_TOKEN = randomBytes(32).toString('hex'); },
 };
 // o que o MCP (src/mcp.ts) lê; dentro do app toda leitura pede token
 const AGENT_GETS = new Set(['/api/state', '/api/warnings', '/api/disk', '/api/quickclean', '/api/appdata', '/api/startup-apps', '/api/suggestions', '/api/log']);

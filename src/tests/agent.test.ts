@@ -763,16 +763,16 @@ await caso('agent-token por turno: abre antes do CLI subir e fecha quando o turn
     dataDir, port: 1, selfPids: new Set(), emit: (ev, d) => { if (ev === 'agent' && ['done', 'error'].includes((d as AgentEvent).type)) fim++; },
     addSuggestion: async () => ({ erro: 'x', status: 500 }),
     launch: t => { log.push('launch'); return fakeLaunch(t); },
-    turnOpen: () => log.push('open'), turnClose: () => log.push('close'),
+    turnOpen: () => { log.push('open'); return 't1'; }, turnClose: t => { log.push(`close:${t}`); },
   });
   await a.send('claude', 'oi');
   for (let i = 0; i < 100 && !fim; i++) await sleep(100);
-  assert.deepEqual(log, ['launch', 'open', 'close']);
+  assert.deepEqual(log, ['launch', 'open', 'close:t1'], 'fecha com o token que aquele turno abriu');
   const b = createAgent({
     dataDir, port: 1, selfPids: new Set(), emit: (ev, d) => { if (ev === 'agent' && ['done', 'error'].includes((d as AgentEvent).type)) fim++; },
     addSuggestion: async () => ({ erro: 'x', status: 500 }),
     launch: () => ({ cmd: join(dataDir, 'nao-existe'), args: [] }),
-    turnOpen: () => log.push('open2'), turnClose: () => log.push('close2'),
+    turnOpen: () => { log.push('open2'); }, turnClose: () => { log.push('close2'); },
   });
   fim = 0;
   await b.send('claude', 'oi');

@@ -196,6 +196,17 @@ pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `
 - Testes: `http.test` (403 em toda `/api/` sem token, cookie passa, nenhum token no disco; mutação da checagem faz
   falhar) e `agent.test` (abre/fecha do agent-token, inclusive com CLI que não sobe).
 
+### Limpeza rápida: apagar pelo nome dentro da pasta conferida (revisão de segurança, 2026-10-27)
+- Cache de navegador que era link (`Cache_Data -> ~/Documents`) fazia a limpeza apagar de vez o outro lado. 1º
+  conserto (caminho real da pasta antes de varrer + pasta de cada arquivo reconferida antes do `unlink`) fechou o
+  caso parado, mas a 2ª revisão ganhou a corrida trocando a pasta por link em laço (~1% dos arquivos, 31 de 3000).
+- Hoje (`files.ts`, `del`): agrupa por pasta, `chdir` nela, confere que `process.cwd()` é a pasta esperada e apaga
+  pelo **nome** (`lstatSync` + `unlinkSync`), tudo síncrono para nenhum outro código rodar com o diretório trocado.
+  Trocar a pasta depois do `chdir` não muda onde o `unlink` cai. Mesmo ataque, 3 rodadas: 0 de 3000.
+- `agent-token`: o fechar do turno só apaga se o token ainda for o daquele turno (conversa zerada no meio de uma
+  resposta não derruba o token do turno novo). Resíduo aceito: durante um turno o arquivo existe e permite listar
+  nomes de arquivos (varredura); qualquer outro canal para o MCP (config, argumento) também fica legível.
+
 ### Notificações: estado em 2026-10-22 (superado — ver 2026-10-27 abaixo)
 
 Medido no app instalado (`~/Applications/Folga.app`, registro único no LaunchServices, build f640ad5…):
