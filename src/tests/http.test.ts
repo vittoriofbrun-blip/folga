@@ -94,24 +94,12 @@ try {
   assert.equal((await call('POST', '/api/release', { body: { keys: ['notepad'] } })).status, 403);
   ok('R16: sem token 403, sem JSON 415');
 
-  // M6: o agente tem token próprio (novo a cada início), que só vale na varredura de arquivos
-  const agentToken = readFileSync(join(dataDir, 'agent-token'), 'utf8').trim();
-  assert.match(agentToken, /^[0-9a-f]{64}$/);
-  assert.notEqual(agentToken, token);
-  const scan = await call('POST', '/api/files/scan', { body: {}, token: agentToken });
-  assert.equal(scan.status, 200);
-  assert.deepEqual(scan.body.files, []);
+  // M6: o agente tem token próprio, que só existe durante um turno (arquivo criado e apagado pelo servidor; o
+  // turno em si está em agent.test). Parado, não há agent-token no disco e nenhum valor antigo vale.
+  assert.ok(!existsSync(join(dataDir, 'agent-token')), 'sem turno do assistente não há agent-token no disco');
   assert.equal((await call('POST', '/api/files/scan', { body: {}, token })).status, 200, 'o ui-token continua valendo na varredura');
   assert.equal((await call('POST', '/api/files/scan', { body: {}, token: 'x'.repeat(64) })).status, 403);
-  for (const [method, path, body] of [
-    ['POST', '/api/suggestions/abc-1/approve', {}], ['POST', '/api/suggestions/abc-1/ignore', {}], ['POST', '/api/suggestions', {}],
-    ['POST', '/api/release', { keys: ['notepad'] }], ['PUT', '/api/settings', { idleMinutes: 10 }], ['PUT', '/api/startup', { on: true }],
-    ['POST', '/api/agent/message', { provider: 'claude', text: 'oi' }], ['POST', '/api/agent/reset', {}], ['POST', '/api/window', {}],
-  ] as const) {
-    assert.equal((await call(method, path, { body, token: agentToken })).status, 403, `${method} ${path} com o agent-token`);
-  }
-  assert.ok(!existsSync(join(startupDir, 'Folga.lnk')), 'nada foi executado');
-  ok('M6: agent-token passa só em POST /api/files/scan; aprovar, liberar, ajustes e o resto dão 403');
+  ok('M6: agent-token só durante o turno; varredura com o ui-token, token qualquer dá 403');
 
   if (process.platform === 'darwin') {
     const w = await call('POST', '/api/window', { body: {}, token });
@@ -177,7 +165,7 @@ try {
   assert.ok(!existsSync(join(startupDir, 'Folga.lnk')));
   ok('P04: atalho de inicialização liga e desliga (pasta temporária)');
   if (process.platform !== 'win32') {
-    for (const t of ['ui-token', 'agent-token']) assert.equal(statSync(join(dataDir, t)).mode & 0o777, 0o600, t);
+    for (const t of ['ui-token']) assert.equal(statSync(join(dataDir, t)).mode & 0o777, 0o600, t);
     ok('tokens gravados em 0600');
   }
 
@@ -188,7 +176,7 @@ try {
     assert.equal((await call('PUT', '/api/startup', { body: { on: true }, token })).status, 409);
     assert.ok(!existsSync(plist), 'sem FOLGA_APP nada é criado');
 
-    const appStartup = async (appPath: string | undefined, fn: (c: (m: string, p: string, body?: unknown) => Promise<Res>, dir: string) => Promise<void>,
+    const appStartup = async (appPath: string | undefined, fn: (c: (m: string, p: string, body?: unknown) => Promise<Res>, dir: string, x: { port: number; data: string; tk: string }) => Promise<void>,
       opts: { env?: Record<string, string>; settings?: string } = {}) => {
       const port = PORT + 1001 + Math.floor(Math.random() * 500);
       const dir = mkdtempSync(join(tmpdir(), 'folga-launchagents-'));
@@ -199,18 +187,36 @@ try {
       Object.assign(env, opts.env);
       if (opts.settings !== undefined) writeFileSync(join(data, 'settings.json'), opts.settings);
       const child = spawn(process.execPath, ['--no-warnings', join(root, 'src', 'server.ts')], { env, stdio: ['pipe', 'ignore', 'inherit'] });   // stdin em pipe: FOLGA_APP=1 sai quando ele fecha
+      const tk = 'ab'.repeat(32);
+      child.stdin!.write(tk + '\n');   // como o Folga.app: o token chega na 1ª linha do stdin, nunca por arquivo
       try {
-        let tk = '';
-        for (let i = 0; i < 100 && !tk; i++) {
-          try { tk = ((await (await fetch(`http://127.0.0.1:${port}/api/token`)).json()) as { token: string }).token; } catch { await sleep(100); }
+        let up = false;
+        for (let i = 0; i < 100 && !up; i++) {
+          try { up = (await fetch(`http://127.0.0.1:${port}/api/settings`, { headers: { 'x-folga-token': tk } })).status === 200; } catch { await sleep(100); }
+          if (!up) await sleep(50);
         }
-        assert.ok(tk, 'servidor do app não subiu');
+        assert.ok(up, 'servidor do app não subiu');
         await fn(async (m, p, body) => {
           const r = await fetch(`http://127.0.0.1:${port}${p}`, { method: m, headers: { 'x-folga-token': tk, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
           return { status: r.status, body: await r.json().catch(() => null), headers: {} };
-        }, dir);
+        }, dir, { port, data, tk });
       } finally { child.kill('SIGKILL'); await rm(dir, { recursive: true, force: true }); await rm(data, { recursive: true, force: true, maxRetries: 5 }); }
     };
+
+    // revisão de segurança: dentro do app a chave nunca vai para o disco e nenhuma /api/ responde sem ela
+    await appStartup('/Users/x/Applications/Folga.app', async (_c, _dir, { port, data, tk }) => {
+      const get = (p: string, h: Record<string, string> = {}) => fetch(`http://127.0.0.1:${port}${p}`, { headers: h }).then(r => r.status);
+      assert.ok(!existsSync(join(data, 'ui-token')), 'ui-token não pode existir no disco dentro do app');
+      assert.ok(!existsSync(join(data, 'agent-token')), 'agent-token só existe durante um turno do assistente');
+      for (const p of ['/api/token', '/api/state', '/api/files/stale', '/api/suggestions', '/api/agent']) {
+        assert.equal(await get(p), 403, `${p} sem token`);
+        assert.equal(await get(p, { 'x-folga-token': 'cd'.repeat(32) }), 403, `${p} com token errado`);
+      }
+      assert.equal(await get('/api/token', { cookie: `folga_t=${tk}` }), 200, 'a janela (cookie) pega o token');
+      assert.equal(await get('/api/state', { cookie: `outro=1; folga_t=${tk}` }), 200, 'cookie entre outros');
+      assert.equal(await get('/', {}), 200, 'a página em si não pede token');
+    });
+    ok('segurança (app): token só na memória; /api/ inteira recusa sem token, cookie da janela passa');
 
     await appStartup('/Users/x/Applications/Fol&ga.app', async (c, dir) => {
       const file = join(dir, 'local.folga.app.plist');

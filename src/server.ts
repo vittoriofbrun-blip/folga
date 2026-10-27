@@ -1,7 +1,7 @@
 // Servidor local do Folga: sonda → classificador → HTTP/SSE (ADR 0001, R15–R17).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
@@ -37,13 +37,45 @@ const writeAtomic = writePrivate;
 
 // ---------- tokens (R16) ----------
 // ui-token: da interface, autoriza tudo. Arquivo com menos de 32 caracteres (vazio, cortado, editado à mão) é regerado.
+// Dentro do Folga.app (Mac) o ui-token NUNCA vai para o disco: arquivo da pasta de dados qualquer programa do usuário
+// lê, e com ele usaria as permissões de pasta do Folga (revisão de segurança). O app gera o token a cada início e o
+// entrega na 1ª linha do stdin; a janela o recebe num cookie e o menu o guarda na memória.
 const tokenFile = join(DATA_DIR, 'ui-token');
-let TOKEN = readPrivate(tokenFile);
-if (TOKEN.length < 32) { TOKEN = randomBytes(32).toString('hex'); writeAtomic(tokenFile, TOKEN); }
-// agent-token: só do processo MCP do agente, novo a cada início, aceito apenas na varredura de arquivos (que só lê).
-// O ui-token também aprova sugestões; o agente nunca o vê.
-const AGENT_TOKEN = randomBytes(32).toString('hex');
-writeAtomic(join(DATA_DIR, 'agent-token'), AGENT_TOKEN);
+function tokenFromStdin(): string {
+  const buf = Buffer.alloc(128);
+  let s = '';
+  try {
+    while (!s.includes('\n') && s.length < 128) {
+      const n = readSync(0, buf, 0, 128 - s.length, null);
+      if (n <= 0) break;
+      s += buf.toString('utf8', 0, n);
+    }
+  } catch { /* sem stdin: token aleatório, a interface não abre (falha fechada) */ }
+  const t = (s.split('\n')[0] ?? '').trim();
+  return /^[0-9a-f]{64}$/.test(t) ? t : randomBytes(32).toString('hex');
+}
+let TOKEN: string;
+if (IN_APP) {
+  TOKEN = tokenFromStdin();
+  rmSync(tokenFile, { force: true });   // o de antes desta correção ainda estaria lá
+} else {
+  TOKEN = readPrivate(tokenFile);
+  if (TOKEN.length < 32) { TOKEN = randomBytes(32).toString('hex'); writeAtomic(tokenFile, TOKEN); }
+}
+// agent-token: só do processo MCP do agente. Existe só durante um turno do assistente (arquivo criado no início,
+// apagado e trocado no fim): fora disso, quem lê a pasta de dados não acha token nenhum.
+// Vale só nas leituras que o MCP faz e na varredura de arquivos. O ui-token também aprova sugestões; o agente nunca o vê.
+const agentTokenFile = join(DATA_DIR, 'agent-token');
+let AGENT_TOKEN = randomBytes(32).toString('hex');
+rmSync(agentTokenFile, { force: true });
+const agentTurn = {
+  open() { AGENT_TOKEN = randomBytes(32).toString('hex'); writeAtomic(agentTokenFile, AGENT_TOKEN); },
+  close() { rmSync(agentTokenFile, { force: true }); AGENT_TOKEN = randomBytes(32).toString('hex'); },
+};
+// o que o MCP (src/mcp.ts) lê; dentro do app toda leitura pede token
+const AGENT_GETS = new Set(['/api/state', '/api/warnings', '/api/disk', '/api/quickclean', '/api/appdata', '/api/startup-apps', '/api/suggestions', '/api/log']);
+const cookieToken = (req: IncomingMessage) =>
+  (req.headers.cookie ?? '').split(';').map(c => c.trim()).find(c => c.startsWith('folga_t='))?.slice('folga_t='.length) ?? '';
 
 // ---------- ajustes (ADR 0005: gravação atômica) ----------
 const settingsFile = join(DATA_DIR, 'settings.json');
@@ -226,7 +258,7 @@ const suggestions = createSuggestions({
   release: async keys => { const r = await releaser.release(keys, 'manual'); if (lastSnap) onSnapshot(lastSnap); return r; },
 });
 const agent = createAgent({
-  dataDir: DATA_DIR, port: PORT, emit, selfPids: extraSelfPids,
+  dataDir: DATA_DIR, port: PORT, emit, selfPids: extraSelfPids, turnOpen: agentTurn.open, turnClose: agentTurn.close,
   addSuggestion: draft => suggestions.add(draft, 'agente'),
 });
 // R30: o vigia propõe sozinho; quem executa continua sendo o clique do usuário em suggestions.approve
@@ -300,6 +332,16 @@ const server = createServer(async (req, res) => {
 
     // outro site disparando a requisição (ex.: uma imagem de outro site apontando para uma GET cara): o navegador avisa em Sec-Fetch-Site
     if (req.headers['sec-fetch-site'] === 'cross-site') return send(res, 403, { erro: 'origem não permitida' });
+
+    // Dentro do app toda a /api/ pede token, leitura inclusive (lista de arquivos, conversa, sugestões): cookie da
+    // janela, cabeçalho do menu, ou o agent-token nas leituras do MCP. Fora do app (Windows, npm run app) fica como era.
+    if (IN_APP) {
+      const given = req.headers['x-folga-token'];
+      const agentRead = method === 'GET' && AGENT_GETS.has(path) && given === AGENT_TOKEN;
+      if (given !== TOKEN && cookieToken(req) !== TOKEN && !agentRead && !(method === 'POST' && path === '/api/files/scan' && given === AGENT_TOKEN)) {
+        return send(res, 403, { erro: 'token inválido' });
+      }
+    }
 
     // R16: escrita só com JSON e token. O agent-token vale só na varredura de arquivos.
     if (method === 'POST' || method === 'PUT') {

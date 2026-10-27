@@ -755,6 +755,31 @@ await caso('M3: Codex que não conhece um --disable vira mensagem fixa de incomp
   assert.ok(m.error && !m.text.includes('foo'));
 });
 
+await caso('agent-token por turno: abre antes do CLI subir e fecha quando o turno acaba (sucesso e falha)', async () => {
+  const log: string[] = [];
+  const dataDir = mkdtempSync(join(tmpdir(), 'folga-agentdata-')); made.push(dataDir);
+  let fim = 0;
+  const a = createAgent({
+    dataDir, port: 1, selfPids: new Set(), emit: (ev, d) => { if (ev === 'agent' && ['done', 'error'].includes((d as AgentEvent).type)) fim++; },
+    addSuggestion: async () => ({ erro: 'x', status: 500 }),
+    launch: t => { log.push('launch'); return fakeLaunch(t); },
+    turnOpen: () => log.push('open'), turnClose: () => log.push('close'),
+  });
+  await a.send('claude', 'oi');
+  for (let i = 0; i < 100 && !fim; i++) await sleep(100);
+  assert.deepEqual(log, ['launch', 'open', 'close']);
+  const b = createAgent({
+    dataDir, port: 1, selfPids: new Set(), emit: (ev, d) => { if (ev === 'agent' && ['done', 'error'].includes((d as AgentEvent).type)) fim++; },
+    addSuggestion: async () => ({ erro: 'x', status: 500 }),
+    launch: () => ({ cmd: join(dataDir, 'nao-existe'), args: [] }),
+    turnOpen: () => log.push('open2'), turnClose: () => log.push('close2'),
+  });
+  fim = 0;
+  await b.send('claude', 'oi');
+  for (let i = 0; i < 100 && !fim; i++) await sleep(100);
+  assert.deepEqual(log.slice(3), ['open2', 'close2'], 'CLI que não sobe também fecha o token');
+});
+
 await caso('mcp: nenhuma descrição de ferramenta fala de Windows sem o Mac nem de "PC"', async () => {
   const { TOOLS } = await import('../mcp.ts');
   for (const t of TOOLS) {

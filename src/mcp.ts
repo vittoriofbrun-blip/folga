@@ -19,7 +19,7 @@ type Json = Record<string, unknown>;
 type Tool = { name: string; description: string; inputSchema: Json; readOnly: boolean; run: (args: Json) => Promise<unknown> };
 
 async function get(path: string): Promise<unknown> {
-  const res = await fetch(BASE + path, { signal: AbortSignal.timeout(15_000) });
+  const res = await fetch(BASE + path, { headers: { 'x-folga-token': token() }, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`Folga respondeu ${res.status}`);
   return res.json();
 }

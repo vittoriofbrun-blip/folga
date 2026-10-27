@@ -396,6 +396,14 @@ func selftest() -> Int32 {
 
 enum Porta { case livre, folgaDeFora, ocupada }
 
+/// Token do servidor (revisão de segurança): 32 bytes aleatórios em hex, novo a cada início do servidor, só na memória.
+/// Vai pelo stdin para o servidor, num cookie para a janela e no cabeçalho das chamadas do menu; nunca para o disco.
+func novoToken() -> String? {
+  var b = [UInt8](repeating: 0, count: 32)
+  guard SecRandomCopyBytes(kSecRandomDefault, b.count, &b) == errSecSuccess else { return nil }
+  return b.map { String(format: "%02x", $0) }.joined()
+}
+
 /// GET /api/settings: conexão recusada → livre; 200 → um Folga de fora do app; resto (inclusive silêncio) → ocupada.
 func olharPorta() async -> Porta {
   var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/settings")!)
@@ -421,6 +429,8 @@ final class Supervisor: NSObject, NSMenuDelegate {
   private let tentar = NSMenuItem(title: "O Folga parou — tentar de novo", action: #selector(tentarDeNovo), keyEquivalent: "")
 
   private let janela = Janela()
+  /// Só existe quando foi este app que subiu o servidor: um Folga "de fora" ou outro programa na porta nunca o recebe.
+  private var token: String? { didSet { janela.token = token } }
   private let liberar = NSMenuItem(title: "Liberar parados…", action: #selector(liberarParados), keyEquivalent: "")
   private let disco = NSMenuItem(title: "Disco livre: —", action: nil, keyEquivalent: "")
   private let acessoTotal = NSMenuItem(title: avisoAcessoTotal, action: nil, keyEquivalent: "")   // só texto, decisão 17
@@ -510,7 +520,7 @@ final class Supervisor: NSObject, NSMenuDelegate {
       req.httpBody = corpo
       req.setValue("application/json", forHTTPHeaderField: "content-type")
     }
-    if let token { req.setValue(token, forHTTPHeaderField: "x-folga-token") }
+    if let token = token ?? self.token { req.setValue(token, forHTTPHeaderField: "x-folga-token") }
     guard let (data, resp) = try? await sessao.data(for: req), let http = resp as? HTTPURLResponse else { return nil }
     return (http.statusCode, (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:])
   }
@@ -524,7 +534,7 @@ final class Supervisor: NSObject, NSMenuDelegate {
   }
 
   /// O mesmo caminho do botão da tela Memória: lista do servidor, confirmação, POST /api/release com o token.
-  /// O releaser revalida tudo no clique (protegido → 409). O token é lido só aqui e não fica guardado.
+  /// O releaser revalida tudo no clique (protegido → 409). O token é o da memória do app (nunca GET /api/token).
   private func liberarAgora() async {
     guard let (st, estado) = await pedir("GET", "/api/state"), st == 200 else {
       return avisar("O Folga não respondeu", "Tente de novo em alguns segundos.")
@@ -547,7 +557,7 @@ final class Supervisor: NSObject, NSMenuDelegate {
     if let esc { NSEvent.removeMonitor(esc) }
     guard confirmouFechar(resposta) else { return }
 
-    guard let (ts, tk) = await pedir("GET", "/api/token"), ts == 200, let token = tk["token"] as? String else {
+    guard let token else {
       return avisar("Não deu para liberar agora", "O Folga não respondeu. Tente de novo.")
     }
     // o alerta pode ficar aberto à vontade: o servidor só fecha o que ainda está parado no clique
@@ -568,6 +578,7 @@ final class Supervisor: NSObject, NSMenuDelegate {
     var soCriticos = false
     var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/state")!)
     req.timeoutInterval = 3
+    req.setValue(token, forHTTPHeaderField: "x-folga-token")   // o servidor do app recusa /api/ sem token
     if let (data, resp) = try? await sessao.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200,
        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
       mem = (obj["memLoad"] as? NSNumber)?.intValue
@@ -577,6 +588,7 @@ final class Supervisor: NSObject, NSMenuDelegate {
     // servidor fora ou resposta ruim → item escondido (não "0 avisos")
     var rw = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/warnings")!)
     rw.timeoutInterval = 3
+    rw.setValue(token, forHTTPHeaderField: "x-folga-token")
     var texto: String?
     if let (data, resp) = try? await sessao.data(for: rw), (resp as? HTTPURLResponse)?.statusCode == 200,
        let lista = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
@@ -590,7 +602,9 @@ final class Supervisor: NSObject, NSMenuDelegate {
 
   func subir() {
     Task { @MainActor in
-      switch await olharPorta() {
+      let porta = await olharPorta()
+      if porta != .livre { token = nil }   // servidor que não é nosso: o token deste app não vai para ele
+      switch porta {
       case .folgaDeFora: mostrar("Folga rodando fora do app")   // não supervisiona, não mata; a janela usa esse servidor
       case .ocupada: mostrar("A porta \(port) está ocupada por outro programa")   // não mata nada
       case .livre: iniciar()
@@ -610,7 +624,9 @@ final class Supervisor: NSObject, NSMenuDelegate {
     p.arguments = ["--no-warnings", resources.appendingPathComponent("folga/src/server.ts").path]
     p.currentDirectoryURL = resources.appendingPathComponent("folga")
     p.environment = childEnv(from: ProcessInfo.processInfo.environment, appPath: Bundle.main.bundlePath, path: cfg?["path"] ?? "/usr/bin:/bin")
-    p.standardInput = Pipe()   // o app nunca fecha: se o app cair, o pipe fecha e o servidor sai
+    guard let tk = novoToken() else { mostrar("Não deu para iniciar o servidor (sem número aleatório)"); return }
+    let entrada = Pipe()
+    p.standardInput = entrada   // o app nunca fecha: se o app cair, o pipe fecha e o servidor sai
     let dir = URL(fileURLWithPath: homeDir()).appendingPathComponent("Library/Application Support/Folga")
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let log = openLog(at: dir.appendingPathComponent("server.log").path)
@@ -618,6 +634,8 @@ final class Supervisor: NSObject, NSMenuDelegate {
     p.standardError = log
     p.terminationHandler = { _ in Task { @MainActor in self.caiu() } }
     do { try p.run() } catch { mostrar("Não deu para iniciar o servidor: \(error.localizedDescription)"); return }
+    entrada.fileHandleForWriting.write(Data((tk + "\n").utf8))   // 1ª linha do stdin = token (server.ts)
+    token = tk
     server = p
     upSince = Date()
     tentar.isHidden = true
@@ -659,7 +677,8 @@ final class Supervisor: NSObject, NSMenuDelegate {
 }
 
 /// Janela WebKit presa ao 127.0.0.1 do Folga. Sem ponte para o app: nenhum WKScriptMessageHandler, nenhum
-/// addUserScript. O token chega como no navegador: a página faz GET /api/token na mesma origem.
+/// addUserScript. O token vai num cookie HttpOnly do armazenamento só-memória da janela; com ele a página faz
+/// GET /api/token na mesma origem, como no navegador (o servidor do app recusa /api/ sem token).
 @MainActor
 final class Janela: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
   private var window: NSWindow?
@@ -669,6 +688,16 @@ final class Janela: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelega
   private var recargaAgendada = false
   private let inicio = URL(string: "http://127.0.0.1:\(port)/")!
   private var alvoAtual: URL?   // a recarga de "servidor subindo" volta para o mesmo alvo (#avisos incluído)
+  /// Servidor novo = token novo: a janela aberta troca o cookie (o mesmo nome sobrescreve); sem token, apaga.
+  var token: String? { didSet { if let web { gravarCookie(web) {} } } }
+
+  private func gravarCookie(_ web: WKWebView, depois: @escaping () -> Void) {
+    let loja = web.configuration.websiteDataStore.httpCookieStore
+    let props: [HTTPCookiePropertyKey: Any] = [.domain: "127.0.0.1", .path: "/", .name: "folga_t", .value: token ?? "",
+                                               HTTPCookiePropertyKey("HttpOnly"): "TRUE", .sameSitePolicy: HTTPCookieStringPolicy.sameSiteStrict]
+    guard let c = HTTPCookie(properties: props) else { return depois() }
+    if token == nil { loja.delete(c) { depois() } } else { loja.setCookie(c) { depois() } }
+  }
 
   /// `vista` ("avisos") vira o fragmento `#avisos`; sem janela, ela nasce já nela; com janela aberta, só troca o fragmento
   /// (a página escuta hashchange, sem recarregar nem passar por ponte).
@@ -711,7 +740,7 @@ final class Janela: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelega
     self.aviso = aviso
     tentativas = 0
     alvoAtual = alvo
-    web.load(URLRequest(url: alvo))
+    gravarCookie(web) { web.load(URLRequest(url: alvo)) }
   }
 
   // Fechar destrói a janela e o WKWebView: o processo de conteúdo do WebKit sai (pegada em segundo plano, Task 9).

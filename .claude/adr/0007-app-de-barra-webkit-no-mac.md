@@ -91,8 +91,10 @@ pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `
   abrir de verdade conta (pasta negada ou inexistente → sem aviso).
 - **O `--disclaim` fica** (Task 6), como defesa em profundidade: se a permissão aparecer ligada, o assistente
   continua sem herdá-la.
-- **Resíduo do `GET /api/token`:** igual ao do Windows — sem a permissão, o servidor só faz o que o próprio usuário
-  já faz.
+- **Resíduo do `GET /api/token`:** ~~igual ao do Windows — sem a permissão, o servidor só faz o que o próprio usuário
+  já faz.~~ **Errado (revisão de segurança, 2026-10-27):** as permissões por pasta (Documentos, Mesa, Downloads…)
+  são do Folga.app, e qualquer programa do usuário (até app de sandbox com rede) pegava o token pelo HTTP ou no
+  arquivo `ui-token` e listava/mandava para a Lixeira arquivos dessas pastas. Ver "Token só na memória" abaixo.
 
 ### O assistente fica fora do acesso ao disco (Task 6)
 - Defesa em profundidade desde a decisão 17 (o Folga não pede a permissão). O servidor (o `node` filho do app)
@@ -177,6 +179,22 @@ pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `
   (3) o `--notify` grava no log o código do erro de `requestAuthorization` (hoje descartado); (4) o `osascript`
   continua como reserva; (5) a contagem de avisos no menu aparece **sempre**, porque nenhum dos dois caminhos é
   garantido; (6) o Foco não pode ser lido: a tela diz isso e não tenta adivinhar.
+
+### Token só na memória (revisão de segurança, 2026-10-27)
+- Dentro do app (`FOLGA_APP=1`) o `ui-token` nunca vai para o disco: o `Folga` gera 32 bytes aleatórios a cada
+  início do servidor e entrega na 1ª linha do stdin (o pipe que já existia). O arquivo `ui-token` antigo é apagado.
+- A janela recebe o token num cookie `folga_t` (HttpOnly, SameSite=Strict) do armazenamento só-memória do
+  WKWebView, gravado antes do primeiro `load`; servidor novo = cookie trocado. Com ele a página faz `GET /api/token`
+  como sempre (a interface não mudou). O menu usa o token da memória no cabeçalho `x-folga-token`.
+- O servidor do app recusa **toda** `/api/` sem token (leituras inclusive: lista de arquivos, conversa, sugestões).
+  A página estática continua aberta. Token só é dado a servidor que este app subiu: porta ocupada ou "Folga de fora"
+  zera o token (um programa que tome a porta não recebe o cookie de um token vivo).
+- `agent-token`: existe só durante um turno do assistente (criado antes do CLI subir, apagado e trocado no fim, em
+  todos os sistemas). Vale nas leituras do MCP e na varredura. **Resíduo:** durante um turno, quem ler o arquivo
+  consegue listar nomes de arquivos das pastas (a varredura); não consegue mandar nada para a Lixeira nem aprovar.
+- Fora do app (Windows, `npm run app`) nada mudou: lá não existe permissão por pasta a herdar.
+- Testes: `http.test` (403 em toda `/api/` sem token, cookie passa, nenhum token no disco; mutação da checagem faz
+  falhar) e `agent.test` (abre/fecha do agent-token, inclusive com CLI que não sobe).
 
 ### Notificações: estado em 2026-10-22 (superado — ver 2026-10-27 abaixo)
 

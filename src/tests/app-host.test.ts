@@ -31,10 +31,12 @@ async function subir(extra: Record<string, string>, stdin: 'pipe' | 'ignore') {
     },
     stdio: [stdin, 'ignore', 'inherit'],
   });
+  const tk = 'ef'.repeat(32);
+  if (stdin === 'pipe') child.stdin!.write(tk + '\n');   // FOLGA_APP=1: token na 1ª linha do stdin
   let state: MemoryState | null = null;
   for (let i = 0; i < 100 && !state?.apps?.length; i++) {
     await sleep(100);
-    try { state = await (await fetch(`http://127.0.0.1:${port}/api/state`)).json() as MemoryState; } catch { /* subindo */ }
+    try { state = await (await fetch(`http://127.0.0.1:${port}/api/state`, { headers: { 'x-folga-token': tk } })).json() as MemoryState; } catch { /* subindo */ }
   }
   if (!state?.apps?.length) { child.kill('SIGKILL'); assert.fail('servidor não subiu'); }
   return { child, state: state!, dataDir };

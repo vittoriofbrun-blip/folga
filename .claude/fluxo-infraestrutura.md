@@ -150,7 +150,7 @@ Folga.app (Swift AppKit + WKWebView, ícone na barra, sem Xcode)  ← mac/Folga.
 ## API (127.0.0.1:4780, `FOLGA_PORT`)
 | Rota | O quê |
 |---|---|
-| `GET /api/token` | Devolve o token. Sem CORS, então outro site não lê a resposta; o `Host` é checado (R15). |
+| `GET /api/token` | Devolve o token. Sem CORS, então outro site não lê a resposta; o `Host` é checado (R15). No Mac, dentro do app, só com o cookie da janela (toda `/api/` pede token; ADR 0007). |
 | `GET /api/state` | `MemoryState` |
 | `GET /api/events` | SSE, evento `state` a cada leitura |
 | `POST /api/release` `{keys}` | `{availBefore, availAfter, results}` (R07–R09) |

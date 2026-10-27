@@ -26,6 +26,8 @@ export type AgentDeps = {
   killTree?: (pid: number) => void;             // troca o taskkill (teste confere quando ele é chamado)
   disclaim?: (l: Launch) => Launch;             // troca o embrulho do --disclaim (teste do código 126)
   findCli?: (p: AgentProvider) => string | null; // troca a busca do binário do CLI
+  turnOpen?: () => void;                        // o servidor cria o agent-token só durante o turno
+  turnClose?: () => void;
 };
 export type SendResult = { ok: true } | { erro: string; status: number };
 
@@ -448,12 +450,14 @@ export function createAgent(deps: AgentDeps) {
       closed = true;
       clearTimeout(timer);
       killLive();   // o CLI demora a sair depois da resposta; não precisamos esperar
+      deps.turnClose?.();
       turn.live = false;
       if (turn.pid) deps.selfPids.delete(turn.pid);
       void finish(turn, convId, provider, acc, turn.killed, code, stderr);
     };
 
     mkdirSync(cwd, { recursive: true });
+    deps.turnOpen?.();
     const child = spawn(l.cmd, l.args, { cwd: l.cwd ?? cwd, env: l.env ?? process.env, shell: false, windowsHide: true, detached: process.platform === 'darwin', stdio: ['ignore', 'pipe', 'pipe'] });
     if (child.pid) { turn.pid = child.pid; turn.live = true; deps.selfPids.add(child.pid); }
     const timer = setTimeout(() => { turn.killed = 'timeout'; killLive(); }, timeoutMs);
