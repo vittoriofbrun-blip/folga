@@ -178,7 +178,7 @@ pino em `files.test.ts` exige que nenhum fonte em `src`, `web/src`, `scripts`, `
   continua como reserva; (5) a contagem de avisos no menu aparece **sempre**, porque nenhum dos dois caminhos é
   garantido; (6) o Foco não pode ser lido: a tela diz isso e não tenta adivinhar.
 
-### Notificações: estado em 2026-10-22 (investigação em aberto)
+### Notificações: estado em 2026-10-22 (superado — ver 2026-10-27 abaixo)
 
 Medido no app instalado (`~/Applications/Folga.app`, registro único no LaunchServices, build f640ad5…):
 `notificacoes.log` → `status=1 alert=2 pedindo` e, no `requestAuthorization` da instância principal,
@@ -193,6 +193,36 @@ recusados). Plano: matriz de apps de teste com bundle ids novos, uma diferença 
 de que aparecerão pedidos na tela.
 
 Enquanto isso, a entrega dos avisos é o contador no menu e a tela Avisos (funcionando, conferido ao vivo).
+
+### Notificações: resolvido em 2026-10-27 (bundle id novo `local.folga.mac`)
+
+Matriz com um app mínimo (mesmo `Info.plist`, `LSUIElement`, hardened runtime, `.accessory`, em
+`~/Applications`, aberto pelo `open`), uma variável por vez:
+
+| App de teste | Bundle id | Resultado |
+|---|---|---|
+| A, F | novo (`local.folgateste.*`) | pedido aparece na tela (sem resposta em 8 s; o Vittorio viu) |
+| E | `local.folga.app` (Folga desregistrado durante o teste) | `antes=1` (negado) e `UNErrorDomain 1` na hora |
+| B, C, D | qualquer, rodado **direto pelo binário** de uma pasta temporária | `UNErrorDomain 1` na hora, mesmo com id novo |
+
+- **Causa:** o macOS guardou "negado" para `local.folga.app`, quase certamente dos testes de 21/10 em que o
+  `--notify` antigo morria em 10 s com o pedido ainda na tela. Esse estado mora no banco do `usernoted`
+  (`~/Library/Group Containers/group.com.apple.usernoted/`), que só abre com Acesso Total ao Disco (decisão 17):
+  não há como zerar por fora. Os 2 registros órfãos das pastas `folga-install-*` não eram a causa (removidos, a
+  recusa continuou).
+- **Prova falsa que segurou a investigação:** "o Folga não está em `com.apple.ncprefs`". Neste macOS esse
+  arquivo não é mais escrito (data de junho); a lista de Ajustes › Notificações vem de outro lugar. Não usar
+  `ncprefs` como evidência.
+- **Armadilha de método:** rodar o binário direto do shell (sem `open`) recusa sempre, e um pedido recusado
+  assim **grava** "negado" para o id. Teste de notificação sempre pelo `open -n -a … --env … --args --notify`.
+  E no zsh `log` é um comando interno: usar `/usr/bin/log`.
+- **Conserto:** bundle id `local.folga.mac` (Info.plist, sonda/servidor que reconhecem o próprio Folga, item
+  "Abrir com o Mac"). O rótulo do LaunchAgent e o `autosaveName` continuam com o nome antigo: não são bundle id.
+  Depois do `install`, o pedido apareceu, o Folga entrou em Ajustes › Notificações e um aviso de teste foi
+  entregue como faixa e ficou na Central (conferido com o Vittorio). Custo: permissões de pasta e posição do
+  ícone foram pedidas de novo (domínio de preferências novo).
+- **`install` desregistra a cópia da pasta temporária** (o `check` a roda e o LaunchServices a registra): sem
+  isso cada instalação deixava mais um registro órfão do mesmo id.
 
 ## Consequências
 - A CI do macOS monta o app ad-hoc e roda o `check` (sem segredo).

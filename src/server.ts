@@ -128,7 +128,7 @@ function selfPids(snap: ProbeSnapshot): number[] {
   const walk = (pid: number) => { if (out.has(pid)) return; out.add(pid); for (const c of children.get(pid) ?? []) walk(c); };
   for (const r of roots) walk(r);
   // o app e os processos do WebKit dele, que a sonda já agrupa pelo .app responsável
-  if (IN_APP) for (const p of snap.processes) if (p.name.toLowerCase() === 'local.folga.app') out.add(p.pid);
+  if (IN_APP) for (const p of snap.processes) if (p.name.toLowerCase() === 'local.folga.mac') out.add(p.pid);
   return [...out];
 }
 

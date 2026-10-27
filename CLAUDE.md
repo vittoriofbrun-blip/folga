@@ -39,7 +39,7 @@ servidor; matar por árvore (`taskkill /T`) e conferir o PID dono da porta. Deta
 ## Armadilhas do Mac
 O Bash do sandbox não enxerga os processos do usuário (`ps`/sonda leem pouco): testar fora dele. O mesmo bundle id
 registrado em duas cópias do `.app` quebra o LaunchServices e as notificações: manter uma só, em `~/Applications`.
-Assinatura ad-hoc: as permissões podem voltar a pedir depois de reinstalar. APFS não guarda atime confiável: o
+Notificação: testar só pelo `open` (binário rodado direto do shell é recusado e grava "negado" no id). Assinatura ad-hoc: as permissões podem voltar a pedir depois de reinstalar. APFS não guarda atime confiável: o
 último uso vem do Spotlight. Pedido de pasta (Downloads, Documentos…) é atribuído ao `Folga.app`, não ao `node`.
 Detalhes em `fluxo-infraestrutura.md` e no ADR 0007.
 

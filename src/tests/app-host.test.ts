@@ -1,5 +1,5 @@
 // Servidor dentro do Folga.app (FOLGA_APP=1): o fim do stdin (app caiu, até por kill -9) encerra o servidor,
-// e os processos do bundle (local.folga.app) contam como o próprio Folga, nunca como app a liberar.
+// e os processos do bundle (local.folga.mac) contam como o próprio Folga, nunca como app a liberar.
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
@@ -45,8 +45,8 @@ if (process.platform === 'darwin') {
   try {
     const self = state.apps.find(a => a.key === '__self');
     assert.ok(self?.pids.includes(9100), `9100 fora do __self: ${JSON.stringify(state.apps.map(a => [a.key, a.pids]))}`);
-    assert.ok(!state.apps.some(a => a.key === 'local.folga.app'), 'o app apareceu como app a liberar');
-    console.log('ok  processos do local.folga.app contam como o próprio Folga');
+    assert.ok(!state.apps.some(a => a.key === 'local.folga.mac'), 'o app apareceu como app a liberar');
+    console.log('ok  processos do local.folga.mac contam como o próprio Folga');
     child.stdin!.end();
     assert.equal(await exited(child, 3000), 0, 'stdin fechado não encerrou o servidor em 3 s');
     console.log('ok  stdin fechado (app caiu) → servidor sai com 0 em ≤ 3 s');

@@ -171,7 +171,7 @@ Vite de desenvolvimento em `127.0.0.1:5180 --strictPort`, com proxy de `/api` pa
 
 ## Armadilhas do Mac
 - O Bash do sandbox do Claude Code não enxerga os processos do usuário: sonda, `ps` e `lsof` voltam incompletos. Testar fora dele.
-- O mesmo bundle id (`local.folga.app`) registrado em duas cópias (build/ e ~/Applications) confunde o LaunchServices e as
+- O mesmo bundle id (`local.folga.mac`; era `local.folga.app`, trocado porque o macOS guardou recusa de notificação para ele, ADR 0007) registrado em duas cópias (build/ e ~/Applications) confunde o LaunchServices e as
   notificações. Manter uma só.
 - Assinatura ad-hoc (ADR 0007, ramo B): o requisito é o hash do app, então depois de reinstalar o macOS pode pedir de novo
   as permissões de pasta. Cada pedido de pasta é atribuído ao `Folga.app`; quem constrói nunca responde no lugar do usuário.

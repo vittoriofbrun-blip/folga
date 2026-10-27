@@ -18,8 +18,8 @@ const procs = new Map(MAC ? [
   mp(9006, 1, 'com.apple.dock', 'Dock', { privateWorkingSet: 90e6 }),
   mp(9007, 1, 'com.apple.Terminal', 'Terminal'),
   mp(1, 0, 'launchd', 'launchd', { session: 0, windowCount: 0, hasVisibleWindow: false, accessible: false }),
-  // FAKE_APP_PID: o Folga.app (a sonda agrupa o app e os processos do WebKit dele por local.folga.app)
-  ...(process.env.FAKE_APP_PID ? [mp(Number(process.env.FAKE_APP_PID), 1, 'local.folga.app', 'Folga', { windowCount: 0, hasVisibleWindow: false })] : []),
+  // FAKE_APP_PID: o Folga.app (a sonda agrupa o app e os processos do WebKit dele por local.folga.mac)
+  ...(process.env.FAKE_APP_PID ? [mp(Number(process.env.FAKE_APP_PID), 1, 'local.folga.mac', 'Folga', { windowCount: 0, hasVisibleWindow: false })] : []),
 ] : [
   [process.ppid, { pid: process.ppid, ppid: 1, name: 'node.exe', description: 'Node.js', session: 1, privateWorkingSet: 50e6, cpuTimeMs: 0, hasVisibleWindow: false, accessible: true }],
   [process.pid, { pid: process.pid, ppid: process.ppid, name: 'node.exe', description: 'Node.js', session: 1, privateWorkingSet: 30e6, cpuTimeMs: 0, hasVisibleWindow: false, accessible: true }],

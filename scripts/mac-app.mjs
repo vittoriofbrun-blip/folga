@@ -16,7 +16,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
-const ID = 'local.folga.app';
+const ID = 'local.folga.mac';   // não 'local.folga.app': o macOS guardou recusa de notificação para aquele id (ADR 0007)
 
 /**
  * Requisito designado fraco = algum ramo do `or` não prende a um hash (cdhash ou certificado folha por hash).
@@ -199,7 +199,12 @@ async function install() {
     }
     rmSync(velho, { recursive: true, force: true });
     console.log(`instalado e aberto: ${app}`);
-  } finally { rmSync(stage, { recursive: true, force: true }); }
+  } finally {
+    // o check roda o app da pasta temporária e o LaunchServices o registra: sem isto fica um 2º registro órfão
+    // do mesmo bundle id a cada instalação (o que confunde LaunchServices e notificações, ADR 0007)
+    run(LSREGISTER, ['-u', join(stage, 'Folga.app')]);   // falha = nunca foi registrado: nada a fazer
+    rmSync(stage, { recursive: true, force: true });
+  }
 }
 
 async function uninstall() {

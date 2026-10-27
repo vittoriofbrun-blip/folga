@@ -13,8 +13,8 @@ import Security
 import UserNotifications
 import WebKit
 
-let bundleId = "local.folga.app"
-let logger = Logger(subsystem: "local.folga.app", category: "app")
+let bundleId = "local.folga.mac"
+let logger = Logger(subsystem: "local.folga.mac", category: "app")
 let port = 4780
 let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
 let resources = Bundle.main.resourceURL ?? URL(fileURLWithPath: ".")

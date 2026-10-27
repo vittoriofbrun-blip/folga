@@ -52,7 +52,7 @@ export const launchAgentXml = (appPath: string) => `<?xml version="1.0" encoding
   <key>Label</key><string>local.folga.app</string>
   <key>ProgramArguments</key>
   <array><string>${xml(join(appPath, 'Contents', 'MacOS', 'Folga'))}</string><string>--login</string></array>
-  <key>AssociatedBundleIdentifiers</key><array><string>local.folga.app</string></array>
+  <key>AssociatedBundleIdentifiers</key><array><string>local.folga.mac</string></array>
   <key>RunAtLoad</key><true/>
   <key>LimitLoadToSessionType</key><string>Aqua</string>
   <key>ProcessType</key><string>Interactive</string>
