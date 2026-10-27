@@ -168,6 +168,12 @@ function inside(root: string, child: string) {
 }
 
 async function realOrNull(p: string) { try { return await realpath(p); } catch { return null; } }
+/** Caminho sem link em nenhum ponto (o real é ele mesmo). Pasta de cache e pasta de cada arquivo passam por aqui:
+ *  um link trocado ali levaria a limpeza a apagar o que está do outro lado (revisão de segurança). */
+async function isRealPath(p: string) {
+  const r = await realOrNull(p);
+  return r !== null && (process.platform === 'win32' ? r.toLowerCase() === p.toLowerCase() : r === p);
+}
 
 /** Passeio com teto de entradas e de tempo. Não segue link nem junção; lê metadados com lstat, em lotes. */
 export type Budget = { entries: number; maxEntries: number; deadline: number; now: () => number; stopped: boolean };
@@ -566,7 +572,7 @@ export function createFiles(deps: FilesDeps) {
         }
         const targets = deps.cacheDirs ? dirs[br] : (await Promise.all(dirs[br].map(profileCaches))).flat();
         const b = budget();
-        for (const d of targets) await walk(d, 32, null, b, (p, st) => { cache[br].push([p, st]); });
+        for (const d of targets) if (await isRealPath(d)) await walk(d, 32, null, b, (p, st) => { cache[br].push([p, st]); });
       }),
     ]);
     return { temp, cache, open, safari };
@@ -648,6 +654,8 @@ export function createFiles(deps: FilesDeps) {
           try {
             const st = await lstat(p);   // reconfere logo antes: ainda arquivo comum e (se temporário) ainda antigo
             if (!st.isFile() || (old && tempAge(st) >= limit)) { skipped++; return; }
+            // a pasta não virou link desde a coleta (ponytail: janela de corrida residual entre esta checagem e o unlink)
+            if (!await isRealPath(dirname(p))) { skipped++; return; }
             await unlink(p);
             bytes += st.size; files++;
           } catch { skipped++; }   // travado, em uso ou sem permissão: fica

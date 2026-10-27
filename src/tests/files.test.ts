@@ -14,7 +14,7 @@ const MAC = process.platform === 'darwin';
 const DAY = 86_400_000;
 const MB = 1024 * 1024;
 // nome com acento de propósito (o caminho real do usuário tem: C:\Users\Antônio)
-const base = mkdtempSync(join(tmpdir(), 'folga-arq-ção-'));
+const base = realpathSync(mkdtempSync(join(tmpdir(), 'folga-arq-ção-')));   // /var é link para /private/var no Mac: a limpeza recusa cache com link no caminho
 const dir = (...p: string[]) => { const d = join(base, ...p); mkdirSync(d, { recursive: true }); return d; };
 // Spotlight falso e neutro: no Mac nenhum teste depende do índice real (nem do binário, que a CI compila depois)
 const noMeta = async (ps: string[]): Promise<FileMeta[]> => ps.map(() => ({ lastUsed: null, added: null, dataless: false, missing: false }));
@@ -399,6 +399,28 @@ try {
     assert.ok(existsSync(join(abreDepois, 'data_0')), 'navegador aberto depois da coleta: cache fica');
     assert.deepEqual([rAbre.files, rAbre.skipped], [0, 1]);
     ok('M2: navegador aberto entre a coleta e o apagar → cache dele fica');
+
+    if (!WIN) {
+      // revisão de segurança: pasta de cache trocada por um link para uma pasta protegida não pode levar o
+      // Folga a apagar o que está do outro lado (outro programa usaria as permissões de pasta do Folga)
+      const protegida = dir('Protegida'); const vitima = file(join(protegida, 'tese.docx'), 10, 0);
+      const falso = join(dir('CacheFalso'), 'Cache_Data'); symlinkSync(protegida, falso);
+      const rLink = await mk({ cacheDirs: { chrome: [falso] } }).quickClean({ categories: ['cache_navegador'] });
+      assert.ok(existsSync(vitima), 'cache que é link: nada do outro lado é apagado');
+      assert.equal(rLink.files, 0);
+      const pai = dir('CachePai'); const sub = join(pai, 'Cache_Data'); mkdirSync(sub);
+      const isca = file(join(sub, 'tese.docx'), 10, 0);
+      const alvo2 = file(join(dir('Protegida2'), 'tese.docx'), 10, 0);
+      // a pasta vira link entre a coleta e o apagar: o arquivo com o mesmo nome do outro lado fica
+      let trocou = false, chamadas = 0;
+      const rTroca = await mk({ cacheDirs: { chrome: [sub] }, browsersOpen: async () => {
+        if (chamadas++ === 1 && existsSync(isca)) { /* 2ª consulta = a de logo antes de apagar (M2) */ trocou = true; await rm(sub, { recursive: true }); symlinkSync(join(base, 'Protegida2'), sub); }
+        return { chrome: false, edge: false };
+      } }).quickClean({ categories: ['cache_navegador'] });
+      assert.ok(trocou && existsSync(alvo2), 'pasta trocada por link depois da coleta: o arquivo do outro lado fica');
+      assert.equal(rTroca.files, 0);
+      ok('segurança: cache que é (ou vira) link para outra pasta não apaga nada do outro lado');
+    }
 
     if (MAC) {
       const tempFiles = async () => (await mkc().quickCleanPreview()).find(i => i.category === 'temp_usuario')!.files;
